@@ -1,0 +1,37 @@
+---
+alwaysApply: true
+---
+
+┌─────────────────────────────────────────────────────────────────┐
+│                                                                  │
+│  系统分为两个阶段：Bootstrap（仅首次）和 Evolve（之后一直运行）。  │
+│                                                                  │
+│  Bootstrap 阶段：                                                 │
+│    Pre-Processor 先把 bootstrap corpus（多样化故事集）标准化，   │
+│    Observer 从每个 story 提取 Narrative Observations，            │
+│    Observations 存入 Observation Bank；                           │
+│    Retrieval 在 Bank 中检索结构相似的 Observations，              │
+│    Inducer 阅读相似跨故事 Observations，归纳共同叙事结构，         │
+│    生成候选 Function，建立初始 Function Registry（O_0）；         │
+│    Evaluator_v0 做启动检查，验证 O_0 健康后，进入 Evolve。        │
+│                                                                  │
+│  Evolve 阶段（此后不再切换回 Bootstrap）：                         │
+│    新故事进入 Pre-Processor → Observer → Observation Bank，       │
+│    Matcher 将新 Observation 与当前 Registry 中的 Function 比较，  │
+│    分类为 5 种：                                                  │
+│      MATCH/EXTEND → Update Registry 更新 exemplars；               │
+│      CONFLICT/UNCERTAIN → Critic 复检后确认分类；                │
+│      NOVEL → 暂存 novelty_pool；                                  │
+│      Critic 复检产生 resolved → 暂存 challenge_pool。            │
+│    3 条路径各自判断触发条件：                                     │
+│      累计 ≥20 新 obs → Evaluator_mid 计算 6 维指标体检；         │
+│      novelty_pool ≥5 → 触发 Curator；                            │
+│      challenge_pool ≥5 → 触发 Curator。                          │
+│    Curator 整合 Pool + Registry 异常，生成 Function 增删改方案，Inducer修改 │
+│    Human Review 审核后，Apply 写入 Registry 并清空 Pool。        │
+│    Evolve 持续运行，直到所有 obs 处理完毕。                       │
+│                                                                  │
+│  终期：                                                          │
+│    Evaluator_final 全面评估，输出 Final Report + 最终 Ontology。  │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘

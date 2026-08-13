@@ -1,0 +1,152 @@
+---
+description: LangGraph 正确使用规范 - 状态定义、节点函数、图构建、条件边、检查点、流输出和常见错误
+alwaysApply: true
+---
+
+# LangGraph 正确使用规范
+
+## 1. State 定义
+
+```python
+# ✅ GOOD: 使用内置 MessagesState（推荐）
+from langgraph.graph import MessagesState
+
+# ✅ GOOD: 或使用 TypedDict 自定义 State
+from typing import TypedDict, Annotated
+from langgraph.graph import add_messages
+
+class AgentState(TypedDict):
+    messages: Annotated[list, add_messages]  # 消息列表，自动处理添加
+    user_input: str
+
+
+```
+
+## 2. Node 函数签名
+
+```python
+# ✅ GOOD: Node 函数接收 state，返回要更新的字段
+def process_node(state: AgentState) -> AgentState:
+    return {"messages": [{"role": "ai", "content": "hello"}]}
+
+# ✅ GOOD: 简单节点直接传函数引用
+graph.add_node(process_node)  # 自动以函数名为节点名
+
+# ✅ GOOD: 自定义节点名
+graph.add_node("custom_name", process_node)
+
+
+```
+
+## 3. 图的构建顺序
+
+```python
+from langgraph.graph import StateGraph, MessagesState, START, END
+
+# ✅ GOOD: 先定义节点，再连线，最后编译
+graph = StateGraph(AgentState)
+graph.add_node("node_a", node_a_func)
+graph.add_node("node_b", node_b_func)
+graph.add_edge(START, "node_a")
+graph.add_edge("node_a", "node_b")
+graph.add_edge("node_b", END)
+app = graph.compile()
+
+# ✅ 调用方式
+app.invoke({"messages": [{"role": "user", "content": "hi!"}]})
+
+```
+
+## 4. 条件边路由
+
+```python
+# ✅ GOOD: 使用函数定义条件路由
+def should_continue(state: AgentState) -> str:
+    if state.get("messages", [])[-1].content == "end":
+        return "end_node"
+    return "continue_node"
+
+graph.add_conditional_edges(
+    "decision_node",      # 源节点
+    should_continue,      # 路由函数
+    {
+        "end_node": "final_node",      # 映射键 -> 目标节点
+        "continue_node": "loop_node"
+    }
+)
+
+# ✅ GOOD: 使用常量定义路由
+from enum import Enum
+
+class Route(str, Enum):
+    END = "end_node"
+    CONTINUE = "continue_node"
+
+
+```
+
+## 5. Checkpointer（记忆持久化）
+
+```python
+from langgraph.checkpoint.memory import MemorySaver
+
+# ✅ GOOD: 编译时传入 checkpointer
+checkpointer = MemorySaver()
+app = graph.compile(checkpointer=checkpointer)
+
+# ✅ 调用时使用 thread_id
+config = {"configurable": {"thread_id": "user-123"}}
+result = app.invoke(input_state, config=config)
+
+
+```
+
+## 6. 错误处理与重试
+
+```python
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+# ✅ GOOD: 为不稳定节点添加重试策略
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def unreliable_api_call(state: AgentState) -> AgentState:
+    ...
+
+graph.add_node("api_call", unreliable_api_call)
+
+
+```
+
+## 7. Stream 输出模式
+
+```python
+# ✅ GOOD: 使用 stream_mode 获取中间步骤
+for event in app.stream(initial_state, stream_mode="values"):
+    print(event)
+
+# ✅ GOOD: 使用 stream_mode="messages" 获取 LLM 输出
+for event in app.stream(input, stream_mode="messages"):
+    if hasattr(event[0], "content"):
+        print(event[0].content)
+```
+
+## 8. 常见错误
+
+| 错误 | 原因 | 修复 |
+|------|------|------|
+| `KeyError: messages` | State 定义缺少 Annotated 字段 | 使用 `Annotated[list, add_messages]` |
+| 图不生效 | 修改已编译的图 | 在 compile() 前完成所有配置 |
+| 状态不持久 | 未使用 checkpointer | 编译时传入 checkpointer |
+| 死循环 | 条件边总是返回自己 | 检查路由函数逻辑 |
+| 内存泄漏 | 未设置 thread_id | 使用 thread_id 管理会话 |
+
+## 9. 调试技巧
+
+```python
+# ✅ 使用 print 调试中间状态
+def debug_node(state: AgentState) -> AgentState:
+    print(f"Current state: {state}")
+    return state
+
+# ✅ 检查 checkpoint 历史
+checkpoints = list(checkpointer.list({"configurable": {"thread_id": "xxx"}}))
+```
