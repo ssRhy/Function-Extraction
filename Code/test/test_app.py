@@ -38,7 +38,7 @@ print(f"观察到: {len(result['observations'])} 个事件")
 
 for obs in result["observations"]:
     print(f"\n[{obs['obs_id']}] {obs['event']}")
-    print(f"  前因: {obs['prior_context']}")
+    print(f"  前因: {obs['before_state']}")
     print(f"  结果: {obs['after_state']}")
 
 # 可视化
