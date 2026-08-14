@@ -3,12 +3,12 @@ Pre-Processor Node - 故事文本标准化（分句、分段）
 LangGraph 范式
 """
 
-from typing import TypedDict, Annotated
-from langgraph.graph import add_messages
 import uuid
+import re
 from datetime import datetime
 from pydantic import BaseModel, Field
 
+from Agent.state import NarrativePipelineState
 from Agent.llm import chat_structured
 from Prompt.Pre_prompt import PREPROCESSOR_SYSTEM_PROMPT
 
@@ -21,7 +21,6 @@ class NormalizedResult(BaseModel):
     paragraph_count: int = Field(default=0)
 
     def model_post_init(self, _):
-        # 统一 segments 字段名：id→segment_id, sentences→content
         normalized = []
         for i, seg in enumerate(self.segments):
             seg = dict(seg)
@@ -29,52 +28,6 @@ class NormalizedResult(BaseModel):
             seg.setdefault("content", seg.pop("sentences", ""))
             normalized.append(seg)
         object.__setattr__(self, "segments", normalized)
-
-
-
-
-class StoryMetadata(TypedDict):
-    story_id: str
-    story_type: str
-    title: str
-    processed_at: str
-
-
-class Segment(TypedDict):
-    segment_id: str
-    content: str
-    sentence_indices: list[int]
-
-
-class NormalizedStory(TypedDict):
-    metadata: StoryMetadata
-    raw_text: str
-    segments: list[Segment]
-    sentences: list[str]
-    paragraph_count: int
-
-
-# ============================================================
-# LangGraph State - 统一设计
-# ============================================================
-class NarrativePipelineState(TypedDict):
-    """统一状态，所有节点共享"""
-    messages: Annotated[list, add_messages]  # LangGraph 规范：自动处理消息追加
-
-    # 故事输入
-    raw_text: str | None  # 原始故事文本
-    story_config: dict | None  # story_id, title, story_type
-
-    # Pre-Processor 输出
-    normalized_story: NormalizedStory | None
-
-    # Observer 输出
-    observations: list[dict]  # NarrativeObservation 列表
-
-    # 流程控制
-    current_phase: str  # "bootstrap" | "evolve"
-    current_story_index: int  # 当前处理到第几个故事
-    total_stories: int  # 总故事数
 
 
 # ============================================================
