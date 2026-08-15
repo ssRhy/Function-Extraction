@@ -63,6 +63,7 @@ class Retriever:
             return []
 
         query_embedding = self.bank.embedder.encode_single(text).tolist()
+        seen_ids = set(exclude_obs_ids or [])
 
         where_filter = None
         if story_id:
@@ -70,13 +71,12 @@ class Retriever:
 
         results = self.bank.collection.query(
             query_embeddings=[query_embedding],
-            n_results=top_k * 3,  # 多取一些，手动过滤
+            n_results=min(self.bank.count(), top_k + len(seen_ids)),
             where=where_filter,
             include=["distances", "documents", "metadatas"]
         )
 
         retrieved = []
-        seen_ids = set(exclude_obs_ids or [])
 
         ids = results["ids"][0]
         distances = results["distances"][0]
@@ -103,7 +103,8 @@ class Retriever:
         self,
         obs: dict,
         top_k: int = 10,
-        exclude_same_story: bool = True
+        exclude_same_story: bool = True,
+        exclude_obs_ids: Optional[list[str]] = None,
     ) -> list[RetrievedObservation]:
         """
         根据一个 Observation 检索相似的其他 Observations。
@@ -114,6 +115,7 @@ class Retriever:
             obs: 参考 Observation 字典
             top_k: 返回数量
             exclude_same_story: 是否排除同 story_id 的结果
+            exclude_obs_ids: 额外排除的 obs_id 列表
 
         Returns:
             RetrievedObservation 列表
@@ -127,9 +129,11 @@ class Retriever:
             obs.get("narrative_effect", ""),
         ])
 
-        exclude_ids = []
+        exclude_ids = list(exclude_obs_ids or [])
         if exclude_same_story:
-            exclude_ids = [o["obs_id"] for o in self.bank.get_by_story(obs["story_id"])]
+            exclude_ids.extend(
+                o["obs_id"] for o in self.bank.get_by_story(obs["story_id"])
+            )
 
         return self.query_similar(
             text=text,

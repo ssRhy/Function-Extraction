@@ -24,7 +24,6 @@ initial_state = {
     "observations": [],
     "added_obs_ids": [],
     "similar_observations": [],
-    "current_phase": "bootstrap",
     "current_story_index": 0,
     "total_stories": 1
 }

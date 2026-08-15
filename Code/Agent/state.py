@@ -29,7 +29,9 @@ class NarrativePipelineState(TypedDict):
     # ---- Retrieval 输出 ----
     similar_observations: list[dict]  # 跨故事相似 obs 对
 
+    # ---- Inducer 输出 ----
+    induced_functions: list[dict]  # 归纳出的候选 Function
+
     # ---- 流程控制 ----
-    current_phase: str  # "bootstrap" | "evolve"
     current_story_index: int
     total_stories: int

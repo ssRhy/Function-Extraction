@@ -36,27 +36,6 @@ def chat(messages: list, model: str = "deepseek-v4-flash", reasoning_effort: str
     return content
 
 
-def chat_json(messages: list, model: str = "deepseek-v4-flash", reasoning_effort: str = "low") -> dict:
-    """返回 JSON 格式，带错误处理"""
-    content = chat(messages, reasoning_effort=reasoning_effort, response_format={"type": "json_object"})
-
-    if not content or not content.strip():
-        raise ValueError("LLM 返回空响应")
-
-    content = content.strip()
-    if content.startswith("```json"):
-        content = content[7:]
-    elif content.startswith("```"):
-        content = content[3:]
-    if content.endswith("```"):
-        content = content[:-3]
-
-    try:
-        return json.loads(content.strip())
-    except json.JSONDecodeError as e:
-        raise ValueError(f"JSON 解析失败: {e}\n原始内容: {content[:200]}")
-
-
 def chat_structured(messages: list, output_schema: type, model: str = "deepseek-v4-flash", reasoning_effort: str = "low"):
     """
     强制 JSON 格式返回 + Pydantic 验证解析。
