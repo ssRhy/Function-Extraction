@@ -1,5 +1,5 @@
 """
-测试：从 story.txt 读取文本，运行 pipeline + 可视化
+测试：从 story.txt 读取文本，运行 pipeline
 """
 
 import sys, os
@@ -51,17 +51,3 @@ if result["similar_observations"]:
         print(f"\n[{i+1}] 相似度={pair['similarity']:.3f}")
         print(f"  参考: {pair['reference']['event']}")
         print(f"  匹配: {pair['retrieved']['event']}")
-
-# 可视化
-test_dir = os.path.dirname(os.path.abspath(__file__))
-mermaid_code = pipeline_app.get_graph().draw_mermaid()
-
-mmd_path = os.path.join(test_dir, "langgraph_graph.mmd")
-with open(mmd_path, "w", encoding="utf-8") as f:
-    f.write(mermaid_code)
-print(f"已生成: {mmd_path}")
-
-print("\n" + "=" * 50)
-print("ASCII 图")
-print("=" * 50)
-print(pipeline_app.get_graph().draw_ascii())

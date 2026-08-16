@@ -65,20 +65,54 @@ def retrieval_node(state: NarrativePipelineState) -> NarrativePipelineState:
     return {"similar_observations": similar, "messages": [{"role": "system", "content": f"[Retrieval] 新增 {len(new_observations)} 条，找到 {len(similar)} 个历史相似对"}]}
 
 
-def build_pipeline_graph() -> StateGraph:
+def build_pipeline_graph(include_inducer: bool = True) -> StateGraph:
     graph = StateGraph(NarrativePipelineState)
     graph.add_node("preprocessor", preprocessor_node)
     graph.add_node("observer", observer_node)
     graph.add_node("bank_adder", bank_adder_node)
     graph.add_node("retrieval", retrieval_node)
-    graph.add_node("inducer", inducer_node)
     graph.add_edge(START, "preprocessor")
     graph.add_edge("preprocessor", "observer")
     graph.add_edge("observer", "bank_adder")
     graph.add_edge("bank_adder", "retrieval")
-    graph.add_edge("retrieval", "inducer")
-    graph.add_edge("inducer", END)
+    if include_inducer:
+        graph.add_node("inducer", inducer_node)
+        graph.add_edge("retrieval", "inducer")
+        graph.add_edge("inducer", END)
+    else:
+        graph.add_edge("retrieval", END)
+    return graph
+
+
+from Agent.Evaluator.evaluator import evaluator_node
+from Agent.Evaluator import revise as revise_module
+from Agent.Evaluator.revise import revise_node
+
+
+def should_continue(state: NarrativePipelineState) -> str:
+    """curate_app 循环路由：PASS 或达修订轮数上限则结束，否则进入修订。"""
+    if state.get("evaluator_decision") == "PASS":
+        return "end"
+    if state.get("evaluation_round", 0) >= revise_module.MAX_EVAL_ROUNDS:
+        return "end"
+    return "revise"
+
+
+def build_curate_graph() -> StateGraph:
+    """闭环图：评估 →（FAIL 且未达上限）→ 修订 → 再评估 → …→ END。"""
+    graph = StateGraph(NarrativePipelineState)
+    graph.add_node("evaluator", evaluator_node)
+    graph.add_node("revise", revise_node)
+    graph.add_edge(START, "evaluator")
+    graph.add_conditional_edges(
+        "evaluator",
+        should_continue,
+        {"end": END, "revise": "revise"},
+    )
+    graph.add_edge("revise", "evaluator")
     return graph
 
 
 pipeline_app = build_pipeline_graph().compile(checkpointer=MemorySaver())
+extract_app = build_pipeline_graph(include_inducer=False).compile(checkpointer=MemorySaver())
+curate_app = build_curate_graph().compile(checkpointer=MemorySaver())

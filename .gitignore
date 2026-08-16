@@ -1,0 +1,21 @@
+# Environment / secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+
+# Logs
+*.log
+logs/
+
+# Generated data
+Code/data/
+Code/Bank/data/
+
+
+# Third-party checkouts
+chromadb-admin/

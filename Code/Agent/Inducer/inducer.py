@@ -1,6 +1,7 @@
 """
 Inducer Node - 从相似 Observations 归纳 Candidate Function
-逻辑：先收集候选 → 循环算分 → 循环结束统一写 Registry（按 supporting_obs_ids 查重）
+逻辑：先收集候选 → 循环算分（bootstrap 可豁免 confusable）→ upsert 写 Registry
+（同名或 definition 相似度 > 0.85 视为重复，仅保留置信度最高者）
 """
 
 import json
@@ -10,7 +11,12 @@ from pydantic import AliasChoices, BaseModel, Field
 
 from Agent.llm import chat_structured
 from Agent.state import NarrativePipelineState
-from Agent.Inducer.confidence import calculate_confidence_detailed
+from Agent.Inducer.confidence import (
+    calculate_confidence_detailed,
+    load_registry_functions,
+    max_definition_similarity,
+    NEAR_DUP_THRESHOLD,
+)
 from Prompt.Inducer_prompt import INDUCER_SYSTEM_PROMPT
 
 
@@ -37,36 +43,61 @@ class InducerResponse(BaseModel):
 _REGISTRY_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "registry")
 _REGISTRY_FILE = os.path.join(_REGISTRY_DIR, "functions.jsonl")
 
-
-def _key_of(func: dict) -> tuple:
-    return tuple(sorted(func.get("supporting_obs_ids", [])))
-
-
-def _load_existing_keys() -> set:
-    if not os.path.exists(_REGISTRY_FILE):
-        return set()
-    keys = set()
-    with open(_REGISTRY_FILE, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                keys.add(_key_of(json.loads(line)))
-            except json.JSONDecodeError:
-                pass
-    return keys
+# bootstrap 阶段豁免 confusable 软惩罚（batch_run 启动时置为 False）
+APPLY_CONFUSABLE = True
 
 
-def _append_to_registry(func: dict, existing_keys: set) -> bool:
-    key = _key_of(func)
-    if key in existing_keys:
-        return False
+def _write_registry(funcs: list[dict]):
     os.makedirs(_REGISTRY_DIR, exist_ok=True)
-    with open(_REGISTRY_FILE, "a", encoding="utf-8") as f:
-        f.write(json.dumps(func, ensure_ascii=False) + "\n")
-    existing_keys.add(key)
-    return True
+    with open(_REGISTRY_FILE, "w", encoding="utf-8") as f:
+        for func in funcs:
+            f.write(json.dumps(func, ensure_ascii=False) + "\n")
+
+
+def merge_candidates(
+    live: list[dict],
+    candidates: list[dict],
+    embedder,
+    threshold: float = NEAR_DUP_THRESHOLD,
+) -> tuple[list[dict], list[dict]]:
+    """
+    把候选依次并入 live（live = 已有 Registry + 本轮已写入候选）。
+
+    - 同名 function_name，或 definition 余弦相似度 > threshold，视为重复；
+    - 重复时只保留置信度最高者：新候选置信度更高才替换，否则跳过。
+
+    返回 (更新后的 live, 实际写入的候选列表)。
+    """
+    live = list(live)
+    written = []
+    for cand in candidates:
+        cand_name = cand.get("function_name", "")
+        cand_def = cand.get("definition", "")
+        conflicts = [
+            entry for entry in live
+            if entry.get("function_name") == cand_name
+            or max_definition_similarity(cand_def, [entry], embedder) > threshold
+        ]
+        if not conflicts:
+            live.append(cand)
+            written.append(cand)
+            continue
+        best = max(conflicts, key=lambda e: e.get("confidence", 0.0))
+        if cand.get("confidence", 0.0) <= best.get("confidence", 0.0):
+            continue
+        for entry in conflicts:
+            live.remove(entry)
+        live.append(cand)
+        written.append(cand)
+    return live, written
+
+
+def _upsert_registry(candidates: list[dict], embedder) -> list[dict]:
+    """合并候选到 Registry（去重后）并整体重写 functions.jsonl"""
+    existing = load_registry_functions()
+    updated, written = merge_candidates(existing, candidates, embedder)
+    _write_registry(updated)
+    return written
 
 
 # ========== Obs Cluster ==========
@@ -145,7 +176,7 @@ def _build_positive_examples(
 # ========== Inducer Node ==========
 
 def inducer_node(state: NarrativePipelineState) -> NarrativePipelineState:
-    """先收集候选 → 循环算分 → 循环结束统一写 Registry"""
+    """先收集候选 → 循环算分 → upsert 写 Registry"""
     similar = state.get("similar_observations", [])
     if not similar:
         return {"induced_functions": [], "messages": [{"role": "system", "content": "[Inducer] 无相似对，跳过归纳"}]}
@@ -159,7 +190,7 @@ def inducer_node(state: NarrativePipelineState) -> NarrativePipelineState:
         {"role": "user", "content": f"请分析以下来自不同故事的相似 Observations，归纳候选 Function：\n\n{_format_obs_for_prompt(obs_cluster)}"},
     ], InducerResponse)
 
-    # 1) 收集 + 算分（一次性算两个版本，避免重复计算）
+    # 1) 收集 + 算分
     from Agent.app import get_bank
     bank = get_bank()
     scored = []
@@ -168,7 +199,7 @@ def inducer_node(state: NarrativePipelineState) -> NarrativePipelineState:
             supporting_obs_ids=func.supporting_obs_ids,
             candidate_def=func.definition,
             bank=bank,
-            obs_cluster=obs_cluster,
+            apply_confusable=APPLY_CONFUSABLE,
         )
         confidence = detail["confidence"]
         print(f"\n[Inducer DEBUG] 候选: {func.function_name}")
@@ -192,9 +223,8 @@ def inducer_node(state: NarrativePipelineState) -> NarrativePipelineState:
             "confidence": confidence,
         })
 
-    # 2) 循环结束统一写盘
-    existing_keys = _load_existing_keys()
-    induced = [cand for cand in scored if _append_to_registry(cand, existing_keys)]
+    # 2) upsert（去重：同名/近义只保留置信度最高者）
+    induced = _upsert_registry(scored, bank.embedder)
 
     return {
         "induced_functions": induced,

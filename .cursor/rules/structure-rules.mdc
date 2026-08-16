@@ -12,7 +12,8 @@ alwaysApply: true
 │    Observations 存入 Observation Bank；                           │
 │    Retrieval 在 Bank 中检索结构相似的 Observations，              │
 │    Inducer 阅读相似跨故事 Observations，归纳共同叙事结构，         │
-│    生成候选 Function，建立初始 Function Registry（O_0）；         │
+│    生成候选 Function，Evaluator_v0 做启动检查，
+      建立初始 Function Registry（O_0）；         │
 │    Evaluator_v0 做启动检查，验证 O_0 健康后，进入 Evolve。        │
 │                                                                  │
 │  Evolve 阶段（此后不再切换回 Bootstrap）：                         │

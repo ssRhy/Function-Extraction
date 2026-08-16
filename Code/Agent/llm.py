@@ -29,10 +29,6 @@ def chat(messages: list, model: str = "deepseek-v4-flash", reasoning_effort: str
         kwargs["response_format"] = response_format
     response = client.chat.completions.create(**kwargs)
     content = response.choices[0].message.content
-    print(f"\n[DEBUG chat] raw response ({len(content) if content else 0} chars):")
-    print("---BEGIN---")
-    print(content if content else "<None>")
-    print("---END---")
     return content
 
 

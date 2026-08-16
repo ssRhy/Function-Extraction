@@ -1,15 +1,14 @@
 """
-测试置信度计算 - 完整流程测试
-从测试数据 -> Bank -> Retrieval -> Inducer -> 置信度输出
+测试置信度计算（新签名）
+覆盖：supporting 集合口径、bootstrap 豁免 confusable、近义"保留最高置信度"。
 """
 
-import sys
-import os
+import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from Bank import ObservationBank
-from Retrieval import Retriever
 from Agent.Inducer.confidence import calculate_confidence_detailed
+from Agent.Inducer.inducer import merge_candidates
 
 
 def make_test_observations():
@@ -25,10 +24,7 @@ def make_test_observations():
             "affected_aspect": "其他角色对主角能力的认知",
             "narrative_effect": "主角的能力评价与声望发生改变",
             "surface_form": "比武获胜",
-            "source_sentence_indices": [1, 2, 3],
-            "source_segment_id": "storyA_seg_1",
             "story_id": "storyA",
-            "extracted_at": "2026-01-01T00:00:00"
         },
         {
             "obs_id": "storyA_obs_002",
@@ -39,10 +35,7 @@ def make_test_observations():
             "affected_aspect": "对主角炼丹水平的认知",
             "narrative_effect": "主角炼丹声望提升",
             "surface_form": "炼制丹药",
-            "source_sentence_indices": [10, 11],
-            "source_segment_id": "storyA_seg_2",
             "story_id": "storyA",
-            "extracted_at": "2026-01-01T00:00:01"
         },
         # Story B - 都市能力展示（不同领域）
         {
@@ -54,10 +47,7 @@ def make_test_observations():
             "affected_aspect": "对主角医术的认知",
             "narrative_effect": "主角获得同事认可",
             "surface_form": "成功手术",
-            "source_sentence_indices": [5, 6],
-            "source_segment_id": "storyB_seg_1",
             "story_id": "storyB",
-            "extracted_at": "2026-01-01T00:02:00"
         },
         {
             "obs_id": "storyB_obs_002",
@@ -68,12 +58,9 @@ def make_test_observations():
             "affected_aspect": "对主角智力的认知",
             "narrative_effect": "主角获得尊重",
             "surface_form": "解题",
-            "source_sentence_indices": [20, 21],
-            "source_segment_id": "storyB_seg_2",
             "story_id": "storyB",
-            "extracted_at": "2026-01-01T00:02:01"
         },
-        # Story C - 关系类（作为对比，不应该与能力展示归为一类）
+        # Story C - 关系类（不同结构，作为对比）
         {
             "obs_id": "storyC_obs_001",
             "before_state": "两人初次见面，彼此陌生",
@@ -83,176 +70,75 @@ def make_test_observations():
             "affected_aspect": "关系与信任",
             "narrative_effect": "开启两人交集",
             "surface_form": "疗伤与对话",
-            "source_sentence_indices": [3, 4],
-            "source_segment_id": "storyC_seg_1",
             "story_id": "storyC",
-            "extracted_at": "2026-01-01T00:03:00"
         },
     ]
 
 
-def test_confidence_calculation():
-    """测试置信度计算"""
+def test_confidence_new_signature():
     print("\n" + "=" * 60)
-    print("测试置信度计算")
+    print("测试置信度计算（新签名）")
     print("=" * 60)
 
-    # 1. Prepare data
-    obs_list = make_test_observations()
-
-    # Capability obs (storyA + storyB, cross-story)
-    capability_obs = [o for o in obs_list if o["story_id"] in ("storyA", "storyB")]
-
-    # Relation obs (storyC)
-    relation_obs = [o for o in obs_list if o["story_id"] == "storyC"]
-
-    print(f"\n[Data] Capability obs: {len(capability_obs)} items")
-
-    print(f"\n[Data] Relation obs: {len(relation_obs)} items")
-
-    # 2. 候选 Function 定义（模拟 LLM 归纳结果）
-    capability_def = "此前未知的能力被相关人物认识到"
-    relation_def = "两个陌生人通过互动建立初步信任关系"
-
-    print("-" * 60)
-    print("Scenario 1: Capability Function")
-    print("-" * 60)
-    result = calculate_confidence_detailed(capability_obs, capability_def)
-    print_confidence_result(result)
-
-    print("\n" + "-" * 60)
-    print("Scenario 2: Relation Function")
-    print("-" * 60)
-    result = calculate_confidence_detailed(relation_obs, relation_def)
-    print_confidence_result(result)
-
-    # 3. Test edge case: single story
-    print("\n" + "-" * 60)
-    print("Scenario 3: Single story (should have low diversity)")
-    print("-" * 60)
-    single_story = [o for o in obs_list if o["story_id"] == "storyA"]
-    result = calculate_confidence_detailed(single_story, capability_def)
-    print_confidence_result(result)
-
-    # 4. Analysis
-    print("\n" + "=" * 60)
-    print("Analysis")
-    print("=" * 60)
-
-    cap_result = calculate_confidence_detailed(capability_obs, capability_def)
-    rel_result = calculate_confidence_detailed(relation_obs, relation_def)
-    single_result = calculate_confidence_detailed(single_story, capability_def)
-
-    print(f"""
-Cross-story capability confidence: {cap_result['confidence']:.3f}
-  - cross_story_diversity: {cap_result['factors']['cross_story_diversity']:.3f}
-  - semantic_coherence: {cap_result['factors']['semantic_coherence']:.3f}
-  - surface_diversity: {cap_result['factors']['surface_diversity']:.3f}
-
-Single-story confidence: {single_result['confidence']:.3f}
-  - cross_story_diversity: {single_result['factors']['cross_story_diversity']:.3f}
-
-[OK] Expected: cross-story > single-story (diversity factor)
-""")
-
-    return cap_result, rel_result, single_result
-
-
-def print_confidence_result(result: dict):
-    """Print confidence result"""
-    print(f"\nFinal confidence: {result['confidence']:.3f}")
-    print("\nFactor scores:")
-    for name, value in result['factors'].items():
-        print(f"  {name}: {value:.3f}")
-
-    print("\nWeight config:")
-    for name, value in result['weights'].items():
-        print(f"  {name}: {value}")
-
-    print("\nCalculation:")
-    total = 0
-    details = []
-    for name, value in result['factors'].items():
-        w = result['weights'].get(name, 0)
-        contribution = value * w
-        sign = "+" if contribution >= 0 else ""
-        total += contribution
-        details.append(f"  {value:.3f} * {w} = {sign}{contribution:.3f}")
-
-    for d in details:
-        print(d)
-    print(f"  = {total:.3f}")
-    print(f"  Clamp to [0,1]: {max(0.0, min(1.0, total)):.3f}")
-
-
-def test_bank_retrieval_confidence():
-    """Test Bank + Retrieval + Confidence pipeline"""
-    print("\n" + "=" * 60)
-    print("Test pipeline: Bank -> Retrieval -> Confidence")
-    print("=" * 60)
-
-    # 1. Init Bank
-    bank = ObservationBank(persist_dir="Code/data/bank_test")
+    bank = ObservationBank(persist_dir="data/bank_test_conf")
     bank.clear()
+    bank.add(make_test_observations())
 
-    # 2. Add test data
-    obs_list = make_test_observations()
-    added = bank.add(obs_list)
-    print(f"\nBank added {len(added)} Observations")
+    supporting = ["storyA_obs_001", "storyB_obs_001", "storyB_obs_002"]
+    cand_def = "此前未知的能力被相关人物认识到"
 
-    # 3. Retrieval
-    retriever = Retriever(bank)
+    # 1) 默认 apply_confusable=True
+    result = calculate_confidence_detailed(supporting, cand_def, bank)
+    print(f"\n[默认] conf={result['confidence']:.3f} factors={result['factors']}")
+    assert "confidence" in result and "factors" in result
 
-    ref_obs = bank.get("storyA_obs_001")
-    print(f"\nReference: [{ref_obs['obs_id']}] {ref_obs['surface_form']}")
+    # 2) bootstrap 豁免：penalty=0，分数不低于默认
+    result2 = calculate_confidence_detailed(supporting, cand_def, bank, apply_confusable=False)
+    print(f"[豁免] conf={result2['confidence']:.3f} factors={result2['factors']}")
+    assert result2["factors"]["confusability_penalty"] == 0.0
+    assert result2["confidence"] >= result["confidence"] - 1e-9
 
-    results = retriever.query_by_observation(ref_obs, top_k=5, exclude_same_story=True)
-    print(f"Found {len(results)} cross-story similar Observations:")
+    # 3) supporting 集合口径：surface 只取决于 supporting obs 的去重 surface_form
+    result3 = calculate_confidence_detailed(
+        ["storyA_obs_001", "storyB_obs_001"], cand_def, bank, apply_confusable=False
+    )
+    print(f"[2-obs] conf={result3['confidence']:.3f} surface={result3['factors']['surface_diversity']}")
+    assert abs(result3["factors"]["surface_diversity"] - 2.0 / 3.0) < 0.01
 
-    similar_pairs = []
-    for r in results:
-        similar_pairs.append({
-            "reference": ref_obs,
-            "retrieved": r.obs,
-            "similarity": r.similarity
-        })
-        print(f"  [{r.obs['obs_id']}] sim={r.similarity:.3f} | {r.obs['surface_form']}")
+    # 4) 近义"保留最高置信度"（merge_candidates，纯内存）
+    embedder = bank.embedder
+    live: list[dict] = []
+    cand_lo = {
+        "function_name": "SACRIFICE_FOR_OTHERS",
+        "definition": "为他人自愿牺牲珍贵资源或生命",
+        "confidence": 0.51,
+    }
+    cand_hi = {
+        "function_name": "SACRIFICE_FOR_GOAL",
+        "definition": "为他人自愿牺牲珍贵资源或生命",
+        "confidence": 0.55,
+    }
+    live, written = merge_candidates(live, [cand_lo], embedder)
+    assert len(live) == 1 and len(written) == 1
+    live, written2 = merge_candidates(live, [cand_hi], embedder)
+    assert len(live) == 1, "近义应合并为 1 条"
+    assert live[0]["function_name"] == "SACRIFICE_FOR_GOAL"
+    assert abs(live[0]["confidence"] - 0.55) < 1e-9
+    print(f"\n[近义合并] 保留: {live[0]['function_name']} conf={live[0]['confidence']}")
 
-    # 5. Build cluster
-    seen = {}
-    for pair in similar_pairs:
-        for role in ("reference", "retrieved"):
-            obs = pair.get(role)
-            if not obs:
-                continue
-            obs_id = obs.get("obs_id", "")
-            if obs_id and obs_id not in seen:
-                seen[obs_id] = obs
+    # 5) 同名但置信度更低 → 不替换
+    cand_low2 = {
+        "function_name": "SACRIFICE_FOR_GOAL",
+        "definition": "完全不同的另一个定义",
+        "confidence": 0.52,
+    }
+    live, written3 = merge_candidates(live, [cand_low2], embedder)
+    assert len(live) == 1
+    assert abs(live[0]["confidence"] - 0.55) < 1e-9
+    print(f"[同名低分] 未替换: {live[0]['function_name']} conf={live[0]['confidence']}")
 
-    cluster = list(seen.values())
-    print(f"\nCluster has {len(cluster)} Observations:")
-
-    for o in cluster:
-        print(f"  - [{o['obs_id']}] {o['surface_form']}")
-
-    # 6. Calculate confidence
-    if len(cluster) >= 2:
-        story_ids = set(o.get("story_id", "") for o in cluster)
-        if len(story_ids) >= 2:
-            candidate_def = "Previously unknown capability is recognized by relevant characters"
-            result = calculate_confidence_detailed(cluster, candidate_def)
-            print(f"\nConfidence based on Retrieval:")
-            print_confidence_result(result)
-        else:
-            print("\n[WARN] Cluster spans < 2 stories")
-    else:
-        print("\n[WARN] Cluster has insufficient observations")
+    print("\n所有断言通过!")
 
 
 if __name__ == "__main__":
-    test_confidence_calculation()
-    test_bank_retrieval_confidence()
-
-    print("\n" + "=" * 60)
-    print("测试完成!")
-    print("=" * 60)
+    test_confidence_new_signature()
