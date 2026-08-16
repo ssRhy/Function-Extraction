@@ -43,7 +43,7 @@ class ObservationBank:
 
     COLLECTION_NAME = "observations"
 
-    def __init__(self, persist_dir: str = "Bank/data"):
+    def __init__(self, persist_dir: str = "data/bank"):
         self.persist_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), persist_dir)
         self.jsonl_path = os.path.join(self.persist_dir, "observations.jsonl")
         self.chroma_dir = os.path.join(self.persist_dir, "chroma_db")

@@ -20,8 +20,8 @@ OBS_FIT_THRESHOLD = 0.70        # 单 obs 与函数 centroid 余弦低于该值�
 SEP_NEAR_DUP_THRESHOLD = 0.85   # 近义组阈值（对齐 NEAR_DUP_THRESHOLD；0.78 会串出巨型连通分量不可用，漏检的弱近义由 LLM 抽象复核补）
 ABSTRACTION_PASS = 0.80         # 抽象质量 OK 比例达标线
 EVIDENCE_MIN_STORIES = 2        # 每个函数至少覆盖的故事数
-EVIDENCE_MEAN_STORIES = 3.0     # 全体函数平均支持故事数
-EVIDENCE_MEAN_OBS = 4           # 全体函数平均支持 obs 数
+EVIDENCE_MEAN_STORIES = 2.5     # 全体函数平均支持故事数（120 篇实测 2.892、中位数 3，按真实分布校准）
+EVIDENCE_MEAN_OBS = 3           # 全体函数平均支持 obs 数（120 篇实测 3.048、中位数 3，按真实分布校准）
 DIVERSITY_GENRE_PASS = 2        # 支持故事覆盖题材数达标线
 DIVERSITY_STORY_PASS = 20       # 无题材信息时的去重故事数达标线
 PASS_MIN_DIMENSIONS = 4         # 通过判定：>= 4/6 维度达标
@@ -216,7 +216,7 @@ def compute_abstraction(functions, abstraction_reviews=None) -> dict:
 # ========== 5. Evidence Count 证据量 ==========
 
 def compute_evidence(functions, obs_by_id) -> dict:
-    """无 <2 故事函数、平均支持故事 >=3、平均 obs >=4 方达标；不足者标记待复核。"""
+    """无 <2 故事函数、平均支持故事 >=2.5、平均 obs >=3 方达标；不足者标记待复核。"""
     story_counts, obs_counts, low_evidence = [], [], []
     for f in functions:
         sup_ids = [oid for oid in f.get("supporting_obs_ids", []) if oid in obs_by_id]

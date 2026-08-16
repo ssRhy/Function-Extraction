@@ -108,7 +108,18 @@ def _has_actionable_issues(report) -> bool:
 
 
 def should_continue(state: NarrativePipelineState) -> str:
-    """curate_app 循环路由：达修订轮数上限则结束；FAIL 或仍有可执行问题则修订，否则结束。"""
+    """curate_app 循环路由：达修订轮数上限或 PASS/无可执行问题 -> 最终全量复核；否则修订。"""
+    if state.get("evaluation_round", 0) >= revise_module.MAX_EVAL_ROUNDS:
+        return "final_review"
+    if state.get("evaluator_decision") == "FAIL":
+        return "revise"
+    if _has_actionable_issues(state.get("evaluation_report")):
+        return "revise"
+    return "final_review"
+
+
+def should_continue_after_final(state: NarrativePipelineState) -> str:
+    """最终全量复核后：达上限则结束；FAIL/仍有可执行问题则再修订（由全新复核驱动），否则结束。"""
     if state.get("evaluation_round", 0) >= revise_module.MAX_EVAL_ROUNDS:
         return "end"
     if state.get("evaluator_decision") == "FAIL":
@@ -118,18 +129,31 @@ def should_continue(state: NarrativePipelineState) -> str:
     return "end"
 
 
+def final_review_node(state: NarrativePipelineState) -> dict:
+    """最终评估轮：强制全新全量 Abstraction 复核（不增量复用），保证判定基于真实测量。"""
+    st = dict(state)
+    st["force_full_review"] = True
+    return evaluator_node(st)
+
+
 def build_curate_graph() -> StateGraph:
-    """闭环图：评估 →（FAIL 且未达上限）→ 修订 → 再评估 → …→ END。"""
+    """闭环图：评估 →（FAIL/可执行问题）→ 修订 → 再评估 →…；PASS 或达上限后做一次最终全量复核再结束。"""
     graph = StateGraph(NarrativePipelineState)
     graph.add_node("evaluator", evaluator_node)
+    graph.add_node("final_review", final_review_node)
     graph.add_node("revise", revise_node)
     graph.add_edge(START, "evaluator")
     graph.add_conditional_edges(
         "evaluator",
         should_continue,
-        {"end": END, "revise": "revise"},
+        {"revise": "revise", "final_review": "final_review"},
     )
     graph.add_edge("revise", "evaluator")
+    graph.add_conditional_edges(
+        "final_review",
+        should_continue_after_final,
+        {"revise": "revise", "end": END},
+    )
     return graph
 
 

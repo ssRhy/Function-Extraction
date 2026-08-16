@@ -226,7 +226,7 @@ def main() -> int:
             print(f"  {rel:<45} 行 {stats['original_lines']:>5} → 段 {stats['paragraphs']:>4}"
                   f" (噪音 -{stats['noise_removed']:>3}){flag}")
 
-    # 复制 manifest（txt_file 相对路径与清洗目录结构一致，batch_run 元数据注入仍可用）
+    # 复制 manifest（txt_file 相对路径与清洗目录结构一致，run_bootstrap 元数据注入仍可用）
     for meta in ("manifest.json", "manifest.csv"):
         src = os.path.join(args.input, meta)
         if os.path.exists(src):

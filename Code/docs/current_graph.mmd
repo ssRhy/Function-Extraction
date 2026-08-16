@@ -1,0 +1,25 @@
+flowchart TD
+    subgraph RB["run_bootstrap.py 主流程"]
+        A["清空 Bank + 清空 bootstrap 命名空间<br/>(APPLY_CONFUSABLE=False)"]
+        A --> B["阶段1：逐篇 extract_app.invoke<br/>(每篇 Function=0，累计 similar_observations)"]
+        B --> C["阶段2：cluster_similar_pairs(0.60) → split_oversized(≤40 obs)<br/>每分量 inducer_node（≥2 故事）→ upsert Registry"]
+        C --> D["阶段3：curate_app.invoke<br/>(评估 + 修订闭环)"]
+        D --> E["快照导出 functions_{ns}.jsonl / bank_{ns}.jsonl"]
+    end
+
+    subgraph EX["extract_app（app.py:161，无 inducer）"]
+        S1["START"] --> P["preprocessor"] --> O["observer"] --> BA["bank_adder"] --> R["retrieval"] --> E1["END"]
+    end
+
+    subgraph CU["curate_app（app.py:162，评估+修订闭环）"]
+        S2["START"] --> EV["evaluator_node"]
+        EV -->|"should_continue: FAIL/可执行问题"| RV["revise_node"]
+        RV --> EV
+        EV -->|"PASS / 达3轮上限"| FR["final_review_node"]
+        FR -->|"仍FAIL且未达上限"| RV
+        FR -->|"PASS / 达上限"| E2["END"]
+    end
+
+    subgraph LP["pipeline_app（app.py:160，含 inducer）—— 未使用（历史遗留）"]
+        S3["START"] --> P2["preprocessor"] --> O2["observer"] --> BA2["bank_adder"] --> R2["retrieval"] --> I2["inducer"] --> E3["END"]
+    end

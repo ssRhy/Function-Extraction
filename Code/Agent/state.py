@@ -40,6 +40,7 @@ class NarrativePipelineState(TypedDict):
     revise_report: dict | None  # 修订节点输出（合并/修订/拆分/移除清单）
     evaluation_round: int  # curate_app 修订轮次计数
     review_targets: list[str] | None  # 下一轮 Abstraction 复核目标（修订变更集；None=全量复核）
+    force_full_review: bool | None  # 最终评估轮强制全新全量 Abstraction 复核（不增量复用）
 
     # ---- 流程控制 ----
     current_story_index: int

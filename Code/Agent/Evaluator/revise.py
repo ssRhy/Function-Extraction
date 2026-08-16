@@ -8,6 +8,7 @@ Revise Node - bootstrap 内嵌 Curator-lite：消费 Evaluator 报告，全自�
 import json
 import os
 import shutil
+import time
 import types
 
 from Agent.llm import chat_structured
@@ -18,7 +19,7 @@ from Agent.Evaluator.dimensions import _obs_text, _cosine
 from Prompt.Merge_prompt import MERGE_SYSTEM_PROMPT, MergeResponse
 from Prompt.Revise_prompt import REVISE_SYSTEM_PROMPT, ReviseResponse
 
-MAX_EVAL_ROUNDS = 3        # 最大修订轮数（curate_run --max-rounds 可覆盖）
+MAX_EVAL_ROUNDS = 3        # 最大修订轮数
 SPLIT_OBS_MIN_SIM = 0.40   # SPLIT 分配：obs 与子函数定义余弦低于该值不归属任何子函数
 LLM_RETRY = 1              # 单次 LLM 动作失败重试次数
 
@@ -28,6 +29,21 @@ def _load_report(report_path: str) -> dict | None:
         return None
     with open(report_path, "r", encoding="utf-8") as f:
         return json.load(f)
+
+
+
+def _persist_round(actions: dict, round_no: int, report_path: str) -> str:
+    """修订历史落盘：与评估报告同目录，追加 revise_rounds.jsonl（每轮动作 + 时间戳）。"""
+    path = os.path.join(os.path.dirname(report_path), "revise_rounds.jsonl")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    record = {
+        "round": round_no,
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "actions": actions,
+    }
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return path
 
 
 def _story_count(supporting_ids: list[str], obs_by_id: dict) -> int:
@@ -348,6 +364,9 @@ def revise_node(state: dict) -> dict:
                 store.export_jsonl(backup)
             store.replace_all(final)
             actions["backup"] = backup
+
+    rounds_path = _persist_round(actions, state.get("evaluation_round", 0) + 1, report_path)
+    print(f"[Revise] 修订历史已落盘 → {rounds_path}")
 
     return {
         "revise_report": actions,

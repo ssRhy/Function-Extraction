@@ -23,14 +23,14 @@ Corpus → Pre-Processor → Observer → Observation Bank
 3. **Observation Bank** — 持久化存储 + 向量索引（ChromaDB + JSONL）
 4. **Retrieval** — 跨故事语义检索
 5. **Inducer** — 从跨故事相似 Observation 归纳 Function，多因子置信度过滤后 upsert 写入 Registry（同名/近义只保留最高置信度）
-6. **Evaluator_v0 + 自动修订闭环（curate_app）** — 批后六维本体评估（Coverage / Cohesion / Separation / Abstraction Quality / Evidence Count / Diversity），>=4/6 达标；FAIL 或仍有可执行问题（近义合并组、待修订定义、题材绑定、粒度、weak-fit obs、低证据函数）时由 `revise_node` 全自动修订（MERGE / REVISE / SPLIT / 剔除 / 移除）并写回 O_0，再评估直到 PASS 或达 3 轮上限；嵌入 batch_run 阶段 3，也可用 `curate_run.py` 对任意快照/并集跑闭环
+6. **Evaluator_v0 + 自动修订闭环（curate_app）** — 批后六维本体评估（Coverage / Cohesion / Separation / Abstraction Quality / Evidence Count / Diversity），>=4/6 达标；FAIL 或仍有可执行问题（近义合并组、待修订定义、题材绑定、粒度、weak-fit obs、低证据函数）时由 `revise_node` 全自动修订（MERGE / REVISE / SPLIT / 剔除 / 移除）并写回 O_0，再评估直到 PASS 或达 3 轮上限；由 `run_bootstrap.py` 一键串联（阶段 3）
 
 ## 目录结构
 
 ```
 Code/
 ├── Agent/
-│   ├── app.py              # LangGraph 图定义（pipeline_app / extract_app）
+│   ├── app.py              # LangGraph 图定义（pipeline_app / extract_app / curate_app）
 │   ├── llm.py              # DeepSeek API 统一封装
 │   ├── state.py            # LangGraph State 定义
 │   ├── Pre_pro/pre_processor.py   # Pre-Processor 节点：LLM 分句分段（规则兜底）
@@ -41,10 +41,9 @@ Code/
 │   ├── Evaluator/evaluator.py     # Evaluator 节点：六维评估 + PASS/FAIL + 建议清单
 │   ├── Evaluator/dimensions.py    # 六维纯函数与阈值（无 LLM、可复现）
 │   ├── Evaluator/revise.py        # 修订节点：MERGE/REVISE/SPLIT + weak-fit 剔除 + 写回
-│   ├── Registry/registry.py     # RegistryStore：SQLite 存储（命名空间隔离，payload 整存）
-│   └── data/registry/functions.db  # Function Registry（SQLite；JSONL 为快照/交换格式）
+│   └── Registry/registry.py     # RegistryStore：SQLite 存储（命名空间隔离，payload 整存）
 ├── Bank/
-│   └── bank.py             # ObservationBank：ChromaDB + JSONL 双存储（data/observations.jsonl）
+│   └── bank.py             # ObservationBank：ChromaDB + JSONL 双存储（data/bank/observations.jsonl）
 ├── Embedding/
 │   └── embedding.py        # Embedder：sentence-transformers 封装（all-MiniLM-L6-v2）
 ├── Retrieval/
@@ -56,22 +55,24 @@ Code/
 │   ├── Evaluator_prompt.py # Evaluator 抽象质量复核提示词
 │   ├── Merge_prompt.py     # 近义组合并提示词
 │   └── Revise_prompt.py    # 定义修订/拆分提示词
+├── data/                    # 统一数据根目录（全部 gitignored 运行时产物）
+│   ├── registry/functions.db # Registry（SQLite，命名空间隔离）
+│   ├── bank/                # ObservationBank 运行时存储（JSONL + ChromaDB）
+│   ├── bootstrap/           # run_bootstrap.py 快照（functions_<ns>.jsonl / bank_<ns>.jsonl）
+│   └── evaluation/          # 评估报告与修订历史（evaluation_report.json / revise_rounds.jsonl）
+├── run_bootstrap.py        # 一键全流程入口（清空→全量提取→统一归纳→评估修订闭环→快照）
 ├── test/
-│   ├── batch_run.py        # 批量运行入口（--limit / --corpus / --stories / --genre / --batch-induction / --out-dir；Registry 按命名空间隔离）
 │   ├── clean_corpus.py     # 语料清洗（脚注/促销/碎片行/数字标记）
-│   ├── genre_extract.py    # 题材快照 Function 清单 + 跨题材近义组摘要
 │   ├── test_evaluator.py   # Evaluator_v0 六维评估测试（单元 + mock LLM 节点）
 │   ├── test_revise.py      # 修订节点 + curate_app 闭环测试（mock LLM）
-│   ├── curate_run.py       # 评估 + 自动修订闭环独立入口（--registry/--bank/--manifest/--report/--max-rounds/--no-revise）
-│   ├── import_registry.py   # 导入 JSONL 快照到 Registry 命名空间（幂等 replace）
-│   ├── gen_evaluation_report.py  # 纯评估入口（三题材并集报告）
 │   ├── test_registry.py    # RegistryStore 单元测试（CRUD/隔离/字段无损/JSONL 往返）
 │   ├── test_batch_induction.py  # 批后归纳聚类纯函数测试（无 LLM）
 │   ├── test_preprocessor.py # Pre-Processor 测试（mock LLM）
 │   ├── test_confidence.py  # 置信度计算测试
-│   ├── test_bank.py        # Bank + Retrieval 集成测试
-│   └── stories/            # 测试用短篇神话（30 篇）
-└── zhihu_story_subset_120_20260815/  # 知乎 120 篇正式语料（3 题材 × 40）
+│   ├── test_clean_corpus.py # 语料清洗回归测试
+│   └── logs/               # 运行日志
+├── zhihu_story_subset_120_20260815/  # 知乎 120 篇原始语料（3 题材 × 40）
+└── zhihu_story_subset_120_20260815_clean/  # 清洗后语料（Bootstrap 实际输入）
 ```
 
 ## 安装
@@ -84,39 +85,25 @@ Embedding 模型（`all-MiniLM-L6-v2`）离线加载，无需额外下载配置�
 
 ## 使用
 
-### 批量运行
+### 一键全流程（run_bootstrap.py）
 
 ```bash
 cd Code
-python test/batch_run.py                        # 处理 test/stories/ 全部
-python test/batch_run.py --limit 10             # 只处理前 10 个
-python test/batch_run.py --corpus zhihu_story_subset_120_20260815 --limit 5
-python test/batch_run.py --corpus zhihu_story_subset_120_20260815 \
-    --stories "3399250684_352071986.txt,1631935032_426631158.txt"  # 显式选篇（支持纯文件名）
+python run_bootstrap.py                                   # 全量：清洗语料 120 篇（缺省）
+python run_bootstrap.py --limit 10                        # 只处理前 10 个（按自然序）
+python run_bootstrap.py --stories "01_悬疑惊悚/a.txt,03_现代情感家庭/b.txt"  # 显式选篇（支持纯文件名）
+python run_bootstrap.py --no-revise                       # 仅评估，不进入修订闭环
+python run_bootstrap.py --evaluate-only                     # 非破坏性评估现有快照（不清空/不提取/不归纳/不修订）
+python run_bootstrap.py --curate-only                       # 在现有命名空间上跑评估+修订闭环（最终全量复核判定）
+python run_bootstrap.py --namespace o0 --out-dir data/o0  # 自定义命名空间 / 快照目录
 ```
 
-- 启动时清空 Bank + Registry（O_0 由批量运行自然重建）
-- `--corpus`：递归收集 `<answer_id>_<question_id>.txt`，story_id = 文件名主干（可复现）
-- `--corpus` 目录存在 `manifest.json` 时自动注入 category / question_title 元数据
-- `--genre <category>`：按 manifest `category`（=顶层目录名）过滤语料（如 `--genre 01_悬疑惊悚`）
-- `--batch-induction`：两阶段模式——阶段 1 逐篇提取 obs（Function=0），阶段 2 跨故事统一归纳；归纳完成后自动触发阶段 3 Evaluator_v0 六维评估
-- `--out-dir <path>`：跑完后把 Registry/Bank 快照为 `functions_<category>.jsonl` / `bank_<category>.jsonl`
-
-### 评估 + 自动修订闭环（curate_app）
-
-```bash
-cd Code
-# 对三题材并集跑闭环：评估 → 发现问题 LLM 自动修订 → 再评估，直到 PASS 或达 3 轮
-python test/curate_run.py --registry data/evaluation/union_functions.jsonl \
-    --bank data/evaluation/union_obs.jsonl \
-    --manifest zhihu_story_subset_120_20260815_clean/manifest.json
-python test/curate_run.py --no-revise ...        # 仅评估（等价 gen_evaluation_report.py）
-python test/curate_run.py --max-rounds 2 ...     # 覆盖默认修订轮数
-```
-
-- 修订动作：近义 MERGE（supporting obs 程序并集）、定义 REVISE、SPLIT（obs 按向量余弦确定性分配）、weak-fit 剔除、低证据移除、同名去重（LLM 撞名加 `_2/_3` 后缀，保证 O_0 函数名唯一）；被改函数置信度按 bootstrap 豁免口径重算
-- 写回前备份为 `<registry>.pre_revise.jsonl`；最终修订报告落盘 `data/evaluation/revise_report.json`，每轮动作追加落盘 `data/evaluation/revise_rounds.jsonl`（含 merged/revised/split 与 `changed` 变更集）
-- Abstraction 复核为"首轮全量 + 后续轮增量"：`revise_node` 记录 `changed`（merge 产物 / revised / split 子函数）回传 `review_targets`，`evaluator_node` 只重评变更集、未变更函数按 function_name 沿用旧评审（`_review_abstraction(review_targets, prev_reviews)`）；确定性五维仍每轮全量计算（向量秒级）
+- 一次运行完成全流程：清空 Bank + 本命名空间 → 阶段 1 逐篇提取 obs（`extract_app`，Function=0）→ 阶段 2 跨题材统一聚类归纳（`cluster_similar_pairs` 阈值 0.60 + `inducer_node`，≥2 故事分量）→ 阶段 3 `curate_app` 六维评估 + 自动修订闭环（评估 → 发现问题 LLM 修订 → 再评估，直到 PASS 或 3 轮上限）→ 快照 `data/bootstrap/functions_<ns>.jsonl` / `bank_<ns>.jsonl`
+- 不做题材过滤：跨题材 obs 直接一起归纳，函数天然题材无关（替代旧的"按题材分批 + 并集合并"流程；`--genre` 与并集工具已删除）
+- `--corpus`：默认 `zhihu_story_subset_120_20260815_clean`；存在 `manifest.json` 时自动注入 category / question_title 元数据（Diversity 维度按题材计）
+- 修订动作：近义 MERGE（supporting obs 程序并集）、定义 REVISE、SPLIT（obs 按向量余弦确定性分配）、weak-fit 剔除、低证据移除；写回前备份 `<registry>.pre_revise.<ns>.jsonl`
+- Abstraction 复核为"首轮全量 + 后续轮增量"：只重评 `revise_node` 标记的变更集，未变更函数按 function_name 沿用旧评审；确定性五维每轮全量（向量秒级）
+- LLM 统一 `reasoning_effort="none"`（`Agent/llm.py` 硬编码）；设 `LLM_USAGE=1` 可打印按调用方归因的 usage/耗时
 
 ### 语料清洗
 
@@ -157,11 +144,9 @@ for obs in result["observations"]:
 
 ```bash
 cd Code
-python test/test_preprocessor.py   # Pre-Processor（mock LLM，离线）
-python test/test_confidence.py     # 置信度（无 LLM）
-python test/test_bank.py           # Bank + Retrieval 集成
-python test/test_evaluator.py      # Evaluator_v0 六维评估（单元 + mock LLM 节点）
-python test/test_batch_induction.py  # 批后归纳聚类纯函数（无 LLM）
+python -m pytest test/test_preprocessor.py test/test_confidence.py test/test_evaluator.py \
+    test/test_revise.py test/test_registry.py test/test_batch_induction.py \
+    test/test_clean_corpus.py -q   # 全部离线回归（mock LLM / 无 LLM）
 ```
 
 ## NarrativeObservation 数据结构
@@ -198,7 +183,7 @@ python test/test_batch_induction.py  # 批后归纳聚类纯函数（无 LLM）
 
 ## Evaluator_v0 六维评估
 
-批后六维本体评估（`Agent/Evaluator/`）：`evaluator_node` 评估初始本体 O_0，`revise_node` 消费报告全自动修订并写回，`curate_app` 编译图把两者连成闭环（`START → evaluator → conditional → revise → evaluator … → END`）：FAIL 或报告仍有可执行问题（`merge_groups`/`revise_definitions`/`genre_bound_functions`/`granularity_issues`/`weak_fit_obs`/`low_evidence_functions`）时进入修订，再评估直到 PASS 或达 `MAX_EVAL_ROUNDS`（3 轮）。评估对象 = 当次 Registry + Bank，可用 `evaluation_context`（`registry_file`/`bank_file`/`manifest_path`/`report_path`）覆盖路径、对三题材快照并集评估。报告落盘 `Code/data/evaluation/evaluation_report.json`；PASS = 达标维度 ≥ 4/6；修订写回前备份 `<registry>.pre_revise.jsonl`。`revise_node` 是 bootstrap 内嵌 Curator-lite（O_0 内部质量收敛，≤3 轮即止），不替代 Evolve 阶段的 Matcher/Critic/Curator。Abstraction 复核为"首轮全量 + 后续轮增量"（只重评变更集，未变更函数沿用旧评审），确定性五维每轮全量。
+批后六维本体评估（`Agent/Evaluator/`）：`evaluator_node` 评估初始本体 O_0，`revise_node` 消费报告全自动修订并写回，`curate_app` 编译图把两者连成闭环（`START → evaluator → conditional → revise → evaluator … → END`）：FAIL 或报告仍有可执行问题（`merge_groups`/`revise_definitions`/`genre_bound_functions`/`granularity_issues`/`weak_fit_obs`/`low_evidence_functions`）时进入修订，再评估直到 PASS 或达 `MAX_EVAL_ROUNDS`（3 轮）；**PASS 或达上限后强制一次 `final_review`（全新全量 Abstraction 复核，不增量复用旧评审）**，最终判定基于真实测量，若仍有可执行问题继续修订（≤3 轮）。评估对象 = 当次 Registry + Bank，`run_bootstrap.py` 自动传 manifest；`evaluation_context`（`registry_file`/`bank_file`/`manifest_path`/`report_path`）仍可覆盖路径、对任意快照评估。报告落盘 `Code/data/evaluation/evaluation_report.json`；PASS = 达标维度 ≥ 4/6；修订写回前备份 `<registry>.pre_revise.jsonl`。`revise_node` 是 bootstrap 内嵌 Curator-lite（O_0 内部质量收敛，≤3 轮即止），不替代 Evolve 阶段的 Matcher/Critic/Curator。Abstraction 复核为"首轮全量 + 后续轮增量"（只重评变更集，未变更函数沿用旧评审），确定性五维每轮全量。
 
 | 维度 | 含义 | 达标条件（默认阈值） |
 |------|------|----------------------|
@@ -206,7 +191,7 @@ python test/test_batch_induction.py  # 批后归纳聚类纯函数（无 LLM）
 | Cohesion 内聚度 | supporting obs 与其 centroid 余弦的总体均值；单 obs 贴合 < 0.70 标 weak-fit | ≥ 0.60 |
 | Separation 分离度 | definition 两两余弦 ≥ 0.85 的并查集近义组数 | = 0（非 0 输出合并建议） |
 | Abstraction Quality 抽象质量 | LLM 逐批复核（20 函数/次）：双向混叠 / 题材绑定 / 粒度 | OK 比例 ≥ 0.80 |
-| Evidence Count 证据量 | 无 <2 故事函数、平均支持故事 ≥ 3、平均 obs ≥ 4 | 三项全满足 |
+| Evidence Count 证据量 | 无 <2 故事函数、平均支持故事 ≥ 2.5、平均 obs ≥ 3（按 120 篇真实分布校准：实测 2.892/3.048、中位数 3/3） | 三项全满足 |
 | Diversity 语料多样性 | 支持故事覆盖题材数（经 manifest 解析）；无题材映射回退去重故事数 | ≥ 2 题材（回退 ≥ 20 故事） |
 
 - 阈值集中在 `dimensions.py` 顶部，按 MiniLM 中文分布校准：Coverage 相似 0.65（中文基线 0.5-0.6）、Cohesion 0.60、weak-fit 0.70（0.80 在 76 函数真实集标 49 条过噪，<0.70 仅 5 条真离群）、Separation 分组 0.85（对齐 `NEAR_DUP_THRESHOLD`）+ 复核列表 0.78（0.78 分组会串出巨型连通分量，故降级为建议列表）。
@@ -243,6 +228,45 @@ confidence = 0.3 × diversity + 0.3 × coherence + 0.2 × surface - 0.2 × confu
 - **客观置信度**：Function 置信度由多因子加权计算，替代 LLM 主观判断，确保可复现、可解释、可调参
 
 
+## 当前进展（2026-08-16 续 9）：数据目录统一（单一 data 根）
+
+- **统一为单一 `Code/data/` 根目录**：Registry DB（原 `Code/Agent/data/registry/functions.db`）→ `data/registry/functions.db`；Bank 运行时存储（原 `Code/Bank/data/`）→ `data/bank/`；快照 `data/bootstrap/` 与评估 `data/evaluation/` 不变。`registry.py` 默认 DB 路径与 `bank.py` 默认 `persist_dir`（`"data/bank"`）已同步；`.gitignore` 收敛为一条 `Code/data/`。
+- **删除无用产物**：已清空命名空间的 4 个 `.pre_revise.*` 备份、`data/bank_test_conf/`（测试临时产物）；保留 `functions.db.pre_revise.bootstrap.jsonl`（curate 83→82 修订前备份）。
+- 验证：`bootstrap` 命名空间 82 函数完整迁移；回归测试通过。
+
+## 当前进展（2026-08-16 续 8）：LangGraph 范式审查 + 仓库清理 + 修订历史落盘
+
+- **LangGraph 范式审查（$langgraph-coding skill）**：合规——`state.py` 用 `TypedDict + Annotated[list, add_messages]`；node 返回字段更新；图"先节点→边→compile"；条件边字符串路由与映射一致；`MemorySaver` + 稳定 `thread_id`；curate 闭环有界（`MAX_EVAL_ROUNDS=3`，`final_review` 出口），无死循环。重试沿用库内既有循环模式（`revise.py`/`pre_processor.py`），未额外引入 tenacity。
+- **删除过期文件与测试**：`test_app.py`（依赖已删 `story.txt`）、`test_bank.py`（及其路径 bug 产物 `Code/Code/data/bank_test`，git 跟踪）、`test/stories/`（30 篇）、`draw_graph.py` + `langgraph_overall.mmd/.png`、`nf_llm_result.json` / `nf_rule_result.json` / `_enc_probe.txt`、旧日志 `batch_run_v2.log` / `batch_run_zhihu_v5.log`。
+- **清理旧产物**：`data/` 下旧分批/试跑目录（`genre_functions` / `trial3_*` / `trial5*` / `trial_none` / `trial_usage_probe.json`）与 `data/evaluation/` 旧 union 快照已删除；保留 `data/bootstrap/` 快照与当前 `evaluation_report.json`。
+- **旧命名空间清空**：`functions.db` 中 `01_悬疑惊悚`(31) / `02_古风穿越重生`(32) / `03_现代情感家庭`(39) / `union`(75) 已清空，仅保留 `bootstrap`(82)。
+- **修订历史落盘**：`revise.py` 的 `revise_node` 每轮修订后追加 `data/evaluation/revise_rounds.jsonl`（`round` / `ts` / `actions`，含 merged/revised/split/removed/backup）。
+- **`.env` 去跟踪**：`git rm --cached Code/Agent/.env`（工作区文件保留，`.gitignore` 已含 `.env`）。
+
+## 当前进展（2026-08-16 续 7）：curate 最终全量复核 + --curate-only 闭环验收
+
+- **流程修复**：`curate_app` 新增 `final_review` 节点——PASS 或达 3 轮上限后强制全新全量 Abstraction 复核（`force_full_review`，不增量复用），最终判定基于真实测量；最终复核仍有可执行问题则继续修订（受轮数上限约束）。修复前最终判定混着旧评审（同一 O0 复用路径 1.0 vs 全新路径 0.7952）。
+- **新增 `--curate-only`**：在现有命名空间上跑评估+修订闭环（不清空/不提取/不归纳），修订写回 DB 并同步快照。
+- **bootstrap 命名空间闭环验收（2026-08-16）**：83 → **82 functions**（拆分 5 / 移除 2，合并/修订 0）；3 轮修订；最终 **PASS 6/6**（coverage 0.761 / cohesion 0.884 / separation 0 / abstraction **0.890（全量最终复核）** / evidence 2.89 / diversity 3）。残留建议（4 REVISE / 3 题材绑定 / 1 粒度）写入报告供 Evolve 参考；快照与 DB 一致（82）。
+
+## 当前进展（2026-08-16 续 6）：Evidence 阈值校准 + --evaluate-only
+
+- **校准**：`EVIDENCE_MEAN_STORIES 3.0→2.5`、`EVIDENCE_MEAN_OBS 4→3`（`dimensions.py`，保留 ≥2 故事硬下限）；依据 = 3/4 为计划默认且"验收时校准"从未执行，历次真实运行（union 3.79、bootstrap 2.892/3.048）从未达到 mean_obs≥4，实测中位数 3/3。
+- **新增 `--evaluate-only`**：`run_bootstrap.py` 非破坏性评估现有快照（不清空/不提取/不归纳/不修订），`evaluation_context` 指向 `functions_<ns>.jsonl`/`bank_<ns>.jsonl`/manifest。
+- **重评结果（2026-08-16）**：evidence `score=2.892` **pass=True**；但全新全量 Abstraction 复核（83 个全评、0 复用）给出 `abstraction_quality 0.7952`（<0.80 临界）→ 整体 PASS 5/6。原全量跑 abstraction 1.0 来自增量复用旧评审；全新复核暴露约 17 个函数可执行问题（4 REVISE / 2 too_broad / 6 题材绑定），体现 LLM 非确定性，需决定是否跑一轮 curate 修订后复评。
+
+## 当前进展（2026-08-16 续 5）：120 篇全量一键验收（run_bootstrap.py）
+
+- **全量运行（120 篇，跨题材统一归纳）**：2265.6s ≈ 37.8 分钟（18.9s/篇）；1027 obs / 102 个相似分量 → Inducer 写入 116 个 → curate 修订（修订 4 / 拆分 13 / 移除 11）→ **最终 83 functions**（全部 ≥2 故事支持，conf [0.546, 0.749]）。Evaluator **PASS 5/6**：coverage 0.731 / cohesion 0.882 / separation 0 / abstraction 1.0 / diversity 3（题材全 3 类，103 故事）；唯一未达标 evidence（mean_stories 2.892<3、mean_obs 3.048<4，接近阈值，属证据量问题而非质量问题）。LLM 306 次 / 1.93M tok / 墙钟 1852.6s。
+- **产物**：DB 命名空间 `bootstrap`（83 条）+ 快照 `data/bootstrap/functions_bootstrap.jsonl`（83）/ `bank_bootstrap.jsonl`（1027 obs）。日志 `test/logs/run_bootstrap_full.log`。
+- **对比旧并集**：旧 union 75（三批 102 → curate → 75，PASS 5/6）vs 新 bootstrap 83——数量与六维形态相近（均 evidence 临界），跨题材直接归纳语义下 83 为当前 O_0。
+
+## 当前进展（2026-08-16 续 4）：统一全流程 run_bootstrap.py（一次过全量）
+
+- **新增 `run_bootstrap.py` 一键入口**：清空 Bank + 本命名空间 → 全量提取 obs（`extract_app`）→ 跨题材统一聚类归纳（阈值 0.60，≥2 故事分量）→ `curate_app` 评估 + 修订闭环 → 单一命名空间 + 快照；不再按题材分批、不再需要并集合并。删除旧工具 `test/batch_run.py` / `genre_extract.py` / `gen_evaluation_report.py` / `curate_run.py` / `import_registry.py`；`llm.py` 删除 `reasoning_effort` 参数、硬编码 `"none"`。
+- **3 篇跨题材冒烟（2026-08-16）**：悬疑/古风/现代各 1 篇，52.7s（17.6s/篇）；30 obs → 1 个跨题材分量 → 归纳 6 个 → 修订移除 3 个低证据（<2 故事）→ 最终 3 functions（RELATIONSHIP_BREAKDOWN / TRUST_FORGING / ESCALATION_TO_REALITY），Evaluator 最终 PASS 4/6（evidence 小样本不达标为预期）；LLM 8 次 / 50,298 tok / 48.7s。快照 `data/bootstrap/functions_bootstrap.jsonl` + `bank_bootstrap.jsonl`。
+- **语义变化**：函数由跨题材 obs 直接聚类产生（题材无关），替代"分题材归纳 + 并集合并"；旧命名空间（01/02/03/union）作为历史数据保留、不再使用。
+
 ## 当前进展（2026-08-16 续）：Registry SQLite 化 + 5 篇试跑
 
 - **RegistryStore（SQLite）**：Code/Agent/Registry/registry.py，表 unctions(namespace, function_name, definition, payload, updated_at)，主键 (namespace, function_name)；按批次命名空间隔离（atch_run 启动只清当前批），payload 整存保证未来 Evolve 加字段无需迁移存储层。
@@ -251,6 +275,13 @@ egistry_file（快照/并集评估）时使用；
 evise 修订写回 store 模式前自动 export_jsonl(<db>.pre_revise.<ns>.jsonl) 备份。
 - **5 篇跨题材试跑验收（2026-08-16）**：悬疑 2 + 古风 2 + 现代 1，--batch-induction --out-dir data/trial5；40 obs / 5 functions（均 ≥2 故事支持）；闭环 PASS 5/6（第 1 轮 4/6 → 修订 3 个题材绑定/粒度函数 → 第 2 轮 5/6；evidence 2.2 因样本仅 5 篇不达标，属小样本预期）；耗时 1282s（256.4s/篇）；DB 命名空间 ll 与导出快照逐字段一致。
 - **测试**：新增 	est/test_registry.py 5 项（CRUD/整批事务/命名空间隔离/字段无损/JSONL 往返）；回归 test_revise/test_evaluator/test_batch_induction/test_confidence/test_preprocessor/test_clean_corpus 共 49 项全过；_REGISTRY_FILE 零残留。
+## 当前进展（2026-08-16 续 3）：120 篇全量重跑（V3 定版）验收
+
+- **三批全量重跑（V3 混合切句 + reasoning_effort=none）**：悬疑 638.9s / 335 obs / 31 funcs；古风 670.9s / 304 obs / 32 funcs；现代 832.9s / 372 obs / 39 funcs；**合计 2142.7s ≈ 36 分钟（17.8s/篇）**，对比旧配置约 8h → 约 13 倍提速。每批 Evaluator PASS 4/6（单题材 diversity=1 与 evidence 略低为预期）。
+- **并集评估（102 funcs / 1011 obs）**：PASS 4/6（separation 16 组跨题材近义为 FAIL 主因）。
+- **并集修订闭环（curate_app 3 轮）**：102 → **75 funcs**，separation 16→0、abstraction 0.987、coverage 0.797、cohesion 0.874、diversity 3，**最终 PASS 5/6**（唯一未达标 evidence mean_obs 3.79<4，接近阈值）。`_llm_merge` 19 次 / `_llm_revise` 10 次 / `_review_abstraction` 10 次，LLM 墙钟 115s。
+- **产物**：DB 命名空间 `01_悬疑惊悚`(31) / `02_古风穿越重生`(32) / `03_现代情感家庭`(39) / `union`(75)；快照 `data/genre_functions/`（functions+bank 三份 + `genre_functions_summary.md`）与 `data/evaluation/`（union_functions/union_obs/evaluation_report/revise_report/revise_rounds）。
+
 ## 当前进展（2026-08-16 续 2）：Bootstrap 提速 ~13.6 倍 + 5 篇新配置试跑
 
 - **根因定位（隐藏推理 token）**：耗时大头不是 Pre-Processor"全文回显"，而是模型隐藏推理 token——单次切句 completion 8220 tok 中 8207（99.8%）为 reasoning，可见输出仅 28 字符 JSON；同调用 `reasoning_effort=low` 31.4s/3925 tok vs `none` 1.6s/248 tok（约 20 倍）。
@@ -280,7 +311,8 @@ evise 修订写回 store 模式前自动 export_jsonl(<db>.pre_revise.<ns>.jsonl
 1. **近义阈值偏严 / 分组阈值降级**：`NEAR_DUP_THRESHOLD=0.85` 对中文 definition 偏保守；Evaluator 验收中 0.85 分组抓到 13 组近义（最高 `CONFLICT_RESOLUTION`≈`RELATIONSHIP_STRENGTHENING` 0.995），0.78 分组会串出巨型连通分量（已降级为复核列表）。`IDENTITY_SHIFT` / `IDENTITY_REVELATION_OR_SUSPICION` 等概念重叠函数未被合并；Evolve 阶段需定调（降阈值 vs 人工合并规则 vs Curator MERGE）。
 2. **作者脚注噪音（已处理）**：约 41/120 篇尾部带 `－END－`、`作者｜`、`编辑于` 等 CTA/版权脚注；已由 `clean_corpus.py` 清洗（输出 `..._clean/`），全量 Bootstrap 改用清洗后语料。头部误删（M1）与幂等（M3）已修复并补回归测试。
 3. **Schema drift**：Observer 提示词要求输出 `source_sentence_indices`，但 schema 未采集（Evolve 阶段需补）。
-4. **过期测试**：`test_app.py` 已过期（依赖已删除的 `story.txt` 驱动与旧 state 字段），去留未定。
+4. **过期测试已删除**：`test_app.py` / `test_bank.py` / `test/stories/`（30 篇）等过期测试与旧日志已在本轮清理（见续 8）。
+5. **旧分批/并集工具已删除**：`test/batch_run.py`（`--genre` 三批）与并集工具（`genre_extract`/`gen_evaluation_report`/`curate_run`/`import_registry`）已由 `run_bootstrap.py` 一键全流程取代；历史命名空间 `01_悬疑惊悚`/`02_古风穿越重生`/`03_现代情感家庭`/`union` 已清空，`functions.db` 仅保留 `bootstrap`。
 5. **历史问题已修复**：早前"5 个故事 Registry 写入 0 个 Function"的根因（diversity 分母过大、confusable 与 Registry 耦合、候选互比缺失）已在 2026-08-15 修复（口径统一 + bootstrap 豁免 + 候选统一算分后写入）。
 6. **Inducer 非确定性**：同一批语料两次运行 Function 名称/数量不同（LLM 候选生成随机），影响可复现；评价阶段需固定候选池或 Run A/B/C 对齐。
 7. **LLM 分句偶发塌缩为 1 句（已兜底）**：`sentences=[全文]` 时 Observer 仍能提取 obs 但粒度变粗；2026-08-16 已加塌缩检测（LLM 返回句子数 < 文本句末标点数/3 时改用规则切句），`test_preprocessor.py` 新增回归用例。

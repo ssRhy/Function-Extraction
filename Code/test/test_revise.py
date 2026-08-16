@@ -312,13 +312,14 @@ def test_curate_incremental_review():
                 "evaluation_round": 0,
             }, config={"configurable": {"thread_id": "curate-inc"}})
             assert result["evaluation_round"] == 1, result
-            assert calls["n"] == 2, calls  # 第 1 轮全量 + 第 2 轮增量
+            assert calls["n"] == 3, calls  # 第 1 轮全量 + 第 2 轮增量 + 最终全量复核
             assert calls[1] == ["F_A", "F_B"], calls
             assert calls[2] == ["F_AB"], calls
+            assert calls[3] == ["F_AB"], calls
             with open(reg, "r", encoding="utf-8") as f:
                 names = {json.loads(l)["function_name"] for l in f if l.strip()}
             assert names == {"F_AB"}, names
-            # curate_run 落盘依赖：checkpointer 历史可回溯每轮 revise_report
+            # run_bootstrap 落盘依赖：checkpointer 历史可回溯每轮 revise_report
             rounds = []
             for snap in curate_app.get_state_history({"configurable": {"thread_id": "curate-inc"}}):
                 rr = (snap.values or {}).get("revise_report")

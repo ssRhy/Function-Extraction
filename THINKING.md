@@ -94,6 +94,8 @@
 - **验证**：集成验收三题材快照并集（76 funcs / 831 obs + manifest）PASS 5/6（仅 Separation FAIL）：coverage 0.83 / cohesion 0.88 / separation 13 / abstraction 0.83 / evidence 3.78 / diversity 3。四类问题的证据：13 组近义（`CONFLICT_RESOLUTION`≈`RELATIONSHIP_STRENGTHENING` 0.995、`INFORMATION_REVELATION`≈`RELATIONSHIP_BREAKDOWN` 0.908 等）；4 个题材绑定函数（`SUPERNATURAL_ENCOUNTER`/`FATE_REWRITING`/`SECOND_CHANCE`/`FATE_CHANGE_DECISION`）；7 个双向混叠 REVISE；weak-fit 5 条离群 obs。报告落盘 `Code/data/evaluation/evaluation_report.json`。
 - **遗留**：v1 FAIL 只输出建议、不自动退回 Inducer（自动重试/扩语料留待 Evolve）；同题材 13 组 + 跨题材 20 组近义如何合并（人工规则 vs 阈值下调 vs Curator MERGE）未决；Abstraction LLM 非确定性接受（与 Inducer 一致）。
 - **状态**：已实现并接入 batch_run 阶段 3；旧 `test/evaluator_v0.py` 已删除，其职责由 Separation + Evidence Count 承接。
+- **Evidence 阈值校准（2026-08-16）**：`EVIDENCE_MEAN_STORIES 3.0→2.5`、`EVIDENCE_MEAN_OBS 4→3`——3/4 是计划默认（当时注明"验收步骤负责校准"但从未对真实分布校准），历次真实运行（union 3.79、bootstrap 2.892/3.048）从未达到 mean_obs≥4；实测中位数 3/3，校准后 evidence 达标（2.892≥2.5、3.048≥3）。≥2 故事硬下限（理论依据 §6.2）不动。
+- **新发现（同一轮）**：`--evaluate-only` 全新全量 Abstraction 复核（83 个全评、0 复用）得 0.7952（<0.80），暴露原 1.0 依赖增量复用；LLM 非确定性使 abstraction 在 0.80 贴边，17 个函数有可执行问题（REVISE/too_broad/题材绑定），需一轮 curate 修订后复评才能真 6/6。
 
 ## 9. Bootstrap 自动修订闭环（curate_app）与 SPLIT 镜像近义（2026-08-16）
 
@@ -130,3 +132,34 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **V2+none 对照（用户提议回退验证，2026-08-16）**：按"Pre-Processor 恢复 V2 全量 LLM 分句 + reasoning_effort=none"实测同 3 篇跨题材（trial5_v2none）——preprocessor 60.3s/篇（completion ~11.6k/篇）vs 混合 3.6s/篇（~600/篇），总耗时 79.9s/篇 vs 18.8s/篇（约 4.2 倍）；2/3 篇首轮 JSON 解析失败触发重试（V2 历史不稳定在 none 下复现）；句子数 289/331/180（与 V2+推理一致，none 不损 V2 分句质量；混合版 317/389/179，规则基底略多句）。结论：**保留 V3 混合**——LLM 仍把关合并/拆分质量，成本 1/4 且无截断风险。
 - **V2 vs V3 同篇定案对照（2026-08-16，trial3_v2 vs trial3_v3，同 3 篇跨题材单次采样）**：总耗时 85.1s/篇 vs 18.4s/篇（4.6 倍）；V2 3/3 篇首轮 JSON 失败（1 篇连败 2 次掉规则兜底，等于 1/3 内容未走 LLM），V3 0 失败；最终 Function 均 4 个且全部 ≥2 故事支持（V2: SECRET_DISCOVERY/ALLY_INTRODUCTION/SELF_IMPROVEMENT_AFTER_CRISIS/DISTURBING_ENCOUNTER；V3: TRUST_ESTABLISHMENT/RELATIONSHIP_DETERIORATION/ESCAPE_IMPULSE/SELF_REFORMATION，概念重叠仅 SELF_IMPROVEMENT_AFTER_CRISIS≈SELF_REFORMATION，其余差异属 Inducer 非确定性）；Evaluator V3 PASS 5/6（coverage 0.70、0 轮修订）vs V2 PASS 4/6（coverage 0.45、移除 2 个低证据/题材绑定函数）；总 token 50,631 vs 105,317。**用户决策：保留 V3 混合切句。**
 - **状态**：已定案（保留 V3）；下一步由用户决定是否清空 `all` 命名空间 + Bank 后全量重跑三批。
+## 13. 120 篇全量重跑验收：V3 提速 ~13 倍，并集闭环 PASS 5/6（2026-08-16）
+
+- **背景**：V3 定版后清空重跑三批（悬疑/古风/现代各 40 篇），验证提速与并集质量。
+- **结果**：三批 2142.7s ≈ 36min（17.8s/篇，旧约 8h，~13 倍）；obs 335/304/372，funcs 31/32/39；并集 102 funcs → curate 3 轮 → 75 funcs；最终 PASS 5/6（separation 16→0、abstraction 0.987、coverage 0.797、cohesion 0.874、diversity 3；evidence mean_obs 3.79<4 未达标，接近阈值）。
+- **遗留**：evidence 维度差 0.2（mean_obs 需 ≥4），可接受或在下批语料补齐；跨题材近义经合并后仍残留 <0.85 的 review_pairs（如 RELATIONSHIP_FORMATION≈RELATIONSHIP_ESTABLISHMENT_THROUGH_EVENT 0.844），Evolve 阶段做阈值/合并决策；`functions.db` 四命名空间已就位，`union` 为修订后 O_0。
+- **状态**：Bootstrap 全量验收完成；进入 Evolve 前的待补清单见 README「Evolve 阶段待补清单」。
+
+## 14. 统一全流程入口 run_bootstrap.py：删除分批/并集（2026-08-16）
+
+- **难点**：Bootstrap 流程被拆成"3 题材分批 + 手动并集 + 多入口脚本"（batch_run --genre / genre_extract / gen_evaluation_report / curate_run / import_registry），入口分散、合并依赖人工步骤；用户要求"一次过大量文本、不需要分批、不需要合并"。
+- **方案**：新增 `Code/run_bootstrap.py` 一键入口——清空 Bank + 本命名空间 → 全量提取 obs（extract_app）→ 跨题材统一聚类归纳（阈值 0.60、≥2 故事分量）→ curate_app 评估 + 修订闭环 → 快照；跨题材 obs 直接一起归纳，函数天然题材无关。删除 5 个旧脚本；`llm.py` 删除 `reasoning_effort` 参数、硬编码 `"none"`（已核实无外部调用方覆盖）。
+- **验证**：3 篇跨题材冒烟 52.7s（17.6s/篇），30 obs → 1 跨题材分量 → 6 函数 → 修订移除 3 低证据 → 3 函数，Evaluator PASS 4/6；离线回归 54 项全过。
+- **全量验收（2026-08-16）**：120 篇 2265.6s ≈ 37.8 分钟（18.9s/篇）；1027 obs → 116 → curate（修订 4/拆分 13/移除 11）→ 83 functions（conf [0.546, 0.749]，全部 ≥2 故事）；Evaluator PASS 5/6（evidence mean_stories 2.892<3 临界未达标，与旧 union 同形态）；LLM 306 次 / 1.93M tok。快照 `data/bootstrap/functions_bootstrap.jsonl`。
+- **状态**：已落地并通过全量验收；bootstrap 命名空间 83 = 当前 O_0；旧命名空间 01/02/03/union 保留作历史对照。
+
+## 15. 评估闭环度量缺陷：最终判定必须用全新全量复核（2026-08-16）
+
+- **难点**：同一 O0 在"增量复用路径"（abstraction 1.0）与"全新全量复核路径"（0.7952）下分数不同——最终判定混着旧评审，不可复现；且逐项校准阈值是打地鼠（evidence 过了 abstraction 又露出来），真实状态是"还差一轮质量收敛"。
+- **根因**：`curate_app` 最终轮用了增量复核（`review_targets=changed` + `prev_reviews` 复用），verdict 依赖缓存的旧评审；校准阈值掩盖而非解决贴线问题。
+- **方案**：① `curate_app` 新增 `final_review` 节点（`force_full_review=True` → 全量复核、不复用），PASS/达上限后强制一次全新测量，仍有可执行问题则继续修订（≤3 轮）；② 新增 `run_bootstrap.py --curate-only`（命名空间上直接跑闭环，写回 DB + 同步快照）。
+- **验证**：bootstrap 命名空间 `--curate-only`：83 → 82（拆分 5 / 移除 2），3 轮，最终 **PASS 6/6**（abstraction 全量(最终)复核 0.8902）；回归 54 项全过。
+- **状态**：已落地。残留建议（REVISE/题材绑定/粒度）写入报告，Evolve 阶段处理；证据增长仍交给 Evolve。
+
+
+## 16. LangGraph 范式审查与仓库清理（2026-08-16）
+
+- **审查结论**：用 $langgraph-coding skill 核对 `app.py`/`state.py`——State = `TypedDict + Annotated[list, add_messages]`；node 返回字段更新；图先建节点后连边再 compile；条件边字符串路由与映射一致；`MemorySaver` checkpointer + 稳定 `thread_id`；curate 闭环有界（`evaluation_round` 上限 + `final_review` 出口），无死循环。重试未引入 tenacity（沿用库内循环模式：`revise.py` LLM_RETRY / `pre_processor.py` 2 次尝试），符合 skill"仅对确实不稳定且可安全重试的外部调用加重试"。
+- **清理**：删除过期文件 `test_app.py`（依赖已删 story.txt）、`test_bank.py`（其 persist_dir 路径 bug 产物 `Code/Code/data/bank_test` 也被 git 跟踪，一并删除）、`test/stories/`（30 篇）、`draw_graph.py` + `langgraph_overall.*`、`nf_llm_result.json`/`nf_rule_result.json`/`_enc_probe.txt`、旧日志与 `data/` 旧分批/试跑产物（genre_functions、trial3_*、trial5*、trial_none、union 快照），保留 `data/bootstrap/` 与 `evaluation_report.json`。
+- **旧命名空间清空**：`01_悬疑惊悚`/`02_古风穿越重生`/`03_现代情感家庭`/`union` 从 functions.db 清除，仅剩 `bootstrap`(82)。
+- **修订历史落盘**：`revise_node` 每轮修订后追加 `data/evaluation/revise_rounds.jsonl`（round/ts/actions），替代旧 curate_run 的 checkpointer 回溯方案。
+- **`.env` 去跟踪**：`git rm --cached Code/Agent/.env`（工作区保留）。

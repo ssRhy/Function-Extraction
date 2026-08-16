@@ -132,10 +132,27 @@ def test_evidence():
     obs_by_id = {o["obs_id"]: o for o in obs}
     r = dim.compute_evidence(funcs, obs_by_id)
     assert r["pass"] is True and r["mean_stories"] == 3.0 and r["mean_obs"] == 4.0, r
+    # 校准后边界：mean_stories=2.5 / mean_obs=3.0 恰好达标
+    obs2 = [_obs("s1", "b_001"), _obs("s2", "b_002"), _obs("s2", "b_003"),
+            _obs("s3", "b_004"), _obs("s4", "b_005"), _obs("s5", "b_006")]
+    obs_by2 = {o["obs_id"]: o for o in obs2}
+    boundary = [
+        {"function_name": "F_X", "supporting_obs_ids": ["b_001", "b_002", "b_003"]},  # 2 故事 / 3 obs
+        {"function_name": "F_Y", "supporting_obs_ids": ["b_004", "b_005", "b_006"]},  # 3 故事 / 3 obs
+    ]
+    rb = dim.compute_evidence(boundary, obs_by2)
+    assert rb["pass"] is True and rb["mean_stories"] == 2.5 and rb["mean_obs"] == 3.0, rb
+    # 低于边界：mean_stories=2.0 / mean_obs=2.5 -> 不达标
+    below = [
+        {"function_name": "F_X", "supporting_obs_ids": ["b_001", "b_002", "b_003"]},  # 2 故事 / 3 obs
+        {"function_name": "F_Y", "supporting_obs_ids": ["b_004", "b_005"]},           # 2 故事 / 2 obs
+    ]
+    rl = dim.compute_evidence(below, obs_by2)
+    assert rl["pass"] is False and rl["mean_stories"] == 2.0 and rl["mean_obs"] == 2.5, rl
     # 单故事函数 -> 不达标 + 标记
-    funcs2 = [{"function_name": "F_X", "supporting_obs_ids": ["obs_001", "obs_002"]}]
+    funcs2 = [{"function_name": "F_Z", "supporting_obs_ids": ["obs_001", "obs_002"]}]
     r2 = dim.compute_evidence(funcs2, obs_by_id)
-    assert r2["pass"] is False and r2["low_evidence"] == [{"function_name": "F_X", "stories": 1}], r2
+    assert r2["pass"] is False and r2["low_evidence"] == [{"function_name": "F_Z", "stories": 1}], r2
     print("Evidence Count: OK")
 
 

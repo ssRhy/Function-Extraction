@@ -59,13 +59,13 @@ def get_client():
     return get_client._client
 
 
-def chat(messages: list, model: str = "deepseek-v4-flash", reasoning_effort: str = "none", response_format: dict | None = None) -> str:
+def chat(messages: list, model: str = "deepseek-v4-flash", response_format: dict | None = None) -> str:
     """通用 chat 接口"""
     client = get_client()
     kwargs = {
         "model": model,
         "messages": messages,
-        "reasoning_effort": reasoning_effort
+        "reasoning_effort": "none"  # 硬编码：bootstrap 全链路统一使用 none，不暴露参数
     }
     if response_format:
         kwargs["response_format"] = response_format
@@ -82,7 +82,7 @@ def chat(messages: list, model: str = "deepseek-v4-flash", reasoning_effort: str
     return content
 
 
-def chat_structured(messages: list, output_schema: type, model: str = "deepseek-v4-flash", reasoning_effort: str = "none"):
+def chat_structured(messages: list, output_schema: type, model: str = "deepseek-v4-flash"):
     """
     强制 JSON 格式返回 + Pydantic 验证解析。
 
@@ -93,7 +93,7 @@ def chat_structured(messages: list, output_schema: type, model: str = "deepseek-
             age: int
         user = chat_structured([...], User)
     """
-    content = chat(messages, reasoning_effort=reasoning_effort, response_format={"type": "json_object"})
+    content = chat(messages, response_format={"type": "json_object"})
 
     if not content or not content.strip():
         raise ValueError("LLM 返回空响应")

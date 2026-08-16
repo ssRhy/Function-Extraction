@@ -3,7 +3,8 @@
 覆盖：supporting 集合口径、bootstrap 豁免 confusable、近义"保留最高置信度"。
 """
 
-import sys, os
+import shutil
+import sys, os, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from Bank import ObservationBank
@@ -80,7 +81,8 @@ def test_confidence_new_signature():
     print("测试置信度计算（新签名）")
     print("=" * 60)
 
-    bank = ObservationBank(persist_dir="data/bank_test_conf")
+    _bank_tmp = tempfile.mkdtemp(prefix="bank_test_conf_")
+    bank = ObservationBank(persist_dir=_bank_tmp)
     bank.clear()
     bank.add(make_test_observations())
 
@@ -138,6 +140,7 @@ def test_confidence_new_signature():
     print(f"[同名低分] 未替换: {live[0]['function_name']} conf={live[0]['confidence']}")
 
     print("\n所有断言通过!")
+    shutil.rmtree(_bank_tmp, ignore_errors=True)
 
 
 if __name__ == "__main__":

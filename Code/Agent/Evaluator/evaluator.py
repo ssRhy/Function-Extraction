@@ -3,7 +3,7 @@ Evaluator_v0 节点 - 批后六维本体评估（Bootstrap → Evolve 入口）
 
 在 batch 的 Inducer 阶段（--batch-induction 阶段 2）归纳完全部候选 Function 后，
 由本节点一次性评估初始本体 O_0：计算六维得分与 PASS/FAIL 判定（>=4/6 达标通过），
-FAIL 时输出优化建议清单。不新增图链路，由 batch_run 归纳循环结束后直接调用本节点
+FAIL 时输出优化建议清单。不新增图链路，由 run_bootstrap.py 归纳循环结束后直接调用本节点
 （与现有直接调用 inducer_node 的模式一致）。
 
 评估对象 = 当次批次的完整 Registry + Bank；evaluation_context 可传
@@ -202,15 +202,17 @@ def evaluator_node(state: dict) -> dict:
         embedder = get_bank().embedder
 
     story_to_category = _load_story_category_map(context.get("manifest_path"))
+    force_full = state.get("force_full_review")
     prev_report = state.get("evaluation_report") or {}
-    prev_reviews = prev_report.get("abstraction_reviews")
-    review_targets = state.get("review_targets")
-    if review_targets is None:
+    prev_reviews = None if force_full else prev_report.get("abstraction_reviews")
+    review_targets = None if force_full else state.get("review_targets")
+    if review_targets is None and not force_full:
         review_targets = (state.get("revise_report") or {}).get("changed")
     reviews, review_errors, reviewed_n, reused_n = _review_abstraction(
         functions, review_targets=review_targets, prev_reviews=prev_reviews,
     )
-    print(f"[Evaluator_v0] Abstraction 复核: {'增量' if review_targets else '全量'} {reviewed_n} 个 / 复用 {reused_n} 个")
+    mode = "全量(最终)" if force_full else ("增量" if review_targets else "全量")
+    print(f"[Evaluator_v0] Abstraction 复核: {mode} {reviewed_n} 个 / 复用 {reused_n} 个")
     report = evaluate_function_set(
         functions,
         all_obs,
