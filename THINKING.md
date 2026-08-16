@@ -94,3 +94,19 @@
 - **验证**：集成验收三题材快照并集（76 funcs / 831 obs + manifest）PASS 5/6（仅 Separation FAIL）：coverage 0.83 / cohesion 0.88 / separation 13 / abstraction 0.83 / evidence 3.78 / diversity 3。四类问题的证据：13 组近义（`CONFLICT_RESOLUTION`≈`RELATIONSHIP_STRENGTHENING` 0.995、`INFORMATION_REVELATION`≈`RELATIONSHIP_BREAKDOWN` 0.908 等）；4 个题材绑定函数（`SUPERNATURAL_ENCOUNTER`/`FATE_REWRITING`/`SECOND_CHANCE`/`FATE_CHANGE_DECISION`）；7 个双向混叠 REVISE；weak-fit 5 条离群 obs。报告落盘 `Code/data/evaluation/evaluation_report.json`。
 - **遗留**：v1 FAIL 只输出建议、不自动退回 Inducer（自动重试/扩语料留待 Evolve）；同题材 13 组 + 跨题材 20 组近义如何合并（人工规则 vs 阈值下调 vs Curator MERGE）未决；Abstraction LLM 非确定性接受（与 Inducer 一致）。
 - **状态**：已实现并接入 batch_run 阶段 3；旧 `test/evaluator_v0.py` 已删除，其职责由 Separation + Evidence Count 承接。
+
+## 9. Bootstrap 自动修订闭环（curate_app）与 SPLIT 镜像近义（2026-08-16）
+
+- **难点**：Evaluator 出建议后需要 LLM 全自动修订并"保持 O_0 可用"，但不能每次靠人工/换批重跑；且并集评估是 PASS 5/6（Separation 是唯一 FAIL 维度），"PASS 即停"会让修订永不触发。
+- **方案**：`revise_node`（bootstrap 内嵌 Curator-lite）+ `curate_app` 编译图闭环——`START → evaluator → conditional → revise → evaluator… → END`。`should_continue` 的终止条件不是"verdict==PASS"，而是"报告已无可执行问题（merge_groups/revise_definitions/genre_bound/granularity/weak_fit/low_evidence）或达 `MAX_EVAL_ROUNDS`（3）"，否则即使 PASS 5/6 也会继续修订直到 6/6 或上限。修订动作：MERGE（supporting obs 程序并集）、REVISE、SPLIT（obs 按向量余弦确定性分配，不信任 LLM 输出 obs）、weak-fit 剔除、低证据移除；confidence 用 bootstrap 豁免口径重算（SimpleNamespace 轻量桩，不改 confidence.py）。
+- **验证**（三题材并集，3 轮，增量复核 + 同名去重后 515s）：76 → 57 funcs（同名 0）；Separation 13 → 0；题材绑定/粒度/weak-fit/低证据清零；Abstraction 0.965、evidence mean_obs 4.65；最终 PASS 6/6（coverage 0.81 / cohesion 0.87 / separation 0 / abstraction 0.96 / evidence 4.65 / diversity 3）。
+- **关键发现**：SPLIT 拆出的正/负镜像对（首采样 `POSITIVE_TURNING_POINT` / `NEGATIVE_TURNING_POINT` sim 0.982）会被 Separation 标为近义——定义高度对称但结构作用相反，embedding 余弦无法区分；这是"阈值判定 vs 语义方向"的固有盲区，需在 Evolve/阈值策略层面解决（如把同源 SPLIT 对加入豁免名单）。重跑采样中该问题未复现（Separation 归零），但风险仍在。
+- **状态**：已实现并验收（LLM 非确定性，两次采样分别 PASS 5/6 与 6/6；交付物以重跑 6/6 为准，`revise_report.json` 随闭环落盘）；最终报告残留非阻塞建议（1 REVISE、1 题材绑定、2 weak-fit、33 组 <0.85 复核对），Evolve 阶段处理。
+## 10. curate_app 增量 Abstraction 复核（2026-08-16）
+
+- **问题**：闭环 680s 里，Abstraction 的 LLM 复核每轮把所有函数全量重评一遍（4 轮 ≈ 13–16 次调用，占大头）。用户追问"能不能只把有问题的组丢给 LLM 处理"。
+- **澄清**：13 组近义是向量检测（免费）；但双向混叠/题材绑定/粒度没有可靠规则，只能靠 LLM 圈出问题组（规则只是预筛 prompt 种子）；且修订产物会带新问题（merge 出的 `RELATIONSHIP_TRANSFORMATION` 第 2 轮又被 REVISE、SPLIT 拆出镜像近义），所以必须"评→改→再评"循环，单次跑不完。
+- **方案**：首轮全量 + 后续轮只重评变更集（merge 产物 / revised / split 子函数），未变更函数按 function_name 沿用旧评审；确定性五维仍全量（向量秒级）。实现：`evaluator._review_abstraction(review_targets, prev_reviews)` + `revise` 记录 `changed` 回传 `review_targets` + `curate_run` 回溯 checkpointer 落盘每轮动作。
+- **实测**（并集重跑，2026-08-16）：Abstraction LLM 调用 13–16 → 8 次（全量 76 分 4 批 + 增量 30/11/1）；耗时 680s → 515s（-24%）；76 → 57 funcs、同名 0（`_dedup_names` 把撞名的 `RELATIONSHIP_BONDING`/`RELATIONSHIP_BREAKDOWN`/`RELATIONSHIP_DEEPENING` 加 `_2` 后缀），最终 PASS 6/6、Separation 归零；`revise_rounds.jsonl` 记录每轮 changed 与 renamed_duplicates。
+- **取舍**：首轮若 LLM 漏检某函数，增量轮不会自动重抓（可加最后一轮全量终检兜底，未启用）；增量让"未变更函数"的评审结果跨轮稳定，也少了一个非确定性波动源。
+

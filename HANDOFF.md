@@ -97,10 +97,32 @@ Narrative Function 自动构建（第一阶段）— bootstrap 阶段改进：O_
 - 验收发现：13 组近义（最高 `CONFLICT_RESOLUTION`≈`RELATIONSHIP_STRENGTHENING` 0.995、`INFORMATION_REVELATION`≈`RELATIONSHIP_BREAKDOWN` 0.908）；4 个题材绑定函数（`SUPERNATURAL_ENCOUNTER`/`FATE_REWRITING`/`SECOND_CHANCE`/`FATE_CHANGE_DECISION`）；7 个双向混叠 REVISE 建议；weak-fit 阈值 0.80→0.70 后仅 5 条真离群（0.80 标 49 条过噪）。
 - 阈值校准（已写入 `dimensions.py`）：COVERAGE_SIM 0.65、COVERAGE_PASS 0.60、COHESION_PASS 0.60、OBS_FIT 0.70、SEP 分组 0.85 / 复核 0.78（0.78 分组串巨型连通分量，降级复核列表）、ABSTRACTION_PASS 0.80、EVIDENCE 2/3/4、DIVERSITY 2 题材（回退 20 故事）、PASS_MIN_DIMENSIONS 4。
 
+## 本轮（2026-08-16 续 3）：Bootstrap 自动修订闭环（curate_app）
+- 实现：
+  - `Agent/Evaluator/revise.py`：`revise_node` 消费评估报告全自动修订——近义组 MERGE（supporting obs 程序并集）、定义 REVISE、SPLIT（obs 按"obs 文本 vs 子函数定义余弦"确定性分配，无匹配子函数丢弃）、weak-fit obs 剔除、低证据（<2 故事）移除；被改函数置信度用 `calculate_confidence_detailed(apply_confusable=False)` + SimpleNamespace 轻量桩重算；写回前备份 `<registry>.pre_revise.jsonl`。
+  - `Prompt/Merge_prompt.py` / `Prompt/Revise_prompt.py`：合并/修订 schema 与提示词。
+  - `Agent/app.py`：`curate_app` 编译图（START→evaluator→conditional→revise→evaluator…→END）；`should_continue`：FAIL 或报告仍有可执行问题（merge_groups/revise_definitions/genre_bound/granularity/weak_fit/low_evidence）→ revise，直到 PASS 或 `MAX_EVAL_ROUNDS`（默认 3）。
+  - `Agent/state.py`：新增 `revise_report` / `evaluation_round`；`Agent/Evaluator/evaluator.py`：报告持久化 `abstraction_reviews`（供修订节点消费 recommendation==REVISE/SPLIT）；默认报告路径修正为 `Code/data/evaluation/`。
+  - `test/batch_run.py` 阶段 3：改用 `curate_app`（评估 + 自动修订闭环），`--out-dir` 快照即修订后最终 O_0；新增 `test/curate_run.py`（独立闭环入口，`--no-revise` 仅评估）。
+- 测试：`test/test_revise.py` 7 项全过（supporting 并集/SPLIT 分配/weak-fit/低证据/confidence 桩/节点全动作/闭环图终止：PASS 提前结束 + 上限强制结束）；回归 `test_evaluator/test_batch_induction/test_confidence/test_preprocessor/test_clean_corpus` 全过。
+- 集成验收（三题材并集 curate_app 3 轮，真实 LLM，增量复核 + 同名去重版 515s）：76 → 57 funcs（同名 0）；Separation 13 → 0；题材绑定/粒度/weak-fit/低证据全部清零；Abstraction 0.965、evidence mean_obs 4.65；最终 PASS 6/6（coverage 0.81 / cohesion 0.87 / separation 0 / abstraction 0.96 / evidence 4.65 / diversity 3）。报告落盘 `data/evaluation/evaluation_report.json` + `revise_report.json` + 每轮 `revise_rounds.jsonl`（含 renamed_duplicates）。历史：全量复核版 680s / 76 → 56 / PASS 6/6；增量版 535s / 76 → 59；首采样 PASS 5/6（残留 2 组 SPLIT 镜像近义）——LLM 非确定性，交付物以最新为准。
+- 已知：SPLIT 拆出的正/负镜像对可能被 Separation 标为近义（definition 高度对称，首采样 0.982 复现、重跑未复现）；同名但 <0.85 的函数对不在本轮合并范围，落在 review_pairs。
+
+## 本轮（2026-08-16 续 4）：curate_app 增量 Abstraction 复核
+- 背景：闭环 680s 里约 13–16 次 Abstraction LLM 全量复核（`_REVIEW_BATCH_SIZE=20`）占大头；"只跑有问题的组"不可行——近义组是向量免费检测，但双向混叠/题材绑定/粒度只能靠 LLM 圈出，且修订产物会带新问题（merge 出的 `RELATIONSHIP_TRANSFORMATION` 第 2 轮又被 REVISE）。
+- 改动：
+  - `Agent/Evaluator/evaluator.py`：`_review_abstraction(functions, review_targets=None, prev_reviews=None)`——首轮全量，后续轮只复核 `review_targets`（变更集 + 缺旧评审兜底），未变更函数按 function_name 复用旧评审；返回合并后评审 + 新评审数/复用数；`evaluator_node` 读 `state.review_targets`（回退 `revise_report.changed`），报告记录 `abstraction_reviewed/reused`。
+  - `Agent/Evaluator/revise.py`：记录 `changed_names`（merge 产物 / revised / split 子函数），写入 `revise_report.changed` 并回传 `review_targets`；新增 `_dedup_names`——LLM 生成名字与存量撞名时加 `_N` 后缀，保证 O_0 函数名唯一（实测 `RELATIONSHIP_BONDING`/`RELATIONSHIP_BREAKDOWN`/`RELATIONSHIP_DEEPENING` 各加 `_2`）。
+  - `Agent/state.py`：新增 `review_targets: list[str] | None`。
+  - `test/curate_run.py`：回溯 checkpointer 历史，每轮 `revise_report` 追加落盘 `revise_rounds.jsonl`（按时间序，含 changed）。
+- 测试：新增"增量只评变更集"/"空变更集零 LLM 调用"单测 + 闭环图测试（第 2 轮只评 merge 产物 F_AB、历史可回溯断言）；`test_revise/test_evaluator/test_batch_induction/test_confidence/test_preprocessor/test_clean_corpus` 全过。
+- 实测（并集重跑，2026-08-16）：Abstraction LLM 调用 13–16 → 8 次（全量 4 批 / 增量 30/11/1）；耗时 680s → 515s（-24%）；76 → 57 funcs（同名 0），最终 PASS 6/6；`revise_rounds.jsonl` 记录每轮动作、changed 与 renamed_duplicates。
+- 取舍：首轮 LLM 漏检的函数，增量轮不会自动重抓（可加最后一轮全量终检兜底，未启用）。实测观测：第 1 轮 LLM 对 76 个函数只返回 56 条评审（缺 20），由"缺旧评审兜底"在第 2 轮自动补评，未影响收敛。
+
 ## 下一步
-- Bootstrap 三批完成，120 篇 O_0 快照齐备（`Code/data/genre_functions/`）；Evaluator_v0 已实现并接入 `--batch-induction` 阶段 3（跑完自动评估，报告 `Code/data/evaluation/evaluation_report.json`）。
-- 决策项：同题材 13 组近义 + 跨题材 20 组近义如何合并（人工规则 / 阈值下调 / Evolve Curator MERGE）；4 个题材绑定函数（`SUPERNATURAL_ENCOUNTER` 等）是否 REVISE；Inducer 非确定性（固定候选池 / Run A/B/C）。
-- 进入 Evolve 前一次性补齐（清单见 README「Evolve 阶段待补清单」）：`source_sentence_indices` 采集（需全量重跑回填）、`function_id/status/version_history`、卡片成熟内容由 Curator 生成、命名统一、Matcher/Critic/Curator。
+- Bootstrap 三批完成 + Evaluator/修订闭环已实现（batch_run 阶段 3 / curate_run 独立入口）；并集 O_0 已修订为 57 函数（同名 0）、PASS 6/6（`data/evaluation/union_functions.jsonl`，原 76 备份 `union_functions.orig.jsonl` / `union_functions.jsonl.pre_revise.jsonl`）。
+- 决策项：SPLIT 镜像对近义风险（重跑采样未复现，是否需要豁免名单）；同名 <0.85 函数对唯一化规则；Inducer/闭环 LLM 非确定性（固定候选池 / Run A/B/C）。
+- 进入 Evolve 前一次性补齐（清单见 README「Evolve 阶段待补清单」）：`source_sentence_indices` 采集（需全量重跑回填）、`function_id/status/version_history`、卡片成熟内容由 Curator 生成、命名统一、Matcher/Critic/Curator（Matcher 仍是 Evolve 专属，revise_node 只做 bootstrap 内收敛）。
 - 三个过期测试（`test_app.py` 等）去留未定。
 
 ## 踩过的坑（不要再踩）

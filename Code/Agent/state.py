@@ -39,6 +39,7 @@ class NarrativePipelineState(TypedDict):
     evaluation_context: dict | None  # 评估上下文（registry_file/bank_file/manifest_path/report_path）
     revise_report: dict | None  # 修订节点输出（合并/修订/拆分/移除清单）
     evaluation_round: int  # curate_app 修订轮次计数
+    review_targets: list[str] | None  # 下一轮 Abstraction 复核目标（修订变更集；None=全量复核）
 
     # ---- 流程控制 ----
     current_story_index: int

@@ -227,6 +227,58 @@ def test_evaluator_node():
         print("evaluator_node（mock LLM）: OK")
 
 
+def test_incremental_abstraction_review():
+    obs, funcs = make_set()
+    prev = make_reviews(funcs, ok=True)
+    calls = {"n": 0}
+
+    def fake(messages, schema, **kw):
+        calls["n"] += 1
+        cards = json.loads(messages[1]["content"].split("\n", 1)[1])
+        return EvaluatorReviewResponse(reviews=[
+            FunctionQualityReview(
+                function_name=c["function_name"], bidirectional_conflation=False, conflation_reason="",
+                genre_surface_binding=False, binding_reason="", granularity="ok", recommendation="OK",
+            ) for c in cards
+        ])
+
+    orig = ev_module.chat_structured
+    ev_module.chat_structured = fake
+    try:
+        reviews, errors, reviewed_n, reused_n = ev_module._review_abstraction(
+            funcs, review_targets=["F_B"], prev_reviews=prev)
+    finally:
+        ev_module.chat_structured = orig
+    assert calls["n"] == 1, calls  # 只复评 F_B（一批）
+    assert len(reviews) == 2 and not errors, (reviews, errors)
+    by_name = {r["function_name"]: r for r in reviews}
+    assert by_name["F_A"] == prev[0], by_name  # 未变更函数沿用旧评审
+    assert by_name["F_B"]["recommendation"] == "OK", by_name
+    assert reviewed_n == 1 and reused_n == 1, (reviewed_n, reused_n)
+    print("增量 Abstraction 复核（只评变更集）: OK")
+
+
+def test_incremental_review_empty_targets():
+    obs, funcs = make_set()
+    prev = make_reviews(funcs, ok=True)
+    calls = {"n": 0}
+
+    def fake(messages, schema, **kw):
+        calls["n"] += 1
+        raise AssertionError("空变更集不应调用 LLM")
+
+    orig = ev_module.chat_structured
+    ev_module.chat_structured = fake
+    try:
+        reviews, errors, reviewed_n, reused_n = ev_module._review_abstraction(
+            funcs, review_targets=[], prev_reviews=prev)
+    finally:
+        ev_module.chat_structured = orig
+    assert calls["n"] == 0, calls
+    assert len(reviews) == 2 and reviewed_n == 0 and reused_n == 2, (reviewed_n, reused_n)
+    print("增量复核空变更集（零 LLM 调用）: OK")
+
+
 def test_empty_registry():
     with tempfile.TemporaryDirectory() as tmp:
         bank_path = os.path.join(tmp, "observations.jsonl")
@@ -251,4 +303,6 @@ if __name__ == "__main__":
     test_pass_and_fail_logic()
     test_evaluator_node()
     test_empty_registry()
+    test_incremental_abstraction_review()
+    test_incremental_review_empty_targets()
     print("\n全部 Evaluator_v0 测试通过")

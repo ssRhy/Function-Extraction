@@ -92,6 +92,21 @@ def test_assign_split_obs():
     print("SPLIT obs 确定性分配: OK")
 
 
+def test_dedup_names():
+    funcs = [
+        {"function_name": "A", "definition": "一"},
+        {"function_name": "B", "definition": "二"},
+        {"function_name": "A", "definition": "三（撞名）"},
+        {"function_name": "A", "definition": "四（再撞名）"},
+    ]
+    out, renames = revise._dedup_names(funcs)
+    names = [f["function_name"] for f in out]
+    assert names == ["A", "B", "A_2", "A_3"], names
+    assert renames == {"A": "A_2"}, renames  # 同名多次出现时保留首次映射
+    assert out[2]["definition"] == "三（撞名）" and out[3]["definition"] == "四（再撞名）"
+    print("同名去重（_N 后缀 + 映射）: OK")
+
+
 def test_story_count():
     obs_by_id = {"o1": _obs("s1", "o1"), "o2": _obs("s1", "o2"), "o3": _obs("s2", "o3")}
     assert revise._story_count(["o1", "o2", "o3"], obs_by_id) == 2
@@ -125,8 +140,14 @@ def test_revise_node_actions():
         ("s13", "e1"), ("s13", "e2"),
         ("s13", "f1"), ("s13", "f2"), ("s14", "f3"), ("s15", "f4"),
     ]):
-        text = "角色发现关键线索并告知同伴，局势随之改变" if oid.startswith("d") else "角色获得关键信息，改变了对局面的认知"
-        obs.append(_obs(sid, oid, text))
+        if oid.startswith("d"):
+            obs.append({"obs_id": oid, "story_id": sid,
+                        "before_state": "角色发现关键线索",
+                        "event": "角色把关键线索告知同伴",
+                        "after_state": "局势随之改变",
+                        "surface_form": "传递线索"})
+        else:
+            obs.append(_obs(sid, oid, "角色获得关键信息，改变了对局面的认知"))
     funcs = [
         {"function_name": "F_A", "definition": "角色获知关键信息，改变认知或推动行动", "supporting_obs_ids": ["a1", "a2", "a3", "a4"], "realization_patterns": ["发现线索"], "hard_negatives": [], "confusable_functions": []},
         {"function_name": "F_B", "definition": "角色获知关键信息并据此行动", "supporting_obs_ids": ["b1", "b2", "b3", "b4"], "realization_patterns": ["获得情报"], "hard_negatives": [], "confusable_functions": []},
@@ -199,12 +220,14 @@ def test_revise_node_actions():
         assert any(r["function_name"] == "F_E" for r in actions["removed"]), actions["removed"]
         assert actions["weak_fit_removed"] == 1, actions
         assert result["evaluation_round"] == 1
+        expected_targets = {"F_AB", "F_C2"}.union({n for s in actions["split"] for n in s["split_into"]})
+        assert set(result["review_targets"]) == expected_targets, result["review_targets"]
 
         with open(reg, "r", encoding="utf-8") as f:
             written = [json.loads(l) for l in f if l.strip()]
         names = {w["function_name"] for w in written}
         assert "F_AB" in names and "F_C2" in names and "F_E" not in names and "F_F" in names, names
-        assert any(n.startswith("D_REVEAL") for n in names), names
+        assert any(n.startswith("D_") for n in names), names
         ff = next(w for w in written if w["function_name"] == "F_F")
         assert "f1" not in ff["supporting_obs_ids"], ff
         assert os.path.exists(reg + ".pre_revise.jsonl")
@@ -236,6 +259,78 @@ def test_curate_max_rounds():
     finally:
         revise.MAX_EVAL_ROUNDS = orig
     print("curate_app 达上限强制终止: OK")
+
+
+def test_curate_incremental_review():
+    from Agent.app import curate_app
+    obs = []
+    for sid, oid in [("s1","a1"),("s1","a2"),("s2","a3"),("s3","a4"),
+                     ("s4","b1"),("s5","b2"),("s5","b3"),("s6","b4")]:
+        obs.append(_obs(sid, oid, "角色获知关键信息，改变了对局面的认知"))
+    funcs = [
+        {"function_name": "F_A", "definition": "角色获知关键信息并据此行动",
+         "supporting_obs_ids": ["a1","a2","a3","a4"], "realization_patterns": ["发现线索"],
+         "hard_negatives": [], "confusable_functions": []},
+        {"function_name": "F_B", "definition": "角色获知关键信息并据此行动",
+         "supporting_obs_ids": ["b1","b2","b3","b4"], "realization_patterns": ["获得情报"],
+         "hard_negatives": [], "confusable_functions": []},
+    ]
+    calls = {"n": 0}
+
+    def fake_eval(messages, schema, **kw):
+        cards = json.loads(messages[1]["content"].split("\n", 1)[1])
+        calls["n"] += 1
+        calls[calls["n"]] = [c["function_name"] for c in cards]
+        return EvaluatorReviewResponse(reviews=[
+            FunctionQualityReview(
+                function_name=c["function_name"], bidirectional_conflation=False, conflation_reason="",
+                genre_surface_binding=False, binding_reason="", granularity="ok", recommendation="OK",
+            ) for c in cards
+        ])
+
+    def fake_revise(messages, schema, **kw):
+        return MergeResponse(merged_functions=[MergedFunction(
+            function_name="F_AB", definition="角色获知关键信息并据此行动",
+            realization_patterns=["发现线索", "获得情报"],
+            hard_negatives=[], confusable_functions=[],
+        )])
+
+    orig_eval, orig_revise = ev_module.chat_structured, revise.chat_structured
+    max_rounds = revise.MAX_EVAL_ROUNDS
+    revise.MAX_EVAL_ROUNDS = 1
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = os.path.join(tmp, "functions.jsonl")
+            bank = os.path.join(tmp, "observations.jsonl")
+            report_path = os.path.join(tmp, "report.json")
+            _write_lines(reg, funcs)
+            _write_lines(bank, obs)
+            ev_module.chat_structured, revise.chat_structured = fake_eval, fake_revise
+            result = curate_app.invoke({
+                "messages": [],
+                "evaluation_context": {"registry_file": reg, "bank_file": bank, "report_path": report_path},
+                "evaluation_round": 0,
+            }, config={"configurable": {"thread_id": "curate-inc"}})
+            assert result["evaluation_round"] == 1, result
+            assert calls["n"] == 2, calls  # 第 1 轮全量 + 第 2 轮增量
+            assert calls[1] == ["F_A", "F_B"], calls
+            assert calls[2] == ["F_AB"], calls
+            with open(reg, "r", encoding="utf-8") as f:
+                names = {json.loads(l)["function_name"] for l in f if l.strip()}
+            assert names == {"F_AB"}, names
+            # curate_run 落盘依赖：checkpointer 历史可回溯每轮 revise_report
+            rounds = []
+            for snap in curate_app.get_state_history({"configurable": {"thread_id": "curate-inc"}}):
+                rr = (snap.values or {}).get("revise_report")
+                if rr and rr.get("before_count") is not None and rr not in rounds:
+                    rounds.append(rr)
+            assert len(rounds) == 1, rounds
+            assert rounds[0]["merged"][0]["merged_as"] == "F_AB", rounds
+            assert rounds[0]["changed"] == ["F_AB"], rounds
+    finally:
+        ev_module.chat_structured, revise.chat_structured = orig_eval, orig_revise
+        revise.MAX_EVAL_ROUNDS = max_rounds
+    print("curate_app 增量复核（第 2 轮只评 merge 产物）+ 轮次历史回溯: OK")
 
 
 def test_curate_pass_early():
@@ -272,9 +367,11 @@ def test_curate_pass_early():
 if __name__ == "__main__":
     test_union_supporting()
     test_assign_split_obs()
+    test_dedup_names()
     test_story_count()
     test_recalc_confidence_stub()
     test_revise_node_actions()
     test_curate_max_rounds()
     test_curate_pass_early()
+    test_curate_incremental_review()
     print("\n全部 Revise/curate_app 测试通过")

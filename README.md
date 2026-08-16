@@ -13,7 +13,9 @@ Corpus → Pre-Processor → Observer → Observation Bank
                                        ↓
                                  Retrieval → Inducer → Function Registry (O_0)
                                                             ↓
-                                                   Evaluator_v0 → Evolve
+                                          Evaluator_v0 ⇄ Revise（curate_app 闭环）
+                                                            ↓
+                                                         Evolve
 ```
 
 1. **Pre-Processor** — 读取清洗后故事文本，调用 LLM 按叙事结构分句分段（V2 prompt：`segments` 只输出句子索引、不重复全文，输出量 -40%；LLM 缺 `sentences`/解析失败/分句塌缩时用规则 `。！？` 切句兜底）
@@ -21,7 +23,7 @@ Corpus → Pre-Processor → Observer → Observation Bank
 3. **Observation Bank** — 持久化存储 + 向量索引（ChromaDB + JSONL）
 4. **Retrieval** — 跨故事语义检索
 5. **Inducer** — 从跨故事相似 Observation 归纳 Function，多因子置信度过滤后 upsert 写入 Registry（同名/近义只保留最高置信度）
-6. **Evaluator_v0** — 批后六维本体评估（Coverage 覆盖率 / Cohesion 内聚度 / Separation 分离度 / Abstraction Quality 抽象质量 / Evidence Count 证据量 / Diversity 语料多样性）；>=4/6 达标通过，FAIL 输出优化建议（近义合并组、待修订定义、weak-fit obs、题材绑定函数、低证据函数）；由 batch_run 阶段 2 归纳完成后直接调用 `evaluator_node`
+6. **Evaluator_v0 + 自动修订闭环（curate_app）** — 批后六维本体评估（Coverage / Cohesion / Separation / Abstraction Quality / Evidence Count / Diversity），>=4/6 达标；FAIL 或仍有可执行问题（近义合并组、待修订定义、题材绑定、粒度、weak-fit obs、低证据函数）时由 `revise_node` 全自动修订（MERGE / REVISE / SPLIT / 剔除 / 移除）并写回 O_0，再评估直到 PASS 或达 3 轮上限；嵌入 batch_run 阶段 3，也可用 `curate_run.py` 对任意快照/并集跑闭环
 
 ## 目录结构
 
@@ -38,6 +40,7 @@ Code/
 │   ├── Inducer/confidence.py      # 多因子加权置信度计算
 │   ├── Evaluator/evaluator.py     # Evaluator 节点：六维评估 + PASS/FAIL + 建议清单
 │   ├── Evaluator/dimensions.py    # 六维纯函数与阈值（无 LLM、可复现）
+│   ├── Evaluator/revise.py        # 修订节点：MERGE/REVISE/SPLIT + weak-fit 剔除 + 写回
 │   └── data/registry/functions.jsonl  # Function Registry
 ├── Bank/
 │   └── bank.py             # ObservationBank：ChromaDB + JSONL 双存储（data/observations.jsonl）
@@ -49,12 +52,17 @@ Code/
 │   ├── Pre_prompt.py       # Pre-Processor 系统提示词
 │   ├── Observer_prompt.py  # Observer 系统提示词
 │   ├── Inducer_prompt.py   # Inducer 系统提示词
-│   └── Evaluator_prompt.py # Evaluator 抽象质量复核提示词
+│   ├── Evaluator_prompt.py # Evaluator 抽象质量复核提示词
+│   ├── Merge_prompt.py     # 近义组合并提示词
+│   └── Revise_prompt.py    # 定义修订/拆分提示词
 ├── test/
 │   ├── batch_run.py        # 批量运行入口（--limit / --corpus / --stories / --genre / --batch-induction / --out-dir）
 │   ├── clean_corpus.py     # 语料清洗（脚注/促销/碎片行/数字标记）
 │   ├── genre_extract.py    # 题材快照 Function 清单 + 跨题材近义组摘要
 │   ├── test_evaluator.py   # Evaluator_v0 六维评估测试（单元 + mock LLM 节点）
+│   ├── test_revise.py      # 修订节点 + curate_app 闭环测试（mock LLM）
+│   ├── curate_run.py       # 评估 + 自动修订闭环独立入口（--registry/--bank/--manifest/--report/--max-rounds/--no-revise）
+│   ├── gen_evaluation_report.py  # 纯评估入口（三题材并集报告）
 │   ├── test_batch_induction.py  # 批后归纳聚类纯函数测试（无 LLM）
 │   ├── test_preprocessor.py # Pre-Processor 测试（mock LLM）
 │   ├── test_confidence.py  # 置信度计算测试
@@ -90,6 +98,22 @@ python test/batch_run.py --corpus zhihu_story_subset_120_20260815 \
 - `--genre <category>`：按 manifest `category`（=顶层目录名）过滤语料（如 `--genre 01_悬疑惊悚`）
 - `--batch-induction`：两阶段模式——阶段 1 逐篇提取 obs（Function=0），阶段 2 跨故事统一归纳；归纳完成后自动触发阶段 3 Evaluator_v0 六维评估
 - `--out-dir <path>`：跑完后把 Registry/Bank 快照为 `functions_<category>.jsonl` / `bank_<category>.jsonl`
+
+### 评估 + 自动修订闭环（curate_app）
+
+```bash
+cd Code
+# 对三题材并集跑闭环：评估 → 发现问题 LLM 自动修订 → 再评估，直到 PASS 或达 3 轮
+python test/curate_run.py --registry data/evaluation/union_functions.jsonl \
+    --bank data/evaluation/union_obs.jsonl \
+    --manifest zhihu_story_subset_120_20260815_clean/manifest.json
+python test/curate_run.py --no-revise ...        # 仅评估（等价 gen_evaluation_report.py）
+python test/curate_run.py --max-rounds 2 ...     # 覆盖默认修订轮数
+```
+
+- 修订动作：近义 MERGE（supporting obs 程序并集）、定义 REVISE、SPLIT（obs 按向量余弦确定性分配）、weak-fit 剔除、低证据移除、同名去重（LLM 撞名加 `_2/_3` 后缀，保证 O_0 函数名唯一）；被改函数置信度按 bootstrap 豁免口径重算
+- 写回前备份为 `<registry>.pre_revise.jsonl`；最终修订报告落盘 `data/evaluation/revise_report.json`，每轮动作追加落盘 `data/evaluation/revise_rounds.jsonl`（含 merged/revised/split 与 `changed` 变更集）
+- Abstraction 复核为"首轮全量 + 后续轮增量"：`revise_node` 记录 `changed`（merge 产物 / revised / split 子函数）回传 `review_targets`，`evaluator_node` 只重评变更集、未变更函数按 function_name 沿用旧评审（`_review_abstraction(review_targets, prev_reviews)`）；确定性五维仍每轮全量计算（向量秒级）
 
 ### 语料清洗
 
@@ -171,7 +195,7 @@ python test/test_batch_induction.py  # 批后归纳聚类纯函数（无 LLM）
 
 ## Evaluator_v0 六维评估
 
-批后六维本体评估（`Agent/Evaluator/`）：在 `--batch-induction` 阶段 2 归纳完所有候选 Function 后，`evaluator_node` 一次性评估初始本体 O_0。评估对象 = 当次 Registry + Bank，可用 `evaluation_context`（`registry_file`/`bank_file`/`manifest_path`/`report_path`）覆盖路径、对三题材快照并集评估。报告落盘 `Code/data/evaluation/evaluation_report.json`；PASS/FAIL = 达标维度 ≥ 4/6；FAIL 只输出建议清单，不自动退回 Inducer（自动重试/扩语料留待 Evolve）。
+批后六维本体评估（`Agent/Evaluator/`）：`evaluator_node` 评估初始本体 O_0，`revise_node` 消费报告全自动修订并写回，`curate_app` 编译图把两者连成闭环（`START → evaluator → conditional → revise → evaluator … → END`）：FAIL 或报告仍有可执行问题（`merge_groups`/`revise_definitions`/`genre_bound_functions`/`granularity_issues`/`weak_fit_obs`/`low_evidence_functions`）时进入修订，再评估直到 PASS 或达 `MAX_EVAL_ROUNDS`（3 轮）。评估对象 = 当次 Registry + Bank，可用 `evaluation_context`（`registry_file`/`bank_file`/`manifest_path`/`report_path`）覆盖路径、对三题材快照并集评估。报告落盘 `Code/data/evaluation/evaluation_report.json`；PASS = 达标维度 ≥ 4/6；修订写回前备份 `<registry>.pre_revise.jsonl`。`revise_node` 是 bootstrap 内嵌 Curator-lite（O_0 内部质量收敛，≤3 轮即止），不替代 Evolve 阶段的 Matcher/Critic/Curator。Abstraction 复核为"首轮全量 + 后续轮增量"（只重评变更集，未变更函数沿用旧评审），确定性五维每轮全量。
 
 | 维度 | 含义 | 达标条件（默认阈值） |
 |------|------|----------------------|
@@ -184,7 +208,8 @@ python test/test_batch_induction.py  # 批后归纳聚类纯函数（无 LLM）
 
 - 阈值集中在 `dimensions.py` 顶部，按 MiniLM 中文分布校准：Coverage 相似 0.65（中文基线 0.5-0.6）、Cohesion 0.60、weak-fit 0.70（0.80 在 76 函数真实集标 49 条过噪，<0.70 仅 5 条真离群）、Separation 分组 0.85（对齐 `NEAR_DUP_THRESHOLD`）+ 复核列表 0.78（0.78 分组会串出巨型连通分量，故降级为建议列表）。
 - 双向混叠规则预筛（方向词对检测）作为 LLM 复核 prompt 种子；Abstraction 用 LLM（与 Inducer 一致的非确定性），其余 5 维确定性可复现。
-- 集成验收（三题材快照并集 76 funcs / 831 obs + manifest，2026-08-16）：PASS 5/6（Separation FAIL）；coverage=0.83、cohesion=0.88、separation=13、abstraction=0.83、evidence=3.78、diversity=3。建议清单含 13 组近义（如 `INFORMATION_REVELATION`≈`RELATIONSHIP_BREAKDOWN` 0.908、`CONFLICT_RESOLUTION`≈`RELATIONSHIP_STRENGTHENING` 0.995）、4 个题材绑定函数（`SUPERNATURAL_ENCOUNTER`/`FATE_REWRITING`/`SECOND_CHANCE`/`FATE_CHANGE_DECISION`）、7 个双向混叠 REVISE、5 条 weak-fit 离群 obs。
+- 集成验收一（三题材快照并集 76 funcs / 831 obs + manifest，2026-08-16）：PASS 5/6（Separation FAIL）；coverage=0.83、cohesion=0.88、separation=13、abstraction=0.83、evidence=3.78、diversity=3。建议清单含 13 组近义（如 `INFORMATION_REVELATION`≈`RELATIONSHIP_BREAKDOWN` 0.908、`CONFLICT_RESOLUTION`≈`RELATIONSHIP_STRENGTHENING` 0.995）、4 个题材绑定函数（`SUPERNATURAL_ENCOUNTER`/`FATE_REWRITING`/`SECOND_CHANCE`/`FATE_CHANGE_DECISION`）、7 个双向混叠 REVISE、5 条 weak-fit 离群 obs。
+- 闭环验收（curate_app 并集 3 轮，2026-08-16 增量复核 + 同名去重后）：76 → 57 funcs（同名 0）；Separation 13 → 0；题材绑定/粒度/weak-fit/低证据全部清零；Abstraction 0.965、evidence mean_obs 4.65；coverage 0.81 / cohesion 0.87 / diversity 3；耗时 515s（增量复核实测：Abstraction LLM 调用 13–16 → 8 次，680s → 515s，-24%）；最终 PASS 6/6。报告 `evaluation_report.json` + `revise_report.json` + 每轮 `revise_rounds.jsonl`（含 renamed_duplicates）。（历史：全量复核版 76 → 56 / PASS 6/6 / 680s；增量版 76 → 59 / PASS 6/6 / 535s；首采样 76 → 57 / PASS 5/6 残留 2 组 SPLIT 镜像近义；LLM 非确定性，交付物以最新为准。）
 
 ## 置信度计算
 
@@ -238,7 +263,9 @@ confidence = 0.3 × diversity + 0.3 × coherence + 0.2 × surface - 0.2 × confu
 6. **Inducer 非确定性**：同一批语料两次运行 Function 名称/数量不同（LLM 候选生成随机），影响可复现；评价阶段需固定候选池或 Run A/B/C 对齐。
 7. **LLM 分句偶发塌缩为 1 句（已兜底）**：`sentences=[全文]` 时 Observer 仍能提取 obs 但粒度变粗；2026-08-16 已加塌缩检测（LLM 返回句子数 < 文本句末标点数/3 时改用规则切句），`test_preprocessor.py` 新增回归用例。
 8. **跨题材近义组（三题材对比，2026-08-16）**：120 篇快照间定义相似度 >0.85 的跨题材 Function 对 20 组（如 `REVELATION_OF_HIDDEN_TRUTH` ≈ `SECRET_DISCOVERY` sim=0.970），多为题材语义交叠；bootstrap 按题材隔离不合并，Evolve 阶段需决策跨题材统一与 0.85 阈值调参。
-9. **Evaluator_v0 验收发现（2026-08-16）**：三题材并集评估 PASS 5/6（Separation FAIL）——13 组同题材近义、4 个题材绑定函数（`SUPERNATURAL_ENCOUNTER`/`FATE_REWRITING`/`SECOND_CHANCE`/`FATE_CHANGE_DECISION`）、7 个双向混叠 REVISE 建议、5 条 weak-fit 离群 obs；均已进建议清单，Evolve 阶段处理。
+9. **Evaluator_v0 验收发现（2026-08-16）**：三题材并集评估 PASS 5/6（Separation FAIL）——13 组同题材近义、4 个题材绑定函数、7 个双向混叠 REVISE、5 条 weak-fit 离群 obs；已由 curate_app 闭环自动修订（76 → 57 funcs、同名 0，题材绑定/粒度/weak-fit/低证据清零，最终 PASS 6/6）。
+10. **SPLIT 镜像近义风险（2026-08-16）**：首采样闭环第 2/3 轮出现 SPLIT 拆出的正/负镜像对（`POSITIVE_TURNING_POINT`≈`NEGATIVE_TURNING_POINT` 0.982、`THREAT_ENCOUNTER`≈`RELATIONSHIP_IMPROVEMENT` 0.901）被 Separation 标为近义；重跑采样未复现（Separation 归零、PASS 6/6），但 LLM 非确定性下该风险仍在，Evolve 阶段可考虑同源 SPLIT 对豁免名单。
+11. **同名碰撞（2026-08-16）**：并集存在同名但定义相似度 <0.85 的函数对（如 `RELATIONSHIP_FORMATION`、`INFORMATION_REVELATION`），低于分组阈值未触发合并，落在 `near_dup_review_pairs`；Evolve 阶段需决策同名唯一化规则。
 
 
 ## Evolve 阶段待补清单（bootstrap 后一次性补齐）

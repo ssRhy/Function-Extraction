@@ -10,13 +10,18 @@ graph TD;
 	bank_adder(bank_adder)
 	retrieval(retrieval)
 	inducer(inducer)
+	evaluator(evaluator)
+	revise(revise)
 	__end__([<p>__end__</p>]):::last
 	__start__ --> preprocessor;
 	bank_adder --> retrieval;
+	evaluator -. &nbsp;end&nbsp; .-> __end__;
+	evaluator -.-> revise;
+	inducer --> evaluator;
 	observer --> bank_adder;
 	preprocessor --> observer;
 	retrieval --> inducer;
-	inducer --> __end__;
+	revise --> evaluator;
 	classDef default fill:#f2f0ff,line-height:1.2
 	classDef first fill-opacity:0
 	classDef last fill:#bfb6fc

@@ -77,6 +77,24 @@ def _build_positive_examples(supporting_obs_ids: list[str], obs_by_id: dict, lim
     return examples
 
 
+def _dedup_names(funcs: list[dict]) -> tuple[list[dict], dict[str, str]]:
+    """同名函数加确定性后缀（_2/_3），保证 O_0 函数名唯一；返回 (去重后列表, 旧名->新名映射)。"""
+    seen, out, renames = set(), [], {}
+    for f in funcs:
+        name = f.get("function_name", "") or "UNNAMED"
+        base, i = name, 1
+        while base in seen:
+            i += 1
+            base = f"{name}_{i}"
+        seen.add(base)
+        if base != name:
+            f["function_name"] = base
+            if name not in renames:  # 同名多次出现时保留首次映射（best-effort，用于报告同步）
+                renames[name] = base
+        out.append(f)
+    return out, renames
+
+
 def _union_supporting(members: list[dict]) -> list[str]:
     merged = []
     for m in members:
@@ -237,6 +255,7 @@ def revise_node(state: dict) -> dict:
     targets = _collect_revise_targets(report)
 
     consumed: set[str] = set()
+    changed_names: set[str] = set()
     new_funcs: list[dict] = []
     actions = {
         "merged": [], "revised": [], "split": [], "removed": [],
@@ -257,6 +276,7 @@ def revise_node(state: dict) -> dict:
         new_funcs.append(merged)
         names = [m.get("function_name") for m in members]
         consumed.update(names)
+        changed_names.add(merged.get("function_name"))
         actions["merged"].append({"group": names, "merged_as": merged.get("function_name")})
 
     # 2) 定义 REVISE / SPLIT（跳过已合并/已移除函数）
@@ -275,6 +295,7 @@ def revise_node(state: dict) -> dict:
             revised["positive_examples"] = _build_positive_examples(base_sup, obs_by_id)
             _recalc_confidence(revised, obs_by_id, embedder)
             new_funcs.append(revised)
+            changed_names.add(revised.get("function_name"))
             actions["revised"].append({"function_name": name, "revised_as": revised.get("function_name")})
         else:
             kept, dropped = _assign_split_obs(base_sup, obs_by_id, out, embedder)
@@ -282,6 +303,7 @@ def revise_node(state: dict) -> dict:
                 actions["failed"].append({"action": "split", "function_name": name, "reason": "子函数均无匹配 obs，保留原函数"})
                 continue
             new_funcs.extend(kept)
+            changed_names.update(f.get("function_name") for f in kept)
             actions["split"].append({
                 "function_name": name,
                 "split_into": [f.get("function_name") for f in kept],
@@ -317,7 +339,21 @@ def revise_node(state: dict) -> dict:
             actions["removed"].append({"function_name": f.get("function_name"), "reason": "修订后支持故事 <2"})
         else:
             final.append(f)
+    # 同名去重：LLM 生成的 merge/revise/split 名字可能与存量函数撞名，加 _N 后缀保证唯一
+    final, renames = _dedup_names(final)
+    if renames:
+        actions["renamed_duplicates"] = renames
+        for m in actions["merged"]:
+            m["merged_as"] = renames.get(m["merged_as"], m["merged_as"])
+        for r in actions["revised"]:
+            r["revised_as"] = renames.get(r["revised_as"], r["revised_as"])
+        for s in actions["split"]:
+            s["split_into"] = [renames.get(n, n) for n in s["split_into"]]
+        for r in actions["removed"]:
+            r["function_name"] = renames.get(r["function_name"], r["function_name"])
+        changed_names = {renames.get(n, n) for n in changed_names}
     actions["recheck_removed"] = recheck
+    actions["changed"] = sorted(changed_names)
     actions["before_count"] = len(functions)
     actions["after_count"] = len(final)
 
@@ -336,6 +372,7 @@ def revise_node(state: dict) -> dict:
 
     return {
         "revise_report": actions,
+        "review_targets": sorted(changed_names),
         "evaluation_round": state.get("evaluation_round", 0) + 1,
         "messages": [{
             "role": "system",

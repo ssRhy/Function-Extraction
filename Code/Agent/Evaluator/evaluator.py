@@ -24,7 +24,7 @@ from Prompt.Evaluator_prompt import (
     EvaluatorReviewResponse,
 )
 
-_EVAL_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "evaluation")
+_EVAL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data", "evaluation")
 _DEFAULT_REPORT_PATH = os.path.join(_EVAL_DIR, "evaluation_report.json")
 _REVIEW_BATCH_SIZE = 20  # 每次 LLM 复核最多容纳的函数数
 
@@ -89,11 +89,33 @@ def _function_genres(functions, obs_by_id, story_to_category) -> dict:
     return result
 
 
-def _review_abstraction(functions: list[dict]) -> tuple[list[dict], list[str]]:
-    """LLM 逐批复核抽象质量；某批失败时退回规则预筛（该批缺失），记录错误。"""
+def _review_abstraction(
+    functions: list[dict],
+    review_targets: list[str] | None = None,
+    prev_reviews: list[dict] | None = None,
+) -> tuple[list[dict], list[str], int, int]:
+    """LLM 逐批复核抽象质量；某批失败时退回规则预筛（该批缺失），记录错误。
+
+    review_targets=None 时全量复核（首轮）；否则只复核变更集（review_targets
+    命中的函数 + 缺少旧评审的函数），未变更函数沿用 prev_reviews（按 function_name 复用）。
+    返回 (合并后评审列表, 错误, 本轮新评审数, 复用旧评审数)。
+    """
+    if review_targets is None:
+        to_review = list(functions)
+        prev_by_name = {}
+    else:
+        target_set = set(review_targets)
+        prev_by_name = {r.get("function_name"): r for r in (prev_reviews or [])}
+        to_review, seen = [], set()
+        for f in functions:
+            name = f.get("function_name")
+            if name in target_set or name not in prev_by_name:
+                if name not in seen:
+                    seen.add(name)
+                    to_review.append(f)
     reviews, errors = [], []
-    for start in range(0, len(functions), _REVIEW_BATCH_SIZE):
-        batch = functions[start:start + _REVIEW_BATCH_SIZE]
+    for start in range(0, len(to_review), _REVIEW_BATCH_SIZE):
+        batch = to_review[start:start + _REVIEW_BATCH_SIZE]
         hits = detect_bidirectional_conflation([f.get("definition", "") for f in batch])
         cards = []
         for f, hit in zip(batch, hits):
@@ -114,7 +136,16 @@ def _review_abstraction(functions: list[dict]) -> tuple[list[dict], list[str]]:
             reviews.extend(r.model_dump() for r in result.reviews)
         except Exception as e:
             errors.append(f"batch@{start}: {e}")
-    return reviews, errors
+    merged = dict(prev_by_name)
+    for r in reviews:
+        merged[r.get("function_name")] = r
+    final_reviews = [merged[f.get("function_name")] for f in functions if f.get("function_name") in merged]
+    new_names = {r.get("function_name") for r in reviews}
+    reused = sum(
+        1 for f in functions
+        if f.get("function_name") in prev_by_name and f.get("function_name") not in new_names
+    )
+    return final_reviews, errors, len(reviews), reused
 
 
 def _print_summary(report: dict) -> None:
@@ -171,7 +202,15 @@ def evaluator_node(state: dict) -> dict:
         embedder = get_bank().embedder
 
     story_to_category = _load_story_category_map(context.get("manifest_path"))
-    reviews, review_errors = _review_abstraction(functions)
+    prev_report = state.get("evaluation_report") or {}
+    prev_reviews = prev_report.get("abstraction_reviews")
+    review_targets = state.get("review_targets")
+    if review_targets is None:
+        review_targets = (state.get("revise_report") or {}).get("changed")
+    reviews, review_errors, reviewed_n, reused_n = _review_abstraction(
+        functions, review_targets=review_targets, prev_reviews=prev_reviews,
+    )
+    print(f"[Evaluator_v0] Abstraction 复核: {'增量' if review_targets else '全量'} {reviewed_n} 个 / 复用 {reused_n} 个")
     report = evaluate_function_set(
         functions,
         all_obs,
@@ -181,6 +220,8 @@ def evaluator_node(state: dict) -> dict:
     )
     if reviews:
         report["abstraction_reviews"] = reviews
+    report["abstraction_reviewed"] = reviewed_n
+    report["abstraction_reused"] = reused_n
     if review_errors:
         report["review_errors"] = review_errors
     obs_by_id = {o.get("obs_id"): o for o in all_obs}
@@ -197,5 +238,6 @@ def evaluator_node(state: dict) -> dict:
         "evaluation_report": report,
         "evaluator_decision": verdict,
         "next_node": "registry_init" if verdict == "PASS" else "inducer_retry",
+        "review_targets": None,
         "messages": [{"role": "system", "content": f"[Evaluator_v0] {verdict}（达标 {len(report['passed_dimensions'])}/6）"}],
     }

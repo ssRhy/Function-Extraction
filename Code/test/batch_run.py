@@ -201,7 +201,7 @@ if args.batch_induction:
             "messages": [],
             "evaluation_context": eval_context,
             "evaluation_round": 0,
-        })
+        }, config={"configurable": {"thread_id": "curate-batch"}})
         decision = result.get("evaluator_decision")
         report = result.get("evaluation_report", {})
         rev = result.get("revise_report") or {}

@@ -89,13 +89,33 @@ from Agent.Evaluator import revise as revise_module
 from Agent.Evaluator.revise import revise_node
 
 
+_ACTIONABLE_KEYS = (
+    "merge_groups",
+    "revise_definitions",
+    "genre_bound_functions",
+    "granularity_issues",
+    "weak_fit_obs",
+    "low_evidence_functions",
+)
+
+
+def _has_actionable_issues(report) -> bool:
+    """报告里还有可执行的修订动作（近义组/待修订/题材绑定/粒度/weak-fit/低证据）。"""
+    if not report:
+        return False
+    rec = report.get("recommendations") or {}
+    return any(rec.get(k) for k in _ACTIONABLE_KEYS)
+
+
 def should_continue(state: NarrativePipelineState) -> str:
-    """curate_app 循环路由：PASS 或达修订轮数上限则结束，否则进入修订。"""
-    if state.get("evaluator_decision") == "PASS":
-        return "end"
+    """curate_app 循环路由：达修订轮数上限则结束；FAIL 或仍有可执行问题则修订，否则结束。"""
     if state.get("evaluation_round", 0) >= revise_module.MAX_EVAL_ROUNDS:
         return "end"
-    return "revise"
+    if state.get("evaluator_decision") == "FAIL":
+        return "revise"
+    if _has_actionable_issues(state.get("evaluation_report")):
+        return "revise"
+    return "end"
 
 
 def build_curate_graph() -> StateGraph:
