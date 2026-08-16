@@ -12,6 +12,7 @@ import types
 
 from Agent.llm import chat_structured
 from Agent.Inducer.confidence import calculate_confidence_detailed
+from Agent.Registry.registry import get_active_store
 from Agent.Evaluator import evaluator as ev
 from Agent.Evaluator.dimensions import _obs_text, _cosine
 from Prompt.Merge_prompt import MERGE_SYSTEM_PROMPT, MergeResponse
@@ -20,12 +21,6 @@ from Prompt.Revise_prompt import REVISE_SYSTEM_PROMPT, ReviseResponse
 MAX_EVAL_ROUNDS = 3        # 最大修订轮数（curate_run --max-rounds 可覆盖）
 SPLIT_OBS_MIN_SIM = 0.40   # SPLIT 分配：obs 与子函数定义余弦低于该值不归属任何子函数
 LLM_RETRY = 1              # 单次 LLM 动作失败重试次数
-_OBS_POSITIVE_LIMIT = 4
-
-
-def _default_registry_file() -> str:
-    from Agent.Inducer.inducer import _REGISTRY_FILE
-    return _REGISTRY_FILE
 
 
 def _load_report(report_path: str) -> dict | None:
@@ -54,27 +49,6 @@ def _recalc_confidence(func: dict, obs_by_id: dict, embedder) -> dict:
     except Exception:
         pass
     return func
-
-
-def _build_positive_examples(supporting_obs_ids: list[str], obs_by_id: dict, limit: int = _OBS_POSITIVE_LIMIT) -> list[dict]:
-    examples, seen_stories = [], set()
-    for oid in supporting_obs_ids:
-        o = obs_by_id.get(oid)
-        if not o:
-            continue
-        sid = o.get("story_id", "")
-        if sid in seen_stories:
-            continue
-        seen_stories.add(sid)
-        examples.append({
-            "obs_id": oid,
-            "story_id": sid,
-            "raw_surface_form": o.get("surface_form", ""),
-            "event": o.get("event", ""),
-        })
-        if len(examples) >= limit:
-            break
-    return examples
 
 
 def _dedup_names(funcs: list[dict]) -> tuple[list[dict], dict[str, str]]:
@@ -133,7 +107,6 @@ def _llm_merge(members: list[dict], obs_by_id: dict) -> tuple[dict | None, str |
                 raise ValueError("LLM 未返回合并函数")
             merged = merged_list[0]
             merged["supporting_obs_ids"] = _union_supporting(members)
-            merged["positive_examples"] = _build_positive_examples(merged["supporting_obs_ids"], obs_by_id)
             return merged, None
         except Exception as e:
             last_err = str(e)
@@ -191,7 +164,6 @@ def _assign_split_obs(supporting_ids, obs_by_id, sub_funcs, embedder, min_sim: f
     for f, ids in zip(sub_funcs, assigned):
         f["supporting_obs_ids"] = ids
         if ids:
-            f["positive_examples"] = _build_positive_examples(ids, obs_by_id)
             _recalc_confidence(f, obs_by_id, embedder)
             kept.append(f)
     return kept, dropped_obs
@@ -219,7 +191,7 @@ def _collect_revise_targets(report: dict) -> dict:
 def revise_node(state: dict) -> dict:
     """消费评估报告，全自动修订并写回 Registry（O_0 数据源）。"""
     context = state.get("evaluation_context") or {}
-    registry_file = context.get("registry_file") or _default_registry_file()
+    registry_file = context.get("registry_file")
     bank_file = context.get("bank_file")
     report_path = context.get("report_path") or ev._DEFAULT_REPORT_PATH
 
@@ -292,7 +264,6 @@ def revise_node(state: dict) -> dict:
         if len(out) == 1:
             revised = out[0]
             revised["supporting_obs_ids"] = base_sup
-            revised["positive_examples"] = _build_positive_examples(base_sup, obs_by_id)
             _recalc_confidence(revised, obs_by_id, embedder)
             new_funcs.append(revised)
             changed_names.add(revised.get("function_name"))
@@ -361,14 +332,22 @@ def revise_node(state: dict) -> dict:
         actions["merged"] or actions["revised"] or actions["split"]
         or actions["removed"] or actions["weak_fit_removed"] > 0
     )
-    if changed and registry_file and os.path.exists(registry_file):
-        backup = f"{registry_file}.pre_revise.jsonl"
-        if not os.path.exists(backup):
-            shutil.copyfile(registry_file, backup)
-        with open(registry_file, "w", encoding="utf-8") as f:
-            for func in final:
-                f.write(json.dumps(func, ensure_ascii=False) + "\n")
-        actions["backup"] = backup
+    if changed:
+        if registry_file and os.path.exists(registry_file):
+            backup = f"{registry_file}.pre_revise.jsonl"
+            if not os.path.exists(backup):
+                shutil.copyfile(registry_file, backup)
+            with open(registry_file, "w", encoding="utf-8") as f:
+                for func in final:
+                    f.write(json.dumps(func, ensure_ascii=False) + "\n")
+            actions["backup"] = backup
+        else:
+            store = get_active_store()
+            backup = f"{store.db_path}.pre_revise.{store.namespace}.jsonl"
+            if not os.path.exists(backup):
+                store.export_jsonl(backup)
+            store.replace_all(final)
+            actions["backup"] = backup
 
     return {
         "revise_report": actions,

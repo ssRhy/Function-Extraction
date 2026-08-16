@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from Agent.state import NarrativePipelineState
 from Agent.llm import chat_structured
-from Prompt.Pre_prompt import PREPROCESSOR_SYSTEM_PROMPT
+from Prompt.Pre_prompt import PRE_HYBRID_SYSTEM_PROMPT
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？])")
 # 句末标点（可带闭合引号）：用于判断段落是否已收束
@@ -146,6 +146,112 @@ class NormalizedResult(BaseModel):
         object.__setattr__(self, "segments", normalized)
 
 
+# ========== V3 混合切句（规则切句 + LLM 仅修正边界，不回显全文） ==========
+
+class PreSplitItem(BaseModel):
+    index: int = Field(description="需要拆分的规则句子编号（0-based）")
+    parts: int = Field(description="期望拆成几句（>=2）")
+
+
+class PreCorrection(BaseModel):
+    merges: list[list[int]] = Field(default_factory=list, description="需合并的编号组（连续升序、不重叠）")
+    splits: list[PreSplitItem] = Field(default_factory=list, description="需拆分的句子")
+
+
+def _apply_corrections(sentences: list[str], merges: list[list[int]], splits: list[PreSplitItem]) -> list[str]:
+    """应用 LLM 修正：先合并（非法组忽略），再对未合并句按 。！？ 拆分。"""
+    valid = []
+    seen = set()
+    for g in sorted(merges, key=lambda x: min(x) if x else 0):
+        g = sorted(set(g))
+        if len(g) < 2 or any(i < 0 or i >= len(sentences) or i in seen for i in g):
+            continue
+        if not all(g[i] + 1 == g[i + 1] for i in range(len(g) - 1)):
+            continue
+        seen.update(g)
+        valid.append(g)
+    split_set = {s.index for s in splits if 0 <= s.index < len(sentences) and s.parts >= 2}
+    out = []
+    i = 0
+    while i < len(sentences):
+        group = next((g for g in valid if g[0] == i), None)
+        if group:
+            out.append("".join(sentences[j] for j in group))
+            i = group[-1] + 1
+        elif i in split_set:
+            parts = [p.strip() for p in _SENTENCE_SPLIT_RE.split(sentences[i]) if p.strip()]
+            out.extend(parts if len(parts) >= 2 else [sentences[i]])
+            i += 1
+        else:
+            out.append(sentences[i])
+            i += 1
+    return out
+
+
+def _orig_to_final(sentences: list[str], merges: list[list[int]], split_set: set[int]) -> dict[int, int]:
+    """原始规则句子编号 -> 应用合并/拆分后的首个 final 编号（供段落映射）。"""
+    m, fi, i = {}, 0, 0
+    while i < len(sentences):
+        group = next((g for g in merges if g[0] == i), None)
+        if group:
+            for j in group:
+                m[j] = fi
+            fi += 1
+            i = group[-1] + 1
+        else:
+            m[i] = fi
+            if i in split_set:
+                parts = [p.strip() for p in _SENTENCE_SPLIT_RE.split(sentences[i]) if p.strip()]
+                fi += max(0, len(parts) - 1)
+            fi += 1
+            i += 1
+    return m
+
+
+def _hybrid_normalized_result(raw_text: str) -> "NormalizedResult":
+    """规则切句生成候选句子，LLM 只输出合并/拆分修正；LLM 失败则用纯规则结果。"""
+    paragraphs = _join_paragraphs(_clean_lines(raw_text))
+    sentences: list[str] = []
+    rule_segs: list[dict] = []
+    for i, para in enumerate(paragraphs):
+        start = len(sentences)
+        sentences.extend(_split_sentences(para))
+        rule_segs.append({
+            "id": f"seg_{i}",
+            "content": para,
+            "sentence_indices": list(range(start, len(sentences))),
+        })
+    if not sentences:
+        return NormalizedResult(segments=[], sentences=[], paragraph_count=0)
+
+    correction = None
+    numbered = "\n".join(f"[{i}] {s}" for i, s in enumerate(sentences))
+    for attempt in range(2):
+        try:
+            correction = chat_structured(
+                [
+                    {"role": "system", "content": PRE_HYBRID_SYSTEM_PROMPT},
+                    {"role": "user", "content": f"故事句子编号列表：\n{numbered}"},
+                ],
+                PreCorrection,
+            )
+            break
+        except ValueError:
+            print(f"  [Pre-Processor-Hybrid] LLM 修正解析失败（第 {attempt + 1} 次），重试...")
+    if correction is None:
+        print("  [Pre-Processor-Hybrid] 修正两次失败，采用规则切句结果")
+        return _rule_normalized_result(raw_text)
+
+    final_sentences = _apply_corrections(sentences, correction.merges, correction.splits)
+    fm = _orig_to_final(sentences, correction.merges, {s.index for s in correction.splits})
+    segs = []
+    for rs in rule_segs:
+        finals = sorted({fm[o] for o in rs["sentence_indices"] if o in fm})
+        if finals:
+            segs.append({"id": rs["id"], "content": rs["content"], "sentence_indices": finals})
+    return NormalizedResult(segments=segs, sentences=final_sentences, paragraph_count=len(segs))
+
+
 def preprocessor_node(state: NarrativePipelineState) -> NarrativePipelineState:
     """
     Pre-Processor 节点
@@ -170,28 +276,11 @@ def preprocessor_node(state: NarrativePipelineState) -> NarrativePipelineState:
         first_line = raw_text.split("\n")[0].strip()
         title = first_line if len(first_line) < 50 else f"story_{story_id}"
 
-    # 调用 LLM（偶发输出失控/截断导致 JSON 解析失败：重试 1 次，仍失败则规则切句兜底）
-    result = None
-    for attempt in range(2):
-        try:
-            result = chat_structured(
-                [
-                    {"role": "system", "content": PREPROCESSOR_SYSTEM_PROMPT},
-                    {"role": "user", "content": raw_text.strip()}
-                ],
-                NormalizedResult
-            )
-            break
-        except ValueError:
-            print(f"  [Pre-Processor] LLM 分句 JSON 解析失败（第 {attempt + 1} 次），重试...")
-    if result is None:
-        print("  [Pre-Processor] LLM 分句两次失败，改用规则切句（。！？）兜底")
-        result = _rule_normalized_result(raw_text)
-    elif _is_collapsed_sentences(result.sentences, raw_text):
-        print("  [Pre-Processor] 检测到 LLM 分句塌缩，改用规则切句兜底")
-        result = _rule_normalized_result(raw_text)
-    elif not result.sentences:
-        print("  [Pre-Processor] LLM 输出缺少 sentences，改用规则切句兜底")
+    # 混合切句：规则生成候选句子 + LLM 只输出合并/拆分修正（不回显全文）；
+    # LLM 失败/塌缩时用纯规则切句兜底
+    result = _hybrid_normalized_result(raw_text)
+    if _is_collapsed_sentences(result.sentences, raw_text):
+        print("  [Pre-Processor] 混合切句塌缩，改用规则切句兜底")
         result = _rule_normalized_result(raw_text)
 
     segments = [{

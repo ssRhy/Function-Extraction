@@ -3,12 +3,11 @@ Confidence Calculator - 多因子加权置信度计算
 用可量化指标替代 LLM 主观判断
 """
 
-import json
-import os
 import numpy as np
 
 from Embedding.embedding import Embedder
 from Bank.bank import ObservationBank
+from Agent.Registry.registry import get_active_store
 
 # 权重配置
 W_DIVERSITY = 0.3       # cross_story_diversity
@@ -31,22 +30,8 @@ def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def load_registry_functions() -> list[dict]:
-    """加载 functions.jsonl 中已有的 Functions"""
-    registry_path = os.path.join(
-        os.path.dirname(__file__), "..", "data", "registry", "functions.jsonl"
-    )
-    if not os.path.exists(registry_path):
-        return []
-    functions = []
-    with open(registry_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                try:
-                    functions.append(json.loads(line))
-                except json.JSONDecodeError:
-                    pass
-    return functions
+    """加载当前活跃 Registry（SQLite）中的 Functions"""
+    return get_active_store().load_all()
 
 
 def max_definition_similarity(

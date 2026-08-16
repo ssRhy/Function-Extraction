@@ -4,19 +4,16 @@ Inducer Node - 从相似 Observations 归纳 Candidate Function
 （同名或 definition 相似度 > 0.85 视为重复，仅保留置信度最高者）
 """
 
-import json
-import os
-
 from pydantic import AliasChoices, BaseModel, Field
 
 from Agent.llm import chat_structured
 from Agent.state import NarrativePipelineState
 from Agent.Inducer.confidence import (
     calculate_confidence_detailed,
-    load_registry_functions,
     max_definition_similarity,
     NEAR_DUP_THRESHOLD,
 )
+from Agent.Registry.registry import get_active_store
 from Prompt.Inducer_prompt import INDUCER_SYSTEM_PROMPT
 
 
@@ -40,18 +37,8 @@ class InducerResponse(BaseModel):
 
 # ========== Registry ==========
 
-_REGISTRY_DIR = os.path.join(os.path.dirname(__file__), "..", "data", "registry")
-_REGISTRY_FILE = os.path.join(_REGISTRY_DIR, "functions.jsonl")
-
 # bootstrap 阶段豁免 confusable 软惩罚（batch_run 启动时置为 False）
 APPLY_CONFUSABLE = True
-
-
-def _write_registry(funcs: list[dict]):
-    os.makedirs(_REGISTRY_DIR, exist_ok=True)
-    with open(_REGISTRY_FILE, "w", encoding="utf-8") as f:
-        for func in funcs:
-            f.write(json.dumps(func, ensure_ascii=False) + "\n")
 
 
 def merge_candidates(
@@ -93,10 +80,10 @@ def merge_candidates(
 
 
 def _upsert_registry(candidates: list[dict], embedder) -> list[dict]:
-    """合并候选到 Registry（去重后）并整体重写 functions.jsonl"""
-    existing = load_registry_functions()
-    updated, written = merge_candidates(existing, candidates, embedder)
-    _write_registry(updated)
+    """合并候选到当前活跃 Registry（去重后）并整体重写该命名空间"""
+    store = get_active_store()
+    updated, written = merge_candidates(store.load_all(), candidates, embedder)
+    store.replace_all(updated)
     return written
 
 
@@ -131,46 +118,6 @@ def _format_obs_for_prompt(obs_list: list[dict]) -> str:
 """
         for obs in obs_list
     )
-
-
-def _build_positive_examples(
-    supporting_obs_ids: list[str],
-    bank,
-    limit: int = 4,
-) -> list[dict]:
-    """从 Bank 回填原始证据，避免让 LLM 编造或改写正例。"""
-    available = []
-    for obs_id in supporting_obs_ids:
-        obs = bank.get(obs_id)
-        if not obs:
-            continue
-        available.append({
-            "obs_id": obs_id,
-            "story_id": obs.get("story_id", ""),
-            "raw_surface_form": obs.get("surface_form", ""),
-            "event": obs.get("event", ""),
-        })
-
-    examples = []
-    selected_ids = set()
-    seen_stories = set()
-    for example in available:
-        story_id = example["story_id"]
-        if story_id in seen_stories:
-            continue
-        examples.append(example)
-        selected_ids.add(example["obs_id"])
-        seen_stories.add(story_id)
-        if len(examples) >= limit:
-            return examples
-
-    for example in available:
-        if example["obs_id"] in selected_ids:
-            continue
-        examples.append(example)
-        if len(examples) >= limit:
-            break
-    return examples
 
 
 # ========== Inducer Node ==========
@@ -214,9 +161,6 @@ def inducer_node(state: NarrativePipelineState) -> NarrativePipelineState:
             "function_name": func.function_name,
             "definition": func.definition,
             "realization_patterns": func.realization_patterns,
-            "positive_examples": _build_positive_examples(
-                func.supporting_obs_ids, bank
-            ),
             "hard_negatives": func.hard_negatives,
             "confusable_functions": func.confusable_functions,
             "supporting_obs_ids": func.supporting_obs_ids,

@@ -14,7 +14,7 @@ import json
 import os
 
 from Agent.llm import chat_structured
-from Agent.Inducer.confidence import load_registry_functions
+from Agent.Registry.registry import get_active_store
 from Agent.Evaluator.dimensions import (
     evaluate_function_set,
     detect_bidirectional_conflation,
@@ -40,7 +40,7 @@ def _load_functions(registry_file: str | None) -> list[dict]:
                 if line:
                     funcs.append(json.loads(line))
         return funcs
-    return load_registry_functions()
+    return get_active_store().load_all()
 
 
 def _load_obs(bank_file: str | None) -> list[dict]:

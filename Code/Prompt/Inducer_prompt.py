@@ -113,6 +113,6 @@ realization_pattern 不能只是照抄原始事件，也不能抽象成 Function
 - 删除人物名、专有物品和世界观词汇，保留动作机制、实现路径或可观察结果
 - 不要输出“警告/劝说/告诫”这类同义词列表；不同 pattern 应代表真正不同的实现方式
 - realization_patterns 应尽可能覆盖不同领域/类型，体现跨故事泛化能力
-- 原始 surface_form 和 event 将由系统根据 supporting_obs_ids 自动写入 positive_examples，不需要输出
+- 原始 surface_form 和 event 不写入卡片（证据保留在 Observation Bank，由 supporting_obs_ids 关联），不需要输出
 - 置信度将由系统根据跨故事多样性、语义一致性、表面形式多样性、与已有 Function 的可区分性自动计算
 """

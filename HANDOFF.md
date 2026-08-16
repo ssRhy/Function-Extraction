@@ -119,6 +119,18 @@ Narrative Function 自动构建（第一阶段）— bootstrap 阶段改进：O_
 - 实测（并集重跑，2026-08-16）：Abstraction LLM 调用 13–16 → 8 次（全量 4 批 / 增量 30/11/1）；耗时 680s → 515s（-24%）；76 → 57 funcs（同名 0），最终 PASS 6/6；`revise_rounds.jsonl` 记录每轮动作、changed 与 renamed_duplicates。
 - 取舍：首轮 LLM 漏检的函数，增量轮不会自动重抓（可加最后一轮全量终检兜底，未启用）。实测观测：第 1 轮 LLM 对 76 个函数只返回 56 条评审（缺 20），由"缺旧评审兜底"在第 2 轮自动补评，未影响收敛。
 
+## 本轮（2026-08-16 续 5）：Registry SQLite 化 + 5 篇试跑
+- Agent/Registry/registry.py：RegistryStore（SQLite，命名空间隔离，payload 整存字段无损）；Inducer/Confidence/Evaluator/Revise 收敛到活跃 store；atch_run 启动只清当前批命名空间（--genre or "all"）；evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry.py（JSONL→命名空间）与 	est/test_registry.py（5 项）；.gitignore 加 Code/Agent/data/registry/，unctions.jsonl 已 git rm --cached。
+- 清空旧数据：Code/data/genre_functions/、Code/data/evaluation/、Code/Bank/data/、Code/Agent/data/registry/functions.jsonl 已删除。
+- 5 篇跨题材试跑（悬疑 2 + 古风 2 + 现代 1，--batch-induction）：40 obs / 5 functions（均 ≥2 故事）；闭环 PASS 5/6（第 1 轮 4/6 → 修订 3 个题材绑定/粒度函数 → 5/6；evidence 2.2 小样本预期失败）；1282s（256.4s/篇）；DB ll 命名空间与 data/trial5/functions_all.jsonl 逐字段一致。日志 Code/test/logs/trial5.log。
+
+## 本轮（2026-08-16 续 6）：Bootstrap 提速（reasoning_effort=none + V3 混合切句）+ 5 篇试跑
+- 根因：耗时大头是 deepseek-v4-flash 隐藏推理 token（单次切句 8220 completion 中 8207 为 reasoning），不是"全文回显"。
+- 改动：`Agent/llm.py` chat/chat_structured 默认 reasoning_effort="none"（low→none 约 20 倍）；`pre_processor.py` 默认走 V3 混合切句 `_hybrid_normalized_result`（规则切句 + LLM 只输出 merges/splits 修正，不回显全文）；`LLM_USAGE=1` 按调用方归因 usage/耗时。
+- 删除 `positive_examples`（inducer/revise/Inducer_prompt 零读取字段）；回归全过。
+- trial5_none（5 篇跨题材，--batch-induction --out-dir data/trial5_none）：93.9s（18.8s/篇）vs 基线 1282s → 约 13.6 倍；47 obs / 5 functions（与基线数量一致）；闭环 PASS 5/6（修订 1 / 拆分 1；evidence 小样本预期失败）；LLM 15 次 / 89,791 tok / 88.8s。日志 Code/test/logs/trial5_none.log。
+- 3 篇试跑（trial_none）只出 1 function → 样本量不足，非配置退化。
+
 ## 下一步
 - Bootstrap 三批完成 + Evaluator/修订闭环已实现（batch_run 阶段 3 / curate_run 独立入口）；并集 O_0 已修订为 57 函数（同名 0）、PASS 6/6（`data/evaluation/union_functions.jsonl`，原 76 备份 `union_functions.orig.jsonl` / `union_functions.jsonl.pre_revise.jsonl`）。
 - 决策项：SPLIT 镜像对近义风险（重跑采样未复现，是否需要豁免名单）；同名 <0.85 函数对唯一化规则；Inducer/闭环 LLM 非确定性（固定候选池 / Run A/B/C）。

@@ -110,3 +110,23 @@
 - **实测**（并集重跑，2026-08-16）：Abstraction LLM 调用 13–16 → 8 次（全量 76 分 4 批 + 增量 30/11/1）；耗时 680s → 515s（-24%）；76 → 57 funcs、同名 0（`_dedup_names` 把撞名的 `RELATIONSHIP_BONDING`/`RELATIONSHIP_BREAKDOWN`/`RELATIONSHIP_DEEPENING` 加 `_2` 后缀），最终 PASS 6/6、Separation 归零；`revise_rounds.jsonl` 记录每轮 changed 与 renamed_duplicates。
 - **取舍**：首轮若 LLM 漏检某函数，增量轮不会自动重抓（可加最后一轮全量终检兜底，未启用）；增量让"未变更函数"的评审结果跨轮稳定，也少了一个非确定性波动源。
 
+## 11. Registry 升级：SQLite + 批次隔离（2026-08-16）
+
+- **用户问题链**："registry 是不是要设计一个数据库" → "如果升级了 Registry，bootstrap 也要升级吗"。澄清结论：升级分两维——**存储层**（JSONL→DB）不改节点逻辑，只收敛读写访问点；**schema 层**（function_id/status/version_history）才需要 bootstrap 写入方兼容 + 一次性 backfill，且 source_sentence_indices 例外（需重跑全量 obs）。当前无任何 LLM prompt 直接消费 Registry，升级是纯数据层问题。
+- **用户决策**：直接上 SQLite + 批次隔离（每批独立命名空间，启动不再删除其他批次）；JSONL 保留为快照/交换格式（curate_run/genre_extract/gen_evaluation_report 都吃 JSONL）。
+- **实现要点**：RegistryStore(db_path, namespace) 单表 unctions(namespace, function_name, definition, payload, updated_at)，payload 整存完整 JSON——字段无损、未来 Evolve 加字段零迁移；活跃 store 走模块级 get_active_store/set_active_store，batch_run 启动按 --genre or "all" 建 store 并 clear() 只清当前批；Inducer/Confidence/Evaluator/Revise 全部收敛到 store，JSONL 只在显式 
+egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre_revise.<ns>.jsonl 备份；	est/import_registry.py 用于把并集修订结果导入 union 命名空间。
+- **5 篇试跑验收**（悬疑 2 + 古风 2 + 现代 1，--batch-induction）：40 obs / 5 functions（均 ≥2 故事支持）；闭环第 1 轮 PASS 4/6（Abstraction 0.4 失败，3 个函数被标题材绑定/粒度过细）→ 修订 3 个 → 第 2 轮 PASS 5/6（evidence 2.2 因 5 篇小样本不达标，属预期）；耗时 1282s（256.4s/篇，与近期全量批 195–275s/篇 同量级；旧 61.5s/篇 是逐篇模式口径，不可直接比）。DB 命名空间 ll 与 data/trial5/functions_all.jsonl 逐字段一致。
+- **遗留**：试跑命名空间 ll 与 Bank 待全量重跑前清空；evidence_count 阈值（mean_stories≥3）在小样本下必然 FAIL，全量 40 篇/批后应自然达标；unctions.db 已 gitignore，被取代的 unctions.jsonl 已 git rm --cached。
+## 12. Bootstrap 提速根因：隐藏推理 token + V3 混合切句（2026-08-16）
+
+- **难点**：全量 120 篇三批合计约 8 小时（195–275s/篇），用户要求大幅提速；此前误以为是 Pre-Processor"全文回显"导致输出 token 大。
+- **根因**：deepseek-v4-flash 隐藏推理 token 才是耗时/成本大头——单次切句 completion 8220 tok 中 reasoning 占 8207（99.8%），可见输出仅 28 字符 JSON；`LLM_USAGE=1` 按调用方归因后确认 Pre-Processor 与 Observer 的 completion 大头是推理 token。
+- **方案**（两处最小改动，已落地）：
+  - `Agent/llm.py`：`chat/chat_structured` 默认 `reasoning_effort="none"`（同调用实测 low=31.4s/3925 tok → none=1.6s/248 tok，约 20 倍；可见输出仍有效）。
+  - `pre_processor.py`：默认改走 V3 混合切句 `_hybrid_normalized_result`——规则切句生成候选句子与编号，LLM 只输出 merges/splits 修正（`PRE_HYBRID_SYSTEM_PROMPT` / `PreCorrection`），不回显全文；输出从 ~21k token 降到几百 token，质量仍由 LLM 把关（等价于 LLM 对规则候选做监督式合并/拆分）。
+- **验证**（trial5_none，2026-08-16，5 篇跨题材）：93.9s（18.8s/篇）vs 基线 trial5 1282s（256.4s/篇）→ 约 13.6 倍；47 obs / 5 functions（数量与基线一致）；闭环 PASS 5/6（第 1 轮 4/6 → 修订 1/拆分 1 → 5/6；evidence 小样本不达标为预期）；LLM 15 次 / 89,791 tok / 88.8s。3 篇试跑（trial_none）仅 1 function → 判为样本量不足（跨故事分量过少），5 篇恢复 → 支撑质量持平结论。
+- **遗留风险**：`none` 对 Inducer/Evaluator（需综合推理）的质量代价未单独对照，当前 5 篇显示影响可控；Observer 仍是单篇主要耗时（5 篇合计 52.8s，约 10.6s/篇）。全量 120 篇预计 ~1h，需重跑后与旧三批结果对照近义组与函数分布。
+- **V2+none 对照（用户提议回退验证，2026-08-16）**：按"Pre-Processor 恢复 V2 全量 LLM 分句 + reasoning_effort=none"实测同 3 篇跨题材（trial5_v2none）——preprocessor 60.3s/篇（completion ~11.6k/篇）vs 混合 3.6s/篇（~600/篇），总耗时 79.9s/篇 vs 18.8s/篇（约 4.2 倍）；2/3 篇首轮 JSON 解析失败触发重试（V2 历史不稳定在 none 下复现）；句子数 289/331/180（与 V2+推理一致，none 不损 V2 分句质量；混合版 317/389/179，规则基底略多句）。结论：**保留 V3 混合**——LLM 仍把关合并/拆分质量，成本 1/4 且无截断风险。
+- **V2 vs V3 同篇定案对照（2026-08-16，trial3_v2 vs trial3_v3，同 3 篇跨题材单次采样）**：总耗时 85.1s/篇 vs 18.4s/篇（4.6 倍）；V2 3/3 篇首轮 JSON 失败（1 篇连败 2 次掉规则兜底，等于 1/3 内容未走 LLM），V3 0 失败；最终 Function 均 4 个且全部 ≥2 故事支持（V2: SECRET_DISCOVERY/ALLY_INTRODUCTION/SELF_IMPROVEMENT_AFTER_CRISIS/DISTURBING_ENCOUNTER；V3: TRUST_ESTABLISHMENT/RELATIONSHIP_DETERIORATION/ESCAPE_IMPULSE/SELF_REFORMATION，概念重叠仅 SELF_IMPROVEMENT_AFTER_CRISIS≈SELF_REFORMATION，其余差异属 Inducer 非确定性）；Evaluator V3 PASS 5/6（coverage 0.70、0 轮修订）vs V2 PASS 4/6（coverage 0.45、移除 2 个低证据/题材绑定函数）；总 token 50,631 vs 105,317。**用户决策：保留 V3 混合切句。**
+- **状态**：已定案（保留 V3）；下一步由用户决定是否清空 `all` 命名空间 + Bank 后全量重跑三批。

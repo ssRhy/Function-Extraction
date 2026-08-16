@@ -41,7 +41,8 @@ Code/
 │   ├── Evaluator/evaluator.py     # Evaluator 节点：六维评估 + PASS/FAIL + 建议清单
 │   ├── Evaluator/dimensions.py    # 六维纯函数与阈值（无 LLM、可复现）
 │   ├── Evaluator/revise.py        # 修订节点：MERGE/REVISE/SPLIT + weak-fit 剔除 + 写回
-│   └── data/registry/functions.jsonl  # Function Registry
+│   ├── Registry/registry.py     # RegistryStore：SQLite 存储（命名空间隔离，payload 整存）
+│   └── data/registry/functions.db  # Function Registry（SQLite；JSONL 为快照/交换格式）
 ├── Bank/
 │   └── bank.py             # ObservationBank：ChromaDB + JSONL 双存储（data/observations.jsonl）
 ├── Embedding/
@@ -56,13 +57,15 @@ Code/
 │   ├── Merge_prompt.py     # 近义组合并提示词
 │   └── Revise_prompt.py    # 定义修订/拆分提示词
 ├── test/
-│   ├── batch_run.py        # 批量运行入口（--limit / --corpus / --stories / --genre / --batch-induction / --out-dir）
+│   ├── batch_run.py        # 批量运行入口（--limit / --corpus / --stories / --genre / --batch-induction / --out-dir；Registry 按命名空间隔离）
 │   ├── clean_corpus.py     # 语料清洗（脚注/促销/碎片行/数字标记）
 │   ├── genre_extract.py    # 题材快照 Function 清单 + 跨题材近义组摘要
 │   ├── test_evaluator.py   # Evaluator_v0 六维评估测试（单元 + mock LLM 节点）
 │   ├── test_revise.py      # 修订节点 + curate_app 闭环测试（mock LLM）
 │   ├── curate_run.py       # 评估 + 自动修订闭环独立入口（--registry/--bank/--manifest/--report/--max-rounds/--no-revise）
+│   ├── import_registry.py   # 导入 JSONL 快照到 Registry 命名空间（幂等 replace）
 │   ├── gen_evaluation_report.py  # 纯评估入口（三题材并集报告）
+│   ├── test_registry.py    # RegistryStore 单元测试（CRUD/隔离/字段无损/JSONL 往返）
 │   ├── test_batch_induction.py  # 批后归纳聚类纯函数测试（无 LLM）
 │   ├── test_preprocessor.py # Pre-Processor 测试（mock LLM）
 │   ├── test_confidence.py  # 置信度计算测试
@@ -234,10 +237,29 @@ confidence = 0.3 × diversity + 0.3 × coherence + 0.2 × surface - 0.2 × confu
 
 - **观察层与归纳层分离**：Observer 只负责"看到"事件，不做归纳；归纳由 Inducer 专门处理
 - **可复现**：story_id 从文件名派生；缺省 story_id 用 `sha256(原文前50字符)[:8]` 稳定回退
-- **可插拔存储**：Bank 支持 JSONL（精确查询）和 ChromaDB（语义检索）双存储
+- **可插拔存储**：Bank 支持 JSONL（精确查询）和 ChromaDB（语义检索）双存储；Registry 为 SQLite（RegistryStore，按批次命名空间隔离，payload 整存字段无损），JSONL 仅作快照/交换格式
 - **LangGraph 状态流**：所有 Agent 节点通过统一 State 通信
 - **表层词汇去偏**：Observation 转换为检索文本时，用结构化字段拼接代替原始句子
 - **客观置信度**：Function 置信度由多因子加权计算，替代 LLM 主观判断，确保可复现、可解释、可调参
+
+
+## 当前进展（2026-08-16 续）：Registry SQLite 化 + 5 篇试跑
+
+- **RegistryStore（SQLite）**：Code/Agent/Registry/registry.py，表 unctions(namespace, function_name, definition, payload, updated_at)，主键 (namespace, function_name)；按批次命名空间隔离（atch_run 启动只清当前批），payload 整存保证未来 Evolve 加字段无需迁移存储层。
+- **读写点收敛**：Inducer/Confidence/Evaluator/Revise 全部改走活跃 store（get_active_store/set_active_store）；JSONL 仅在有显式 
+egistry_file（快照/并集评估）时使用；
+evise 修订写回 store 模式前自动 export_jsonl(<db>.pre_revise.<ns>.jsonl) 备份。
+- **5 篇跨题材试跑验收（2026-08-16）**：悬疑 2 + 古风 2 + 现代 1，--batch-induction --out-dir data/trial5；40 obs / 5 functions（均 ≥2 故事支持）；闭环 PASS 5/6（第 1 轮 4/6 → 修订 3 个题材绑定/粒度函数 → 第 2 轮 5/6；evidence 2.2 因样本仅 5 篇不达标，属小样本预期）；耗时 1282s（256.4s/篇）；DB 命名空间 ll 与导出快照逐字段一致。
+- **测试**：新增 	est/test_registry.py 5 项（CRUD/整批事务/命名空间隔离/字段无损/JSONL 往返）；回归 test_revise/test_evaluator/test_batch_induction/test_confidence/test_preprocessor/test_clean_corpus 共 49 项全过；_REGISTRY_FILE 零残留。
+## 当前进展（2026-08-16 续 2）：Bootstrap 提速 ~13.6 倍 + 5 篇新配置试跑
+
+- **根因定位（隐藏推理 token）**：耗时大头不是 Pre-Processor"全文回显"，而是模型隐藏推理 token——单次切句 completion 8220 tok 中 8207（99.8%）为 reasoning，可见输出仅 28 字符 JSON；同调用 `reasoning_effort=low` 31.4s/3925 tok vs `none` 1.6s/248 tok（约 20 倍）。
+- **对策（两处最小改动）**：① `Agent/llm.py` `chat/chat_structured` 默认 `reasoning_effort="none"`；② `pre_processor.py` 默认走 **V3 混合切句**（规则切句生成候选句子 → LLM 只输出 merges/splits 修正、不回显全文，输出从 ~21k token 降到几百），质量仍由 LLM 把关。
+- **trial5_none 试跑验收（2026-08-16）**：同 trial5 的 5 篇跨题材，`--batch-induction --out-dir data/trial5_none`；**93.9s（18.8s/篇）vs 基线 1282s（256.4s/篇）→ 提速约 13.6 倍**；47 obs / 5 functions（与基线数量一致）；闭环 PASS 5/6（第 1 轮 4/6 → 修订 1 / 拆分 1 → 第 2 轮 5/6；evidence 因 5 篇小样本不达标，符合预期）；LLM 15 次调用 / 89,791 tok / 88.8s。
+- **3 篇样本量警告**：同配置 3 篇试跑（trial_none）只归纳出 1 个 function（34 obs）——跨故事相似分量过少导致，非配置退化；5 篇即恢复 5 个 function，支撑"质量持平"结论。
+- **删除 `positive_examples`**：inducer.py / revise.py / Inducer_prompt.py 已清理（零读取字段）；回归测试全过。
+- **V2 vs V3 同篇对照（2026-08-16 定案）**：同 3 篇跨题材（trial3_v2 vs trial3_v3）——V2 85.1s/篇 vs V3 18.4s/篇（4.6 倍）；V2 3/3 篇首轮 JSON 失败、1 篇掉规则兜底，V3 0 失败；两者均产出 4 个 Function 且全部 ≥2 故事支持；Evaluator V3 PASS 5/6（0 轮修订）vs V2 PASS 4/6（需移除 2 个低证据/题材绑定函数）。**决策：保留 V3 混合切句**（LLM 仍把关合并/拆分质量）。
+- **待决策**：是否清空 `all` 命名空间 + Bank，以新配置全量重跑三批（预计 ~1h，Observer 每篇 ~10s 为主）。
 
 ## 当前进展（2026-08-15）
 

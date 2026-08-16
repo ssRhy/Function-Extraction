@@ -15,6 +15,7 @@ logs/
 # Generated data
 Code/data/
 Code/Bank/data/
+Code/Agent/data/registry/
 
 
 # Third-party checkouts

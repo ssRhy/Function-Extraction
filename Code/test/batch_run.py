@@ -18,6 +18,7 @@ from Agent.state import NarrativePipelineState
 from Agent.app import pipeline_app, extract_app, get_bank
 from Agent.Inducer.cluster import cluster_similar_pairs, split_oversized
 from Agent.Inducer import inducer as inducer_module
+from Agent.Registry.registry import RegistryStore, set_active_store
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--limit", type=int, default=None, help="只处理前 N 个故事（未指定 --stories 时生效）")
@@ -35,13 +36,15 @@ if not os.path.exists(stories_dir):
     print("请把 .txt 文件放入此目录后重跑。")
     sys.exit(0)
 
-# 1. 清空 Bank 和 Registry
+# 1. 清空 Bank；Registry 按命名空间隔离（只清当前批，保留其他批次）
 print("=== 清理 Bank / Registry ===")
 bank = get_bank()
 bank.clear()
-if os.path.exists(inducer_module._REGISTRY_FILE):
-    os.remove(inducer_module._REGISTRY_FILE)
-    print(f"  删除 Registry: {inducer_module._REGISTRY_FILE}")
+registry_ns = args.genre or "all"
+registry_store = RegistryStore(namespace=registry_ns)
+registry_store.clear()
+set_active_store(registry_store)
+print(f"  清空 Registry 命名空间: {registry_ns}（DB: {registry_store.db_path}）")
 print(f"  Bank 已清空 (count={bank.count()})")
 print()
 
@@ -230,22 +233,17 @@ print(f"=== 运行耗时: {elapsed:.1f} 秒 ({elapsed / max(total, 1):.1f} 秒/�
 
 # 打印 Registry 统计
 print("=== Registry 统计 ===")
-if os.path.exists(inducer_module._REGISTRY_FILE):
-    with open(inducer_module._REGISTRY_FILE, "r", encoding="utf-8") as f:
-        funcs = [line for line in f if line.strip()]
+funcs = registry_store.load_all()
+if funcs:
     print(f"  共写入 Function: {len(funcs)}")
-    for line in funcs[:5]:
-        try:
-            rec = json.loads(line)
-            print(f"    - {rec.get('function_name', 'N/A')} "
-                  f"(conf={rec.get('confidence', 0):.3f}, "
-                  f"supporting={len(rec.get('supporting_obs_ids', []))})")
-        except json.JSONDecodeError:
-            pass
+    for rec in funcs[:5]:
+        print(f"    - {rec.get('function_name', 'N/A')} "
+              f"(conf={rec.get('confidence', 0):.3f}, "
+              f"supporting={len(rec.get('supporting_obs_ids', []))})")
     if len(funcs) > 5:
         print(f"    ... 还有 {len(funcs) - 5} 条")
 else:
-    print("  Registry 文件不存在")
+    print("  命名空间为空")
 
 if args.out_dir:
     import shutil
@@ -253,9 +251,8 @@ if args.out_dir:
     tag = args.genre or "all"
     dst_f = os.path.join(args.out_dir, f"functions_{tag}.jsonl")
     dst_b = os.path.join(args.out_dir, f"bank_{tag}.jsonl")
-    if os.path.exists(inducer_module._REGISTRY_FILE):
-        shutil.copyfile(inducer_module._REGISTRY_FILE, dst_f)
-        print(f"  快照 Registry → {dst_f}")
+    registry_store.export_jsonl(dst_f)
+    print(f"  快照 Registry → {dst_f}（{registry_store.count()} 条）")
     if os.path.exists(bank.jsonl_path):
         shutil.copyfile(bank.jsonl_path, dst_b)
         print(f"  快照 Bank → {dst_b}")
