@@ -1,7 +1,7 @@
 """
 批后统一归纳 - 相似 Observation 聚类工具
 
-纯函数模块（无 LLM、无 IO），供 run_bootstrap.py 阶段2 使用：
+纯函数模块（无 LLM、无 IO），供 Agent.app（bootstrap_app 阶段 2）使用：
 把跨故事相似对按连通分量聚类，超大规模分量按度贪心拆分。
 """
 

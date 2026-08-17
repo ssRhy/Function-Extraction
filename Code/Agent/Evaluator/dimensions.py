@@ -4,7 +4,7 @@ Evaluator_v0 六维评估纯函数模块（无 LLM、可复现）
 六维：
 1. coverage            覆盖率：能被 >=1 个 Function 解释的 obs 占比
 2. cohesion            内聚度：supporting obs 与其 centroid 的余弦均值；弱贴合 obs 标记
-3. separation          分离度：definition 两两余弦 >= 阈值的近义组数（=0 达标，抓近义碎片化）
+3. separation          分离度：LLM 判定的近义合并组数（=0 达标，抓近义碎片化）
 4. abstraction_quality 抽象质量：LLM 复核聚合（OK 比例）；规则预筛仅作兜底/种子
 5. evidence_count      证据量：跨故事证据数量与分布
 6. diversity           语料多样性：支持故事覆盖题材数（无题材信息时回退去重故事数）
@@ -17,7 +17,6 @@ COVERAGE_SIM_THRESHOLD = 0.65   # obs 文本向量与任一 definition 余弦 >=
 COVERAGE_PASS = 0.60            # 覆盖率达标线
 COHESION_PASS = 0.60            # 内聚度达标线（MiniLM 中文同质 obs ~0.97、无关 ~0.57）
 OBS_FIT_THRESHOLD = 0.70        # 单 obs 与函数 centroid 余弦低于该值标记 weak-fit（0.80 在真实数据标记 49 条过噪，<0.70 仅 5 条为真离群）
-SEP_NEAR_DUP_THRESHOLD = 0.85   # 近义组阈值（对齐 NEAR_DUP_THRESHOLD；0.78 会串出巨型连通分量不可用，漏检的弱近义由 LLM 抽象复核补）
 ABSTRACTION_PASS = 0.80         # 抽象质量 OK 比例达标线
 EVIDENCE_MIN_STORIES = 2        # 每个函数至少覆盖的故事数
 EVIDENCE_MEAN_STORIES = 2.5     # 全体函数平均支持故事数（120 篇实测 2.892、中位数 3，按真实分布校准）
@@ -25,9 +24,6 @@ EVIDENCE_MEAN_OBS = 3           # 全体函数平均支持 obs 数（120 篇实�
 DIVERSITY_GENRE_PASS = 2        # 支持故事覆盖题材数达标线
 DIVERSITY_STORY_PASS = 20       # 无题材信息时的去重故事数达标线
 PASS_MIN_DIMENSIONS = 4         # 通过判定：>= 4/6 维度达标
-SEP_REVIEW_THRESHOLD = 0.78     # 复核候选对阈值（低于分组阈值，仅作建议列表）
-SEP_REVIEW_CAP = 60             # 复核候选对数量上限（按相似度降序取前 N）
-
 # 双向混叠方向词对（规则预筛，供 LLM 复核作种子；形如"揭露或掩盖/建立或恶化"）
 OPPOSITION_PAIRS = [
     ("揭露", "掩盖"), ("揭示", "掩盖"), ("转变", "揭示"), ("建立", "恶化"),
@@ -104,63 +100,6 @@ def compute_cohesion(functions, obs_by_id, embedder, fit_threshold: float = OBS_
         "score": round(score, 4),
         "pass": score >= COHESION_PASS,
         "weak_fit_obs": weak_fit_obs,
-    }
-
-
-# ========== 3. Separation 分离度 ==========
-
-def compute_separation(functions, embedder, threshold: float = SEP_NEAR_DUP_THRESHOLD) -> dict:
-    """definition 两两余弦 >= 阈值的并查集近义组；达标 = 0 组。
-
-    低于分组阈值但 >= SEP_REVIEW_THRESHOLD 的对子进 review_pairs（建议复核列表，
-    仅作建议，不参与达标判定；避免低阈值串出巨型连通分量）。
-    """
-    n = len(functions)
-    if n == 0:
-        return {"score": 0, "pass": True, "groups": [], "pairs": [], "review_pairs": []}
-    vecs = embedder.encode([f.get("definition", "") for f in functions])
-    parent = list(range(n))
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
-    def union(a, b):
-        ra, rb = find(a), find(b)
-        if ra != rb:
-            parent[ra] = rb
-
-    pairs, review_pairs = [], []
-    for i in range(n):
-        for j in range(i + 1, n):
-            sim = _cosine(vecs[i], vecs[j])
-            if sim >= threshold:
-                union(i, j)
-                pairs.append({
-                    "a": functions[i].get("function_name"),
-                    "b": functions[j].get("function_name"),
-                    "similarity": round(sim, 3),
-                })
-            elif sim >= SEP_REVIEW_THRESHOLD:
-                review_pairs.append({
-                    "a": functions[i].get("function_name"),
-                    "b": functions[j].get("function_name"),
-                    "similarity": round(sim, 3),
-                })
-    groups_map = {}
-    for i in range(n):
-        groups_map.setdefault(find(i), []).append(i)
-    groups = [sorted(g) for g in groups_map.values() if len(g) > 1]
-    group_names = [[functions[i].get("function_name") for i in g] for g in groups]
-    review_pairs.sort(key=lambda p: p["similarity"], reverse=True)
-    return {
-        "score": len(group_names),
-        "pass": len(group_names) == 0,
-        "groups": group_names,
-        "pairs": pairs,
-        "review_pairs": review_pairs[:SEP_REVIEW_CAP],
     }
 
 
@@ -263,13 +202,11 @@ def compute_diversity(functions, obs_by_id, story_to_category=None) -> dict:
 
 # ========== 聚合 ==========
 
-def generate_recommendations(functions, dims: dict) -> dict:
+def generate_recommendations(functions, dims: dict, merge_groups: list[list[str]]) -> dict:
     """把各维问题整理为可执行建议清单。"""
-    sep, coh, evi, abq = dims["separation"], dims["cohesion"], dims["evidence_count"], dims["abstraction_quality"]
+    coh, evi, abq = dims["cohesion"], dims["evidence_count"], dims["abstraction_quality"]
     rec = {
-        "merge_groups": sep.get("groups", []),
-        "near_dup_pairs": sep.get("pairs", []),
-        "near_dup_review_pairs": sep.get("review_pairs", []),
+        "merge_groups": merge_groups,
         "revise_definitions": abq.get("issues", {}).get("conflation", []),
         "genre_bound_functions": abq.get("issues", {}).get("genre_bound", []),
         "granularity_issues": {
@@ -282,13 +219,24 @@ def generate_recommendations(functions, dims: dict) -> dict:
     return {k: v for k, v in rec.items() if v}
 
 
-def evaluate_function_set(functions, all_obs, embedder, story_to_category=None, abstraction_reviews=None) -> dict:
-    """六维评估总入口：返回判定、各维得分、达标位与建议。"""
+def evaluate_function_set(
+    functions,
+    all_obs,
+    embedder,
+    story_to_category=None,
+    abstraction_reviews=None,
+    merge_groups: list[list[str]] | None = None,
+) -> dict:
+    """六维评估总入口：返回判定、各维得分、达标位与建议。
+
+    separation 由 LLM 近义合并组判定（0 组达标，不设余弦阈值）。
+    """
     obs_by_id = {o.get("obs_id"): o for o in all_obs}
+    merge_groups = merge_groups or []
     dims = {
         "coverage": compute_coverage(functions, all_obs, embedder),
         "cohesion": compute_cohesion(functions, obs_by_id, embedder),
-        "separation": compute_separation(functions, embedder),
+        "separation": {"score": len(merge_groups), "pass": len(merge_groups) == 0},
         "abstraction_quality": compute_abstraction(functions, abstraction_reviews),
         "evidence_count": compute_evidence(functions, obs_by_id),
         "diversity": compute_diversity(functions, obs_by_id, story_to_category),
@@ -301,5 +249,5 @@ def evaluate_function_set(functions, all_obs, embedder, story_to_category=None, 
         "passed_dimensions": passed,
         "failed_dimensions": failed,
         "dimensions": dims,
-        "recommendations": generate_recommendations(functions, dims),
+        "recommendations": generate_recommendations(functions, dims, merge_groups),
     }

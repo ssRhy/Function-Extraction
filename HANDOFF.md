@@ -153,6 +153,56 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 验收（bootstrap 命名空间，2026-08-16）：83 → 82 functions（拆分 5 / 移除 2）；3 轮修订；最终 **PASS 6/6**（coverage 0.761 / cohesion 0.884 / separation 0 / abstraction 0.890（全量最终复核）/ evidence 2.89 / diversity 3）；残留建议 4 REVISE / 3 题材绑定 / 1 粒度 写入报告供 Evolve 参考。日志 test/logs/run_bootstrap_curate.log；快照 data/bootstrap/functions_bootstrap.jsonl（82）与 DB bootstrap（82）一致。
 - 回归：54 项全过（含 evidence 边界用例）。
 
+## 本轮（2026-08-16 续 11）：Bootstrap 单图重构 bootstrap_app + checkpoint/--resume
+- 实现：
+  - `Agent/app.py` 收敛为唯一编译图 `bootstrap_app`：`story_loader →[continue_extraction]→(preprocessor→observer→bank_adder→retrieval→pairs_collector→story_loader 循环)→cluster→[continue_induction]→(induce_step 循环)→evaluator→[route_after_evaluator]→(revise 循环/final_review)→[route_after_final]→export→END`；删除 `run_bootstrap.py` 与 `pipeline_app`/`extract_app`/`curate_app`。CLI 收敛 `python -m Agent.app`（仅 `--corpus/--namespace/--out-dir/--limit/--stories/--no-revise` + 新增 `--resume`）。
+  - 持久化：`SqliteSaver`（`data/checkpoints/bootstrap-<ns>.sqlite3`，thread_id=`bootstrap-<ns>`）；无 `--resume` 时 fresh（`bank.clear()` + `RegistryStore(ns).clear()` + `delete_thread`），`--resume` 跳过清理、`invoke({})` 续跑（Bank 按 obs_id 去重幂等）。`langgraph-checkpoint-sqlite`/`sqlite-vec`/`aiosqlite` 装到 `Code/vendor/`（全局 site-packages 不可写），`app.py` 有则前置 `sys.path`；`.gitignore` 加 `Code/vendor/` 与 `.pytest_cache/`。
+  - `Agent/state.py`：新增 `story_files/corpus_dir/story_meta/all_pairs/induction_components/induction_index/errors/no_revise/namespace/out_dir`；`route_after_evaluator/route_after_final` 增加 `no_revise` 分支；逐篇/每分量/判定打印移入图内节点。
+  - 测试：`test_revise.py` 3 个闭环用例改用 `bootstrap_app`（临时 in-memory SqliteSaver + 空 story 列表直达评估）；新增 `test_bootstrap_app.py`（全流程 no-revise、interrupt→新实例同 DB 续跑、单篇失败跳过、空 story 直达评估）。
+- 验证：图逻辑 13 项通过（Embedding 桩 + FakeEmbedder）；torch-free 回归 33 项通过（test_preprocessor/test_registry/test_batch_induction/test_clean_corpus）。
+- **环境阻塞**：沙箱用户 `codexsandboxoffline` 无法加载 `torch_python.dll`（WinError 5；shm/python313/torch_cpu 均可加载，临时副本同样失败）→ 依赖 torch 的测试（test_confidence/test_evaluator 大部分、真实 Embedder 路径）本轮无法运行；需在可正常加载 torch 的环境跑全量回归 `python -m pytest test/ -q`。
+
+## 本轮（2026-08-17 续 12）：bootstrap_app 单图 120 篇全量验收 + llm.py JSON 数据层加固
+- **修复（最终方案）**：首跑 120 篇在第 2 篇崩溃——observer 的 LLM 输出 JSON 解析失败（缺 `affected_aspect`/控制字符）抛 pydantic ValidationError。先尝试 `story_process` 子图节点方案，被用户否决（不新增节点、简洁优先）；最终改为加固 `llm.py` 的 `chat_structured`：解析/校验失败附错误反馈自动重试（最多 2 次）+ 轻量修复（控制字符/尾逗号）。新增 `test_llm.py`（5 项）；图测试 13 项、torch-free 回归 38 项全过。
+- **全量验收（2026-08-17）**：120 篇 → 117 成功（3 篇因 observer LLM 坏 JSON 跳过）；1006 obs → 45 个归纳分量（1 个分量 inducer JSON 失败）→ **61 functions**（conf [0.528, 0.749]，mean 0.663；24 个恰 2 故事 / 37 个 ≥3 故事）。耗时 3112.9s ≈ 51.9 分钟（25.9s/篇）；LLM 307 次 / 1.97M tok（observer 1465s + inducer 795s 大头）。
+- **Evaluator**：**PASS 4/6**——coverage 0.695 / cohesion 0.888 / separation 0 / diversity 3（87 故事三题材）；未达标：abstraction 0.7541（<0.80；3 轮修订上限内未收敛，残差 9 题材绑定 / 3 双向混叠 REVISE / 粒度，已写入报告）、evidence 2.721/2.885（mean_stories 2.721 ≥2.5 过、mean_obs 2.885 <3 差一线）。
+- 对比历史（run_bootstrap.py 全量：83 funcs / PASS 5/6 / 37.8min）：函数更少、abstraction 未收敛——差异主要来自跨题材统一归纳的 LLM 非确定性 + 3 轮上限，语义本身已随单图重构变化。
+- 产物：DB `bootstrap`（61）+ 快照 `data/bootstrap/functions_bootstrap.jsonl`（61）/ `bank_bootstrap.jsonl`（1006）；报告 `data/evaluation/evaluation_report.json`；日志 `test/logs/bootstrap_full_20260816.log`；checkpoint `data/checkpoints/bootstrap-bootstrap.sqlite3`（可 `--resume`）。
+
+## 本轮（2026-08-17 续 13）：JSON 层加固 + source_sentence_indices 全量复验（120/120 成功）
+- `ObservationItem` 补 `source_sentence_indices`（缺省 `[]`，对齐提示词，供 Evolve obs↔句子 可追溯）；3 篇冒烟 32/32 obs 带非空字段。
+- 120 篇全量：**0 跳过**（observer 121 次 = 120 篇 + 1 次 JSON 重试成功；对比上版 3 篇跳过）；978 obs 全部含非空 `source_sentence_indices`；**85 functions**；39.4min（19.7s/篇）；LLM 314 次 / 1.96M tok。
+- Evaluator PASS 4/6：coverage 0.7474 / cohesion 0.8762 / separation 0 / diversity 3（99 故事）；abstraction 0.7647（3 轮上限未收敛，残差写入报告）+ evidence 2.788/2.929 未达标。
+- 产物：DB `bootstrap`（85）+ 快照 `data/bootstrap/`（85 funcs / 978 obs）+ 报告 + 日志 `test/logs/bootstrap_full_20260817.log`。**当前 O_0 = 85 functions（含溯源字段）。**
+
+## 本轮（2026-08-17 续 14）：Separation 改由 LLM 判定，删除余弦门槛
+- 决策链：近义碎片化 → 余弦 0.85 漏检 / 0.78 串假簇 → 用户定 B 方案：**彻底删掉余弦 Separation**。
+- 改动：`dimensions.py` 删除 `compute_separation` 与 `SEP_NEAR_DUP_THRESHOLD/SEP_REVIEW_*`；`evaluate_function_set` 新增 `merge_groups` 参数，`separation = {score: len(merge_groups), pass: ==0}`；`generate_recommendations` 输出 `merge_groups`（移除 near_dup 诊断）；`evaluator.py` 的 `_review_abstraction` 从复核响应收集 `merge_groups`（此前已删掉独立检测函数 `_detect_merge_groups`）。
+- 判定影响：Separation 现在是六维中由 LLM 合并组驱动的 1 维（0 组达标）；verdict 仍是 ≥4/6。
+- 测试：64 项全过（Separation 改用 LLM 组判定、≥4/6 逻辑、无门槛进 merge_groups）；`rg compute_separation|SEP_NEAR_DUP|near_dup_*` 零残留。
+
+## 本轮（2026-08-17 续 15）：O_0 未达标舍弃（复用 export_node，不新增节点）
+- 决策：达 3 轮上限（或 `--no-revise`）后若 `verdict==FAIL` 或仍有可执行问题 → **舍弃**（用户定：FAIL∪可执行问题、清空命名空间且无备份、no_revise 同样）。对齐设计文档 §4.6（FAIL → 不进入 registry_init）。
+- 实现：不新增节点——舍弃逻辑并入 `export_node`（开头判定，命中则 `get_active_store().clear()` + 删除 `functions_<ns>.jsonl`/`bank_<ns>.jsonl` + 返回 `discarded=True`，否则照常统计+导出）；`route_after_final` 保持原三态路由；`state.py` 加 `discarded: bool`；`main()` 置 `discarded` 时打印并 `sys.exit(1)`。
+- 测试：`test_curate_max_rounds`（FAIL@cap → discarded、命名空间清空、无快照）、`test_empty_story_list`（no_revise FAIL → discarded）、新增 `test_curate_actionable_persists_discards`（merge 持续失败 → cap → 舍弃清空预置函数）；对照 PASS/无可执行问题用例维持导出。
+
+## 本轮（2026-08-17 续 16）：checkpoint 膨胀修复 + 全量 120 严格语义验证
+- **根因**：单图单线程把所有超步完整状态序列化进同一 checkpoint；`all_pairs` 携带完整 obs 字典 → checkpoint 随篇数超线性膨胀（5篇 12MB / 30篇 213MB / 74篇 **2.6GB 并卡死**，首跑 2h 未到 75 篇）。
+- **修复**：`pairs_collector` 改存 obs_id 三元组（ref/ret/similarity），`cluster_node` 聚类前从 Bank 重建完整对。全量 120 恢复 39.5 分钟完成；checkpoint ~475MB。
+- **全量 120（严格舍弃语义验证）**：994 obs → 89 functions；中途评估一度 **PASS 6/6**，但 final_review 全量复核暴露 separation 2（2 组 LLM 近义合并：`EXCLUSION_AND_REJECTION+SOCIAL_ISOLATION`、`NEW_RELATIONSHIP_INTRODUCTION+RELATIONSHIP_INITIATION`）+ 2 双向混叠 + 1 weak-fit → **PASS 5/6 但仍有可执行问题** → 3 轮上限内未排完 → **舍弃**（bootstrap 命名空间清空、快照删除、退出码 1，报告保留）。
+- **矛盾点**：严格"必须收敛"语义下 final_review 全量复核的 LLM 判定几乎总会挑出残差，3 轮上限经常排不完 → 多数全量跑会舍弃。待决策：加轮（MAX_EVAL_ROUNDS）、放宽舍弃条件（仅 FAIL 舍弃）、或接受重跑撞收敛。
+
+## 本轮（2026-08-17 续 17）：舍弃语义修正——整批清空 → 逐函数舍弃
+- 用户澄清："舍弃不达标的 function，没有说全部 function 舍弃"——整批清空是理解偏差。
+- 实现：`export_node` 删除整批 `clear()` 分支，改为按 `final_review` 报告逐函数移除——`revise_definitions / genre_bound_functions / granularity_issues / low_evidence_functions` 全部移除，`merge_groups` 每组保留 supporting obs 最多者（同长按 confidence、再按名称字典序，确定性）；幸存者 `store.replace_all` 后照常导出；被移除函数完整 payload 写 `discarded_<ns>.jsonl` 留档；全部被移除才 `discarded=True`（退出码 1）。`route_after_final` 不变；`weak_fit` 属 obs 级不触发函数移除。
+- 测试：新增 `export_node` 直测 4 项（merge 组保留最优 / 五类标记移除 / 全移除无 O_0 / 无标记照常导出），改写 merge-fail 用例为"保留证据最多者、幸存者导出"；全量 69 项通过。
+
+## 本轮（2026-08-17 续 18）：全量 120 验收（逐函数舍弃）+ 稳定性修复
+- **运行方式**：分离进程 + 文件重定向 + `-u` 无缓冲 + 每 60s 监控（stall≥3 判卡死）。此前"shell 中断 → 管道断开 → 孤儿进程空转"导致卡死（另注：早期 checkpoint 2.6GB 膨胀已由 all_pairs 三元组修复；本轮 checkpoint 全程 162→469MB 稳定）。
+- **全量 120（worktree）**：998 obs → 75 候选 → final_review 标记 → **逐函数舍弃 16 个**（5 组近义 loser + 5 双向混叠 + 5 题材绑定 + 粒度）→ **幸存 59 个导出为 O_0**（conf [0.585, 0.742]，20 个恰 2 故事 / 39 个 ≥3）。判定 PASS 5/6（separation 5 未达标但不再整批舍弃）。耗时 2320.9s（19.3s/篇），LLM 320 次，全程零卡顿。
+- **产物**：DB `bootstrap`（59）+ `data/bootstrap/functions_bootstrap.jsonl`（59）/ `bank_bootstrap.jsonl`（998）/ `discarded_bootstrap.jsonl`（16 留档）；`trial30w`（16）保留。
+- **清理**（死代码审计）：删 `next_node` 字段、模块级 `bootstrap_app`、`PREPROCESSOR_SYSTEM_PROMPT`、`Embedding/__init__.py`/`Retrieval/__init__.py` 未用再导出；worktree 补齐 vendor 与 `.env`。
+
 ## 本轮（2026-08-16 续 11）：LangGraph 范式审查 + 仓库清理 + 修订历史落盘 + .env 去跟踪
 - **LangGraph 审查**：合规（State TypedDict+add_messages / node 返回字段 / 先节点后边再 compile / 条件边字符串路由 / MemorySaver + thread_id / 闭环有界）；未做非必要重构（重试沿用库内循环模式）。
 - **删除**：`test_app.py`、`test_bank.py` + 其路径 bug 产物 `Code/Code/data/bank_test`（git 跟踪）、`test/stories/`（30 篇）、`draw_graph.py` + `langgraph_overall.mmd/.png`、`nf_llm_result.json` / `nf_rule_result.json` / `_enc_probe.txt`、旧日志 `batch_run_v2.log` / `batch_run_zhihu_v5.log`。
@@ -171,7 +221,7 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 
 
 - **Bootstrap 已收尾（2026-08-16）**：run_bootstrap.py 120 篇全量 → `bootstrap` 命名空间 82 functions / 1027 obs；curate 最终全量复核 PASS 6/6（coverage 0.761 / cohesion 0.884 / separation 0 / abstraction 0.890 / evidence 2.89 / diversity 3）；快照 `data/bootstrap/` + 报告 `data/evaluation/evaluation_report.json`；修订历史 `data/evaluation/revise_rounds.jsonl`。日志 test/logs/run_bootstrap_full.log / run_bootstrap_curate.log。
-- 进入 Evolve 前一次性补齐（清单见 README「Evolve 阶段待补清单」）：`source_sentence_indices` 采集（需全量重跑回填）、`function_id/status/version_history`、卡片成熟内容由 Curator 生成、命名统一、Matcher/Critic/Curator（Matcher 仍是 Evolve 专属，revise_node 只做 bootstrap 内收敛）。
+- 进入 Evolve 前一次性补齐（清单见 README「Evolve 阶段待补清单」）：`source_sentence_indices` 已采集（2026-08-17，历史 obs 需重跑回填）、`function_id/status/version_history`、卡片成熟内容由 Curator 生成、命名统一、Matcher/Critic/Curator（Matcher 仍是 Evolve 专属，revise_node 只做 bootstrap 内收敛）。
 - 决策项：SPLIT 镜像对近义风险（重跑采样未复现，是否需要豁免名单）；同名 <0.85 函数对唯一化规则；Inducer/闭环 LLM 非确定性（固定候选池 / Run A/B/C）；`data/bootstrap`/`data/evaluation` 被 .gitignore 忽略（仅 DB 为权威源），是否纳入版本控制待定。
 
 ## 踩过的坑（不要再踩）

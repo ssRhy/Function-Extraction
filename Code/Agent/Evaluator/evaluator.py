@@ -1,10 +1,9 @@
 """
 Evaluator_v0 节点 - 批后六维本体评估（Bootstrap → Evolve 入口）
 
-在 batch 的 Inducer 阶段（--batch-induction 阶段 2）归纳完全部候选 Function 后，
+在 batch 的 Inducer 阶段（bootstrap_app 阶段 2）归纳完全部候选 Function 后，
 由本节点一次性评估初始本体 O_0：计算六维得分与 PASS/FAIL 判定（>=4/6 达标通过），
-FAIL 时输出优化建议清单。不新增图链路，由 run_bootstrap.py 归纳循环结束后直接调用本节点
-（与现有直接调用 inducer_node 的模式一致）。
+FAIL 时输出优化建议清单。不新增独立图链路，作为 bootstrap_app 单图的一个节点被调用。
 
 评估对象 = 当次批次的完整 Registry + Bank；evaluation_context 可传
 registry_file / bank_file / manifest_path / report_path 覆盖默认路径，便于对快照并集评估。
@@ -93,12 +92,12 @@ def _review_abstraction(
     functions: list[dict],
     review_targets: list[str] | None = None,
     prev_reviews: list[dict] | None = None,
-) -> tuple[list[dict], list[str], int, int]:
+) -> tuple[list[dict], list[str], int, int, list[list[str]]]:
     """LLM 逐批复核抽象质量；某批失败时退回规则预筛（该批缺失），记录错误。
 
     review_targets=None 时全量复核（首轮）；否则只复核变更集（review_targets
     命中的函数 + 缺少旧评审的函数），未变更函数沿用 prev_reviews（按 function_name 复用）。
-    返回 (合并后评审列表, 错误, 本轮新评审数, 复用旧评审数)。
+    返回 (合并后评审列表, 错误, 本轮新评审数, 复用旧评审数, LLM 近义合并组)。
     """
     if review_targets is None:
         to_review = list(functions)
@@ -113,7 +112,8 @@ def _review_abstraction(
                 if name not in seen:
                     seen.add(name)
                     to_review.append(f)
-    reviews, errors = [], []
+    reviews, errors, merge_groups = [], [], []
+    valid_names = {f.get("function_name") for f in functions}
     for start in range(0, len(to_review), _REVIEW_BATCH_SIZE):
         batch = to_review[start:start + _REVIEW_BATCH_SIZE]
         hits = detect_bidirectional_conflation([f.get("definition", "") for f in batch])
@@ -134,6 +134,10 @@ def _review_abstraction(
                 {"role": "user", "content": user_content},
             ], EvaluatorReviewResponse)
             reviews.extend(r.model_dump() for r in result.reviews)
+            for g in result.merge_groups:
+                names = [n for n in g if n in valid_names]
+                if len(names) >= 2 and len(set(names)) == len(names):
+                    merge_groups.append(names)
         except Exception as e:
             errors.append(f"batch@{start}: {e}")
     merged = dict(prev_by_name)
@@ -145,7 +149,7 @@ def _review_abstraction(
         1 for f in functions
         if f.get("function_name") in prev_by_name and f.get("function_name") not in new_names
     )
-    return final_reviews, errors, len(reviews), reused
+    return final_reviews, errors, len(reviews), reused, merge_groups
 
 
 def _print_summary(report: dict) -> None:
@@ -190,7 +194,6 @@ def evaluator_node(state: dict) -> dict:
         return {
             "evaluation_report": report,
             "evaluator_decision": "FAIL",
-            "next_node": "inducer_retry",
             "messages": [{"role": "system", "content": "[Evaluator_v0] FAIL（Registry 为空）"}],
         }
 
@@ -208,7 +211,7 @@ def evaluator_node(state: dict) -> dict:
     review_targets = None if force_full else state.get("review_targets")
     if review_targets is None and not force_full:
         review_targets = (state.get("revise_report") or {}).get("changed")
-    reviews, review_errors, reviewed_n, reused_n = _review_abstraction(
+    reviews, review_errors, reviewed_n, reused_n, merge_groups = _review_abstraction(
         functions, review_targets=review_targets, prev_reviews=prev_reviews,
     )
     mode = "全量(最终)" if force_full else ("增量" if review_targets else "全量")
@@ -219,7 +222,9 @@ def evaluator_node(state: dict) -> dict:
         embedder,
         story_to_category=story_to_category,
         abstraction_reviews=reviews,
+        merge_groups=merge_groups,
     )
+    print(f"[Evaluator_v0] LLM 近义合并组: {len(merge_groups)} 组")
     if reviews:
         report["abstraction_reviews"] = reviews
     report["abstraction_reviewed"] = reviewed_n
@@ -239,7 +244,6 @@ def evaluator_node(state: dict) -> dict:
     return {
         "evaluation_report": report,
         "evaluator_decision": verdict,
-        "next_node": "registry_init" if verdict == "PASS" else "inducer_retry",
         "review_targets": None,
         "messages": [{"role": "system", "content": f"[Evaluator_v0] {verdict}（达标 {len(report['passed_dimensions'])}/6）"}],
     }

@@ -20,6 +20,10 @@ class ObservationItem(BaseModel):
     affected_aspect: str = Field(description="影响的是角色的哪个方面（能力/身份/关系/资源等）")
     narrative_effect: str = Field(description="事件对故事发展的影响")
     surface_form: str = Field(description="表层实现（具体动作，如'比武获胜''治病救人'）")
+    source_sentence_indices: list[int] = Field(
+        default_factory=list,
+        description="支撑此观察的句子在 normalized_story.sentences 中的下标（可追溯；缺失时为空列表）",
+    )
 
 
 class ObservationResponse(BaseModel):
@@ -35,6 +39,7 @@ class NarrativeObservation(TypedDict):
     affected_aspect: str
     narrative_effect: str
     surface_form: str
+    source_sentence_indices: list[int]
     story_id: str
 
 
@@ -88,6 +93,7 @@ def observer_node(state: NarrativePipelineState) -> NarrativePipelineState:
             "affected_aspect": obs.affected_aspect,
             "narrative_effect": obs.narrative_effect,
             "surface_form": obs.surface_form,
+            "source_sentence_indices": obs.source_sentence_indices,
             "story_id": story_id,
         }
         observations.append(observation)

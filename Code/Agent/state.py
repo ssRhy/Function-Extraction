@@ -35,13 +35,25 @@ class NarrativePipelineState(TypedDict):
     # ---- Evaluator 输出 ----
     evaluation_report: dict | None  # 六维评估报告
     evaluator_decision: str | None  # PASS / FAIL
-    next_node: str | None  # registry_init / inducer_retry（仅记录，不自动循环）
     evaluation_context: dict | None  # 评估上下文（registry_file/bank_file/manifest_path/report_path）
     revise_report: dict | None  # 修订节点输出（合并/修订/拆分/移除清单）
-    evaluation_round: int  # curate_app 修订轮次计数
+    evaluation_round: int  # bootstrap_app 修订轮次计数
     review_targets: list[str] | None  # 下一轮 Abstraction 复核目标（修订变更集；None=全量复核）
     force_full_review: bool | None  # 最终评估轮强制全新全量 Abstraction 复核（不增量复用）
 
     # ---- 流程控制 ----
     current_story_index: int
     total_stories: int
+
+    # ---- 批处理编排（bootstrap_app 单图）----
+    story_files: list[str]      # 待处理故事相对路径（自然排序）
+    corpus_dir: str             # 语料根目录
+    story_meta: dict            # manifest: txt_file -> entry（category/question_title）
+    all_pairs: list[dict]       # 累计跨故事相似 obs 对
+    induction_components: list[list[dict]]  # cluster 后的可归纳分量（≥2 故事）
+    induction_index: int        # 当前分量下标
+    errors: list[str]           # 逐篇/每分量失败记录（不中断）
+    no_revise: bool             # 仅评估，跳过修订闭环
+    namespace: str              # Registry 命名空间
+    out_dir: str                # 快照输出目录
+    discarded: bool             # 逐函数舍弃后无幸存者（O_0 为空）时置 True

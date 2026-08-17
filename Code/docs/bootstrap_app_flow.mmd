@@ -1,0 +1,59 @@
+flowchart TD
+    subgraph CLI["入口 python -m Agent.app（main）"]
+        A["--corpus --namespace --out-dir --limit --stories --no-revise --resume"]
+        B{"--resume?"}
+        B -->|"否（fresh）"| C["清空 Bank + RegistryStore(ns) + checkpoint"]
+        B -->|"是"| D["跳过清理，同 thread 续跑"]
+        C --> E["初始 state"]
+        D --> E
+    end
+
+    subgraph G["bootstrap_app 单图（LangGraph）"]
+        SL["story_loader"]
+        PP["preprocessor<br/>LLM 混合切句（规则兜底）"]
+        OB["observer<br/>提取 obs（含 source_sentence_indices）"]
+        BA["bank_adder<br/>入库（obs_id 去重）"]
+        RT["retrieval<br/>跨故事相似对"]
+        PC["pairs_collector<br/>存 obs_id 三元组（checkpoint 瘦身）"]
+        CL["cluster<br/>0.60 连通分量 + ≤40 obs 拆分 + ≥2 故事"]
+        IS["induce_step<br/>LLM 归纳 + 算分 + upsert"]
+        EV["evaluator<br/>六维评估 + LLM 近义合并组"]
+        RV["revise<br/>MERGE / REVISE / SPLIT<br/>weak-fit 剔除 / 低证据移除"]
+        FR["final_review<br/>强制全量复核"]
+        EX["export<br/>逐函数舍弃 + 幸存者导出"]
+
+        SL -->|"有当前故事"| PP --> OB --> BA --> RT --> PC --> SL
+        SL -->|"空文件/读失败"| SL
+        SL -->|"全部处理完"| CL
+        CL -->|"有分量"| IS
+        IS -->|"还有分量"| IS
+        IS -->|"全部分量完成"| EV
+        CL -->|"无分量"| EV
+        EV -->|"FAIL / 有可执行问题（未达 3 轮）"| RV --> EV
+        EV -->|"PASS / 达 3 轮上限 / no_revise"| FR
+        FR -->|"仍 FAIL / 有可执行问题（未达上限）"| RV
+        FR -->|"PASS / 达上限 / no_revise"| EX
+    end
+
+    subgraph OUT["出口：export 内部（逐函数舍弃）"]
+        DS["_discard_set 过滤<br/>revise_definitions / genre_bound / granularity / low_evidence 名单<br/>merge_groups 每组保留支持证据最多者"]
+        KEEP["幸存者：replace_all + 快照 functions_/bank_&lt;ns&gt;.jsonl<br/>被弃函数留档 discarded_&lt;ns&gt;.jsonl"]
+        EMPTY["无幸存者：命名空间清空、不导出、退出码 1"]
+        DS --> KEEP
+        DS --> EMPTY
+    end
+
+    subgraph PERSIST["持久化与产物"]
+        P1["SqliteSaver checkpoint<br/>data/checkpoints/bootstrap-&lt;ns&gt;.sqlite3"]
+        P2["RegistryStore（SQLite）<br/>data/registry/functions.db"]
+        P3["Bank<br/>data/bank/（ChromaDB + JSONL）"]
+        P4["data/bootstrap/ 快照 + 报告 data/evaluation/"]
+    end
+
+    E --> G
+    EX --> OUT
+    P1 -.->|"逐超步持久化"| G
+    KEEP --> P2
+    KEEP --> P4
+    EMPTY -.-> P2
+    BA -.-> P3

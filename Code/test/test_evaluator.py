@@ -110,21 +110,14 @@ def test_cohesion_weak_fit():
 
 
 def test_separation():
-    funcs = [
-        {"function_name": "A", "definition": "角色获知关键信息改变认知"},
-        {"function_name": "B", "definition": "角色获知关键信息改变认知"},
-        {"function_name": "C", "definition": "角色与重要人物建立互助合作关系"},
-    ]
+    """Separation 由 LLM 近义合并组判定：0 组达标、>0 组不达标（不设余弦阈值）。"""
+    obs, funcs = make_set()
     emb = get_embedder()
-    r = dim.compute_separation(funcs, emb)
-    assert r["pass"] is False and len(r["groups"]) == 1, r
-    assert set(r["groups"][0]) == {"A", "B"}, r["groups"]
-    assert any(p["a"] == "A" and p["b"] == "B" for p in r["pairs"])
-    # A/B 相似度 1.0 已构成分组 -> 不进 0.78-0.85 复核列表
-    assert r["review_pairs"] == [], r["review_pairs"]
-    r2 = dim.compute_separation(funcs[:1], emb)
-    assert r2["pass"] is True and r2["groups"] == [], r2
-    print("Separation 近义分组: OK")
+    r = dim.evaluate_function_set(funcs, obs, emb, merge_groups=[])["dimensions"]["separation"]
+    assert r["pass"] is True and r["score"] == 0, r
+    r2 = dim.evaluate_function_set(funcs, obs, emb, merge_groups=[["F_A", "F_B"]])["dimensions"]["separation"]
+    assert r2["pass"] is False and r2["score"] == 1, r2
+    print("Separation（LLM 合并组判定，无余弦阈值）: OK")
 
 
 def test_evidence():
@@ -184,10 +177,15 @@ def test_pass_and_fail_logic():
     # FAIL：同义重复 + 单题材 + 抽象质量全不合格 -> 3/6
     dup_funcs = [dict(funcs[0], function_name="F_A2"), funcs[1]]
     dup_funcs[0]["definition"] = funcs[1]["definition"]
-    report2 = dim.evaluate_function_set(dup_funcs, obs, emb, story_to_category={k: "g1" for k in cats}, abstraction_reviews=make_reviews(dup_funcs, ok=False))
+    report2 = dim.evaluate_function_set(
+        dup_funcs, obs, emb,
+        story_to_category={k: "g1" for k in cats},
+        abstraction_reviews=make_reviews(dup_funcs, ok=False),
+        merge_groups=[["F_A", "F_A2"]],
+    )
     assert report2["verdict"] == "FAIL", report2["passed_dimensions"]
     assert len(report2["passed_dimensions"]) < 4, report2["passed_dimensions"]
-    assert "merge_groups" in report2["recommendations"], report2["recommendations"]
+    assert report2["recommendations"].get("merge_groups") == [["F_A", "F_A2"]], report2["recommendations"]
     print("≥4/6 判定逻辑: OK")
 
 
@@ -240,7 +238,6 @@ def test_evaluator_node():
         with open(report_path, "r", encoding="utf-8") as f:
             saved = json.load(f)
         assert saved["verdict"] == report["verdict"]
-        assert result["next_node"] in ("registry_init", "inducer_retry")
         print("evaluator_node（mock LLM）: OK")
 
 
@@ -262,7 +259,7 @@ def test_incremental_abstraction_review():
     orig = ev_module.chat_structured
     ev_module.chat_structured = fake
     try:
-        reviews, errors, reviewed_n, reused_n = ev_module._review_abstraction(
+        reviews, errors, reviewed_n, reused_n, merge_groups = ev_module._review_abstraction(
             funcs, review_targets=["F_B"], prev_reviews=prev)
     finally:
         ev_module.chat_structured = orig
@@ -272,6 +269,7 @@ def test_incremental_abstraction_review():
     assert by_name["F_A"] == prev[0], by_name  # 未变更函数沿用旧评审
     assert by_name["F_B"]["recommendation"] == "OK", by_name
     assert reviewed_n == 1 and reused_n == 1, (reviewed_n, reused_n)
+    assert merge_groups == [], merge_groups
     print("增量 Abstraction 复核（只评变更集）: OK")
 
 
@@ -287,13 +285,56 @@ def test_incremental_review_empty_targets():
     orig = ev_module.chat_structured
     ev_module.chat_structured = fake
     try:
-        reviews, errors, reviewed_n, reused_n = ev_module._review_abstraction(
+        reviews, errors, reviewed_n, reused_n, merge_groups = ev_module._review_abstraction(
             funcs, review_targets=[], prev_reviews=prev)
     finally:
         ev_module.chat_structured = orig
     assert calls["n"] == 0, calls
-    assert len(reviews) == 2 and reviewed_n == 0 and reused_n == 2, (reviewed_n, reused_n)
+    assert len(reviews) == 2 and reviewed_n == 0 and reused_n == 2 and not merge_groups, (reviewed_n, reused_n)
     print("增量复核空变更集（零 LLM 调用）: OK")
+
+
+def test_llm_merge_groups_no_threshold():
+    """近义合并组由抽象复核 LLM 直接产出（不设余弦门槛）：余弦 <0.85 的组也进 merge_groups。"""
+    obs, funcs = make_set()  # F_A/F_B 定义不同，余弦远低于 0.85
+    with tempfile.TemporaryDirectory() as tmp:
+        reg = os.path.join(tmp, "functions.jsonl")
+        bank = os.path.join(tmp, "observations.jsonl")
+        report_path = os.path.join(tmp, "report.json")
+        with open(reg, "w", encoding="utf-8") as f:
+            for func in funcs:
+                f.write(json.dumps(func, ensure_ascii=False) + "\n")
+        with open(bank, "w", encoding="utf-8") as f:
+            for o in obs:
+                f.write(json.dumps(o, ensure_ascii=False) + "\n")
+
+        def fake(messages, schema, **kw):
+            cards = json.loads(messages[1]["content"].split("\n", 1)[1])
+            return EvaluatorReviewResponse(reviews=[
+                FunctionQualityReview(
+                    function_name=c["function_name"], bidirectional_conflation=False, conflation_reason="",
+                    genre_surface_binding=False, binding_reason="", granularity="ok", recommendation="OK",
+                ) for c in cards
+            ], merge_groups=[["F_A", "F_B"]])
+
+        orig = ev_module.chat_structured
+        ev_module.chat_structured = fake
+        try:
+            result = evaluator_node({
+                "messages": [],
+                "evaluation_context": {
+                    "registry_file": reg,
+                    "bank_file": bank,
+                    "report_path": report_path,
+                },
+            })
+        finally:
+            ev_module.chat_structured = orig
+        groups = result["evaluation_report"]["recommendations"].get("merge_groups", [])
+        assert groups == [["F_A", "F_B"]], groups
+        sep = result["evaluation_report"]["dimensions"]["separation"]
+        assert sep["pass"] is False and sep["score"] == 1, sep
+        print("LLM 近义检测无门槛（余弦 <0.85 也进 merge_groups）: OK")
 
 
 def test_empty_registry():
@@ -306,7 +347,7 @@ def test_empty_registry():
             "messages": [],
             "evaluation_context": {"registry_file": os.path.join(tmp, "none.jsonl"), "bank_file": bank_path, "report_path": report_path},
         })
-        assert result["evaluator_decision"] == "FAIL" and result["next_node"] == "inducer_retry"
+        assert result["evaluator_decision"] == "FAIL"
         print("空 Registry 兜底: OK")
 
 
@@ -322,4 +363,5 @@ if __name__ == "__main__":
     test_empty_registry()
     test_incremental_abstraction_review()
     test_incremental_review_empty_targets()
+    test_llm_merge_groups_no_threshold()
     print("\n全部 Evaluator_v0 测试通过")

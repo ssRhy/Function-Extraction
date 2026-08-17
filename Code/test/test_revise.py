@@ -1,4 +1,4 @@
-"""Revise 节点测试：无 LLM 纯函数 + mock chat_structured 节点测试 + curate_app 闭环图测试"""
+"""Revise 节点测试：无 LLM 纯函数 + mock chat_structured 节点测试 + bootstrap_app 修订闭环图测试"""
 
 import sys, os, json, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -234,10 +234,22 @@ def test_revise_node_actions():
         print("revise_node 全动作（合并/修订/拆分/剔除/移除/写回）: OK")
 
 
-# ---------- curate_app 闭环图 ----------
+# ---------- bootstrap_app 修订闭环（story 列表为空 → 直接走 evaluator→revise 循环） ----------
+
+def _compile_bootstrap():
+    """编译 bootstrap_app（临时 in-memory SqliteSaver，无文件副作用）。"""
+    import sqlite3
+    from Agent.app import _build_bootstrap_graph
+    from langgraph.checkpoint.sqlite import SqliteSaver
+    saver = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
+    saver.setup()
+    return _build_bootstrap_graph().compile(checkpointer=saver)
+
 
 def test_curate_max_rounds():
-    from Agent.app import curate_app
+    from Agent.Registry import registry as reg_mod
+    from Agent.Registry.registry import RegistryStore, set_active_store
+    app = _compile_bootstrap()
     orig = revise.MAX_EVAL_ROUNDS
     revise.MAX_EVAL_ROUNDS = 2
     try:
@@ -249,20 +261,175 @@ def test_curate_max_rounds():
                 pass
             with open(bank, "w", encoding="utf-8") as f:
                 pass
-            result = curate_app.invoke({
-                "messages": [],
-                "evaluation_context": {"registry_file": reg, "bank_file": bank, "report_path": report_path},
-                "evaluation_round": 0,
-            }, config={"configurable": {"thread_id": "curate-maxrounds"}})
+            prev = reg_mod._active_store
+            store = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="test_ns")
+            set_active_store(store)
+            try:
+                result = app.invoke({
+                    "messages": [],
+                    "evaluation_context": {"registry_file": reg, "bank_file": bank, "report_path": report_path},
+                    "evaluation_round": 0,
+                    "out_dir": tmp,
+                    "namespace": "test_ns",
+                }, config={"configurable": {"thread_id": "curate-maxrounds"}})
+            finally:
+                set_active_store(prev)
             assert result["evaluator_decision"] == "FAIL", result
             assert result["evaluation_round"] == 2, result
+            assert result.get("discarded") is True, result
+            assert store.count() == 0, store.count()  # 命名空间被清空
+            assert not os.path.exists(os.path.join(tmp, "functions_test_ns.jsonl"))
+            assert not os.path.exists(os.path.join(tmp, "bank_test_ns.jsonl"))
     finally:
         revise.MAX_EVAL_ROUNDS = orig
-    print("curate_app 达上限强制终止: OK")
+    print("bootstrap_app 修订闭环达上限 FAIL → 舍弃（清空命名空间、不导出）: OK")
+
+
+def test_curate_merge_fail_removes_flagged():
+    """merge 持续失败到 cap → export_node 逐函数舍弃：merge 组保留证据最多者，幸存者导出。"""
+    from Agent.Registry import registry as reg_mod
+    from Agent.Registry.registry import RegistryStore, set_active_store
+    app = _compile_bootstrap()
+    obs, funcs = make_set()
+    orig_rounds = revise.MAX_EVAL_ROUNDS
+    revise.MAX_EVAL_ROUNDS = 1
+    try:
+        with tempfile.TemporaryDirectory() as tmp:
+            reg = os.path.join(tmp, "functions.jsonl")
+            bank = os.path.join(tmp, "observations.jsonl")
+            report_path = os.path.join(tmp, "report.json")
+            _write_lines(reg, funcs)
+            _write_lines(bank, obs)
+
+            def fake_eval(messages, schema, **kw):
+                cards = json.loads(messages[1]["content"].split("\n", 1)[1])
+                return EvaluatorReviewResponse(reviews=[
+                    FunctionQualityReview(
+                        function_name=c["function_name"], bidirectional_conflation=False, conflation_reason="",
+                        genre_surface_binding=False, binding_reason="", granularity="ok", recommendation="OK",
+                    ) for c in cards
+                ], merge_groups=[["F_A", "F_B"]])
+
+            def fake_revise(messages, schema, **kw):
+                return MergeResponse(merged_functions=[])  # 合并失败 → merge_groups 持续存在
+
+            prev = reg_mod._active_store
+            store = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="test_ns")
+            store.replace_all([
+                {"function_name": "F_A", "definition": "a", "supporting_obs_ids": ["o1", "o2", "o3", "o4", "o5"]},
+                {"function_name": "F_B", "definition": "b", "supporting_obs_ids": ["o6", "o7", "o8"]},
+            ])  # 预置两条，验证 merge 组保留 F_A（证据更多）、移除 F_B
+            set_active_store(store)
+            orig_eval, orig_revise = ev_module.chat_structured, revise.chat_structured
+            ev_module.chat_structured, revise.chat_structured = fake_eval, fake_revise
+            try:
+                result = app.invoke({
+                    "messages": [],
+                    "evaluation_context": {"registry_file": reg, "bank_file": bank, "report_path": report_path},
+                    "evaluation_round": 0,
+                    "out_dir": tmp,
+                    "namespace": "test_ns",
+                }, config={"configurable": {"thread_id": "curate-discard"}})
+            finally:
+                ev_module.chat_structured, revise.chat_structured = orig_eval, orig_revise
+                set_active_store(prev)
+            assert not result.get("discarded"), result
+            names = {f["function_name"] for f in store.load_all()}
+            assert names == {"F_A"}, names  # 保留证据最多者
+            with open(os.path.join(tmp, "functions_test_ns.jsonl"), encoding="utf-8") as f:
+                exported = {json.loads(l)["function_name"] for l in f if l.strip()}
+            assert exported == {"F_A"}, exported
+            with open(os.path.join(tmp, "discarded_test_ns.jsonl"), encoding="utf-8") as f:
+                discarded = {json.loads(l)["function_name"] for l in f if l.strip()}
+            assert discarded == {"F_B"}, discarded
+    finally:
+        revise.MAX_EVAL_ROUNDS = orig_rounds
+    print("merge 失败到 cap → 逐函数舍弃（保留证据最多者、幸存者导出）: OK")
+
+
+def _export_with(report, funcs, tmp):
+    """在临时活跃 store 上直调 export_node，返回 (result, store)。"""
+    from Agent.Registry import registry as reg_mod
+    from Agent.Registry.registry import RegistryStore, set_active_store
+    from Agent.app import export_node
+    prev = reg_mod._active_store
+    store = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="test_ns")
+    store.replace_all(funcs)
+    set_active_store(store)
+    try:
+        result = export_node({
+            "namespace": "test_ns",
+            "out_dir": tmp,
+            "total_stories": 0,
+            "evaluation_report": report,
+        })
+        return result, store
+    finally:
+        set_active_store(prev)
+
+
+def _func(name, n_obs, conf=0.6):
+    return {"function_name": name, "definition": f"定义{name}", "confidence": conf,
+            "supporting_obs_ids": [f"{name}_o{i}" for i in range(n_obs)]}
+
+
+def test_export_merge_keeps_best():
+    with tempfile.TemporaryDirectory() as tmp:
+        result, store = _export_with(
+            {"recommendations": {"merge_groups": [["F_A", "F_B"]]}},
+            [_func("F_A", 5), _func("F_B", 3)], tmp)
+        assert not result.get("discarded"), result
+        assert {f["function_name"] for f in store.load_all()} == {"F_A"}
+        with open(os.path.join(tmp, "discarded_test_ns.jsonl"), encoding="utf-8") as f:
+            assert {json.loads(l)["function_name"] for l in f if l.strip()} == {"F_B"}
+    print("export merge 组保留证据最多者: OK")
+
+
+def test_export_removes_flagged():
+    report = {"recommendations": {
+        "revise_definitions": [{"function_name": "F_C"}],
+        "genre_bound_functions": [{"function_name": "F_D"}],
+        "granularity_issues": {"too_broad": ["F_E"], "too_specific": []},
+        "low_evidence_functions": [{"function_name": "F_F"}],
+    }}
+    with tempfile.TemporaryDirectory() as tmp:
+        result, store = _export_with(
+            report,
+            [_func("F_OK", 2), _func("F_C", 2), _func("F_D", 2), _func("F_E", 2), _func("F_F", 2)], tmp)
+        assert not result.get("discarded"), result
+        names = {f["function_name"] for f in store.load_all()}
+        assert names == {"F_OK"}, names
+        with open(os.path.join(tmp, "discarded_test_ns.jsonl"), encoding="utf-8") as f:
+            discarded = {json.loads(l)["function_name"] for l in f if l.strip()}
+        assert discarded == {"F_C", "F_D", "F_E", "F_F"}, discarded
+        assert os.path.exists(os.path.join(tmp, "functions_test_ns.jsonl"))
+    print("export 移除五类标记函数（其余保留并导出）: OK")
+
+
+def test_export_all_flagged_discarded():
+    report = {"recommendations": {
+        "revise_definitions": [{"function_name": "F_X"}],
+        "genre_bound_functions": [{"function_name": "F_Y"}],
+    }}
+    with tempfile.TemporaryDirectory() as tmp:
+        result, store = _export_with(report, [_func("F_X", 2), _func("F_Y", 2)], tmp)
+        assert result.get("discarded") is True, result
+        assert store.count() == 0
+        assert not os.path.exists(os.path.join(tmp, "functions_test_ns.jsonl"))
+    print("export 全部被标记 → 无幸存者（O_0 为空）: OK")
+
+
+def test_export_clean_exports_all():
+    with tempfile.TemporaryDirectory() as tmp:
+        result, store = _export_with({"recommendations": {}}, [_func("F_A", 2), _func("F_B", 2)], tmp)
+        assert not result.get("discarded"), result
+        assert store.count() == 2
+        assert os.path.exists(os.path.join(tmp, "functions_test_ns.jsonl"))
+    print("export 无标记 → 照常导出全部: OK")
 
 
 def test_curate_incremental_review():
-    from Agent.app import curate_app
+    app = _compile_bootstrap()
     obs = []
     for sid, oid in [("s1","a1"),("s1","a2"),("s2","a3"),("s3","a4"),
                      ("s4","b1"),("s5","b2"),("s5","b3"),("s6","b4")]:
@@ -286,7 +453,7 @@ def test_curate_incremental_review():
                 function_name=c["function_name"], bidirectional_conflation=False, conflation_reason="",
                 genre_surface_binding=False, binding_reason="", granularity="ok", recommendation="OK",
             ) for c in cards
-        ])
+        ], merge_groups=[["F_A", "F_B"]])
 
     def fake_revise(messages, schema, **kw):
         return MergeResponse(merged_functions=[MergedFunction(
@@ -306,10 +473,12 @@ def test_curate_incremental_review():
             _write_lines(reg, funcs)
             _write_lines(bank, obs)
             ev_module.chat_structured, revise.chat_structured = fake_eval, fake_revise
-            result = curate_app.invoke({
+            result = app.invoke({
                 "messages": [],
                 "evaluation_context": {"registry_file": reg, "bank_file": bank, "report_path": report_path},
                 "evaluation_round": 0,
+                "out_dir": tmp,
+                "namespace": "test_ns",
             }, config={"configurable": {"thread_id": "curate-inc"}})
             assert result["evaluation_round"] == 1, result
             assert calls["n"] == 3, calls  # 第 1 轮全量 + 第 2 轮增量 + 最终全量复核
@@ -319,9 +488,9 @@ def test_curate_incremental_review():
             with open(reg, "r", encoding="utf-8") as f:
                 names = {json.loads(l)["function_name"] for l in f if l.strip()}
             assert names == {"F_AB"}, names
-            # run_bootstrap 落盘依赖：checkpointer 历史可回溯每轮 revise_report
+            # checkpoint 历史可回溯每轮 revise_report
             rounds = []
-            for snap in curate_app.get_state_history({"configurable": {"thread_id": "curate-inc"}}):
+            for snap in app.get_state_history({"configurable": {"thread_id": "curate-inc"}}):
                 rr = (snap.values or {}).get("revise_report")
                 if rr and rr.get("before_count") is not None and rr not in rounds:
                     rounds.append(rr)
@@ -331,11 +500,11 @@ def test_curate_incremental_review():
     finally:
         ev_module.chat_structured, revise.chat_structured = orig_eval, orig_revise
         revise.MAX_EVAL_ROUNDS = max_rounds
-    print("curate_app 增量复核（第 2 轮只评 merge 产物）+ 轮次历史回溯: OK")
+    print("bootstrap_app 增量复核（第 2 轮只评 merge 产物）+ 轮次历史回溯: OK")
 
 
 def test_curate_pass_early():
-    from Agent.app import curate_app
+    app = _compile_bootstrap()
     obs, funcs = make_set()
     fake = EvaluatorReviewResponse(reviews=[
         FunctionQualityReview(
@@ -353,16 +522,18 @@ def test_curate_pass_early():
         orig = ev_module.chat_structured
         ev_module.chat_structured = lambda messages, schema, **kw: fake
         try:
-            result = curate_app.invoke({
+            result = app.invoke({
                 "messages": [],
                 "evaluation_context": {"registry_file": reg, "bank_file": bank, "report_path": report_path},
                 "evaluation_round": 0,
+                "out_dir": tmp,
+                "namespace": "test_ns",
             }, config={"configurable": {"thread_id": "curate-pass"}})
         finally:
             ev_module.chat_structured = orig
         assert result["evaluator_decision"] == "PASS", result.get("evaluation_report", {}).get("dimensions")
         assert result["evaluation_round"] == 0, result
-    print("curate_app PASS 提前终止: OK")
+    print("bootstrap_app PASS 提前终止: OK")
 
 
 if __name__ == "__main__":
@@ -375,4 +546,9 @@ if __name__ == "__main__":
     test_curate_max_rounds()
     test_curate_pass_early()
     test_curate_incremental_review()
-    print("\n全部 Revise/curate_app 测试通过")
+    test_curate_merge_fail_removes_flagged()
+    test_export_merge_keeps_best()
+    test_export_removes_flagged()
+    test_export_all_flagged_discarded()
+    test_export_clean_exports_all()
+    print("\n全部 Revise/bootstrap_app 测试通过")

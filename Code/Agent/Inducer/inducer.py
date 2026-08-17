@@ -37,7 +37,7 @@ class InducerResponse(BaseModel):
 
 # ========== Registry ==========
 
-# bootstrap 阶段豁免 confusable 软惩罚（run_bootstrap.py 启动时置为 False）
+# bootstrap 阶段豁免 confusable 软惩罚（Agent.app 启动时置为 False）
 APPLY_CONFUSABLE = True
 
 

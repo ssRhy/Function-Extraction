@@ -5,9 +5,11 @@ LLM 调用模块 - 统一管理 DeepSeek API
 import os
 import sys
 import json
+import re
 import atexit
 import time
 from openai import OpenAI
+from pydantic import ValidationError
 
 # ---- usage/耗时统计（LLM_USAGE=1 时启用；按调用方函数名归因） ----
 _USAGE = {"calls": 0, "prompt": 0, "completion": 0, "elapsed": 0.0}
@@ -82,22 +84,12 @@ def chat(messages: list, model: str = "deepseek-v4-flash", response_format: dict
     return content
 
 
-def chat_structured(messages: list, output_schema: type, model: str = "deepseek-v4-flash"):
-    """
-    强制 JSON 格式返回 + Pydantic 验证解析。
+# JSON 解析/校验失败的最大重试次数（把错误反馈给 LLM 让它自纠正）
+_STRUCTURED_RETRY = 2
 
-    用法：
-        from pydantic import BaseModel
-        class User(BaseModel):
-            name: str
-            age: int
-        user = chat_structured([...], User)
-    """
-    content = chat(messages, response_format={"type": "json_object"})
 
-    if not content or not content.strip():
-        raise ValueError("LLM 返回空响应")
-
+def _strip_json_fences(content: str) -> str:
+    """去掉 LLM 可能包裹的 ```json 代码块围栏。"""
     content = content.strip()
     if content.startswith("```json"):
         content = content[7:]
@@ -105,10 +97,46 @@ def chat_structured(messages: list, output_schema: type, model: str = "deepseek-
         content = content[3:]
     if content.endswith("```"):
         content = content[:-3]
+    return content.strip()
 
-    try:
-        data = json.loads(content.strip())
-    except json.JSONDecodeError as e:
-        raise ValueError(f"JSON 解析失败: {e}\n原始内容: {content[:200]}")
 
-    return output_schema.model_validate(data)
+def _repair_json(content: str) -> str:
+    """轻量修复：剔除非法控制字符、去掉尾逗号（尽力而为，失败仍走重试）。"""
+    repaired = re.sub(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", "", content)
+    return re.sub(r",\s*([}\]])", r"\1", repaired)
+
+
+def chat_structured(messages: list, output_schema: type, model: str = "deepseek-v4-flash"):
+    """
+    强制 JSON 格式返回 + Pydantic 验证解析。
+
+    JSON 解析失败（坏 JSON）或字段校验失败（缺字段/类型错）时，把错误反馈给 LLM
+    自动重试（最多 _STRUCTURED_RETRY 次），保证结构化输出层自纠正，不再由上层崩溃。
+    """
+    last_error = ""
+    last_content = ""
+    for attempt in range(_STRUCTURED_RETRY + 1):
+        content = _strip_json_fences(chat(messages, response_format={"type": "json_object"}) or "")
+        last_content = content
+        if not content:
+            last_error = "LLM 返回空响应"
+        else:
+            data = None
+            for candidate in (content, _repair_json(content)):
+                try:
+                    data = json.loads(candidate)
+                    break
+                except json.JSONDecodeError as e:
+                    last_error = f"JSON 解析失败: {e}"
+            if data is not None:
+                try:
+                    return output_schema.model_validate(data)
+                except ValidationError as e:
+                    last_error = f"字段校验失败: {str(e)[:300]}"
+        if attempt < _STRUCTURED_RETRY:
+            print(f"  [llm] 结构化输出重试 {attempt + 1}/{_STRUCTURED_RETRY}: {last_error}")
+            messages = list(messages) + [{
+                "role": "user",
+                "content": f"你上次的输出解析失败：{last_error}\n请只重新输出符合要求的 JSON。",
+            }]
+    raise ValueError(f"结构化输出 {_STRUCTURED_RETRY} 次重试后仍失败: {last_error}\n原始内容: {last_content[:200]}")

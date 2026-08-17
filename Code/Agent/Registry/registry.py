@@ -3,7 +3,7 @@ RegistryStore - Function Registry 持久化存储（SQLite，命名空间隔离�
 
 每批（题材）写入独立 namespace，互不清除；payload 整存完整 JSON（字段无损，
 未来加 function_id/status/version_history 无需迁移存储层）。JSONL 仍是快照/交换格式，
-由 export_jsonl / import_jsonl 负责与 run_bootstrap.py 快照/导入对接。
+由 export_jsonl / import_jsonl 负责与 Agent.app（bootstrap_app 导出）快照对接。
 """
 
 import json
@@ -104,7 +104,7 @@ class RegistryStore:
     # ---------- JSONL 快照/交换 ----------
 
     def export_jsonl(self, dst_path: str) -> None:
-        """导出当前 namespace 为 JSONL（供 run_bootstrap.py 快照等使用）。"""
+        """导出当前 namespace 为 JSONL（供 bootstrap_app 快照等使用）。"""
         os.makedirs(os.path.dirname(os.path.abspath(dst_path)), exist_ok=True)
         funcs = self.load_all()
         with open(dst_path, "w", encoding="utf-8") as f:
@@ -123,7 +123,7 @@ class RegistryStore:
         return len(funcs)
 
 
-# ---------- 模块级活跃 store（run_bootstrap.py 启动时 set，Inducer/Evaluator/Revise 读写） ----------
+# ---------- 模块级活跃 store（Agent.app 启动时 set，Inducer/Evaluator/Revise 读写） ----------
 
 _active_store: RegistryStore | None = None
 

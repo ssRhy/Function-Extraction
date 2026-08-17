@@ -2,7 +2,7 @@
 Revise Node - bootstrap 内嵌 Curator-lite：消费 Evaluator 报告，全自动修订 O_0 并写回。
 
 动作：近义 MERGE / 定义 REVISE / SPLIT 拆分（obs 按向量确定性分配）/ weak-fit 剔除 / 低证据移除。
-与 evaluator_node 同模式：由 curate_app 闭环图或入口脚本直接调用，不新增逐篇 pipeline 链路。
+与 evaluator_node 同模式：作为 bootstrap_app 单图节点被调用，不新增独立 pipeline 链路。
 """
 
 import json
@@ -252,7 +252,7 @@ def revise_node(state: dict) -> dict:
 
     # 1) 近义合并
     for group in merge_groups:
-        members = [by_name[n] for n in group if n in by_name]
+        members = [by_name[n] for n in group if n in by_name and n not in consumed]
         if len(members) < 2:
             actions["failed"].append({"action": "merge", "group": group, "reason": "组内可用成员不足"})
             continue

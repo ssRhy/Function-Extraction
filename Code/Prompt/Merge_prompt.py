@@ -20,6 +20,7 @@ class MergeResponse(BaseModel):
 MERGE_SYSTEM_PROMPT = """你是叙事结构本体维护者。以下是一组近义 Function（definition 语义几乎相同、概念重叠），请把它们合并为一个统一的 Function。
 
 要求：
+- 若组内成员方向相反或并非同一结构作用（如"建立信任"与"背叛信任"、"牺牲"与"损失"），该组不应合并：输出空 merged_functions 数组；
 - 函数名用英文大写下划线，能代表这组函数共同的叙事结构作用；
 - definition 用中文 1 句，概括全部成员的核心结构作用，去掉题材表层词（重生/穿越/系统/鬼魂/修仙/总裁/豪门等）；
 - realization_patterns 2-4 个，保留动作机制、去专名与题材设定；

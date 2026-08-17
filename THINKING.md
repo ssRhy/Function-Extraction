@@ -163,3 +163,27 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **旧命名空间清空**：`01_悬疑惊悚`/`02_古风穿越重生`/`03_现代情感家庭`/`union` 从 functions.db 清除，仅剩 `bootstrap`(82)。
 - **修订历史落盘**：`revise_node` 每轮修订后追加 `data/evaluation/revise_rounds.jsonl`（round/ts/actions），替代旧 curate_run 的 checkpointer 回溯方案。
 - **`.env` 去跟踪**：`git rm --cached Code/Agent/.env`（工作区保留）。
+
+## 17. Bootstrap 单图重构：bootstrap_app + SqliteSaver 持久化/--resume（2026-08-16）
+
+- **难点**：Bootstrap 编排散在三处——`run_bootstrap.py`（脚本引擎：阶段 1 逐篇 `extract_app.invoke`、阶段 2 直接调 `inducer_node`、阶段 3 `curate_app.invoke`）+ 三张独立编译图（`pipeline_app`/`extract_app`/`curate_app`）。"一个 agent 一次跑完全流程、可断点续跑"要求把编排收敛进唯一一张图，并让 checkpoint 跨进程持久化。
+- **方案**：唯一编译图 `bootstrap_app`（`Agent/app.py`）——`story_loader →[continue_extraction]→(preprocessor→observer→bank_adder→retrieval→pairs_collector→story_loader 循环)→cluster→[continue_induction]→(induce_step 循环)→evaluator→[route_after_evaluator]→(revise 循环/final_review)→[route_after_final]→export→END`；`no_revise` 时路由直接走 final_review/export。CLI 收敛 `python -m Agent.app`（删除 run_bootstrap.py 与三图）。`--resume` 用 `SqliteSaver`（`data/checkpoints/bootstrap-<ns>.sqlite3`，thread_id=`bootstrap-<ns>`）：fresh 清空 Bank/Registry/checkpoint，resume 跳过清理、`invoke({})` 从最后 checkpoint 续跑（`Bank.add` 按 `obs_id` 去重保证幂等）。
+- **环境约束**：全局 site-packages 不可写（沙箱用户 ACL RX-only）→ `langgraph-checkpoint-sqlite`/`sqlite-vec`/`aiosqlite` 以 `--no-deps --target Code/vendor` 本地安装，`Agent/app.py` 在 `vendor/` 存在时前置 `sys.path`（`langgraph.checkpoint` 是命名空间包，天然合并）；`SqliteSaver.from_conn_string` 是上下文管理器，改用手持 `sqlite3.connect + setup()` 供图实例长生命周期使用。
+- **验证**：13 项图测试通过（新增 `test_bootstrap_app.py`：全流程 no-revise、interrupt→新实例同 DB 续跑、单篇失败跳过、空 story 直达评估；`test_revise.py` 3 个闭环用例改用 `bootstrap_app` + in-memory SqliteSaver）；torch-free 回归 33 项通过。**环境阻塞**：沙箱用户 `codexsandboxoffline` 无法加载 `torch_python.dll`（WinError 5；其依赖 shm/python313/torch_cpu 均可加载，复制到临时目录同样失败，ACL 为 RX、无签名差异）→ 依赖 Embedding/torch 的测试（test_confidence/test_evaluator 大部分、真实 Embedder 路径）本轮无法运行；图逻辑用 Embedding 桩（sys.modules 注入字符袋 Embedder）+ FakeEmbedder 验证。
+- **状态**：代码与图逻辑已落地；需在可正常加载 torch 的环境跑全量回归（`python -m pytest test/ -q`）验收。
+
+## 18. LLM 结构化输出 JSON 数据层加固（observer JSON 失败整图崩溃，2026-08-17）
+
+- **难点**：重构为单图后，旧 `run_bootstrap.py` 的"逐篇 try/except 继续"丢失——observer 的 LLM 输出 JSON 解析失败（缺 `affected_aspect`/非法控制字符/缺逗号）抛 pydantic ValidationError，直接中断整张图（首跑 120 篇第 2 篇崩溃，前 2 篇白跑）。
+- **根因**：preprocessor 有 2 次重试 + 规则兜底（ValidationError ⊂ ValueError 被捕获）、inducer/evaluator/revise 都有异常边界，唯独 observer 无保护；单图把逐篇链放进图内后没有外层异常边界。
+- **方案（迭代）**：先尝试 `story_process` 子图节点（try/except 跳过整篇），被用户否决——图已按"简洁"诉求收敛，且整篇跳过丢全部 obs；最终改为**加固 `llm.py` JSON 数据层**（根因修复）：`chat_structured` 解析/校验失败时把错误反馈给 LLM 自动重试（最多 2 次）+ 轻量修复（剔除非法控制字符、去尾逗号）；图保持原始拓扑，不新增任何节点。
+- **验证**：新增 `test_llm.py` 5 项（正常解析 / 坏 JSON 反馈重试 / 尾逗号修复 / 缺字段反馈重试 / 仍失败抛 ValueError）；图测试 13 项、torch-free 回归 38 项全过。
+- **状态**：已落地。120 篇旧产物（61 functions，3 篇因旧代码跳过）不受影响，重跑可补回；abstraction 0.7541 < 0.80 未达标问题（3 轮修订上限内未收敛）另记，供 Evolve 或加轮处理。
+- **补充（同日）**：响应"重构后 pydantic 字段要不要改"——除 JSON 层加固外，落地既有 schema drift 修复：`ObservationItem` 补 `source_sentence_indices: list[int]`（缺省 `[]`，对齐 Observer 提示词，供 Evolve obs↔句子 可追溯）；历史 obs 需重跑回填。
+- **全量复验（同日）**：120 篇 0 跳过（observer 121 次 = 120 + 1 次 JSON 重试成功，对比上版 3 篇跳过）；978 obs 全部含非空 `source_sentence_indices`；85 functions；39.4min；PASS 4/6（abstraction 0.7647 仍受 3 轮上限约束、evidence 贴线）。
+- **近义检测去阈值（同日续）**：余弦 0.85 漏检近义碎片、0.78 串假簇 → 用户定调"合并全交给 LLM"。迭代：① `_detect_merge_groups` 全量检测函数被否（"加限制代码"）；② 改为抽象复核响应字段 `merge_groups`（无独立调用）；③ Separation 维度改由 LLM 合并组计分（0 组达标），删除 `compute_separation` 及全部 SEP 阈值/诊断。verdict 仍 ≥4/6。残留风险：按批检测跨批漏检 + LLM 偶发过度合并（再评估兜底）。
+- **O_0 未达标舍弃（同日尾）**：设计文档 §4.6 本意"不通过不进入 Evolve"，但实现此前"3 轮上限照常入库"（残差只写报告）。用户定 B 类严格语义：达上限或 `--no-revise` 后 `FAIL`/仍有可执行问题 → 舍弃（清空命名空间、删快照、退出码 1、无备份）。实现复用 `export_node`（不新增节点，被否的 `discard_node` 方案回退），`route_after_final` 路由不变。影响：带残差的运行不再落库，收敛到"完全达标"才产出 O_0。
+- **checkpoint 膨胀（同日尾）**：单图单线程全量状态（`all_pairs` 含完整 obs 字典）被逐超步序列化进同一 SqliteSaver → checkpoint 超线性膨胀，74 篇时 2.6GB 且写死锁（2h 未到 75 篇）。修复：`all_pairs` 改存 obs_id 三元组、聚类前从 Bank 重建 → 全量 120 恢复 39.5 分钟。教训：把完整对象放 checkpointed state 会随超步数平方级膨胀，持久化状态应只存可重建的引用。
+- **严格舍弃 vs LLM 非确定性（同日尾）**：全量 120 中途 6/6，final_review 全量复核暴露 2 组近义 + 2 混叠 → PASS 5/6 带残差 → 舍弃。矛盾：全量复核的 LLM 判定总会挑残差、3 轮上限常排不完 → 严格语义下多数全量跑会被舍弃（需加轮/放宽/重跑）。
+- **舍弃语义修正（同日尾）**：用户澄清"舍弃 = 舍弃不达标的 function，不是全部舍弃"——整批清空是理解偏差。改为 `export_node` 逐函数移除（`merge_groups` 每组保留 supporting obs 最多者），幸存者导出、被移除函数写 `discarded_<ns>.jsonl` 留档；仅全部被移除才判定"无 O_0"。教训：把"剔除坏函数"误实现成"整批丢弃"，应在实现前确认用户意图的粒度。
+- **全量 120 验收（同日尾）**：75 候选 → 逐函数舍弃 16 → 幸存 59 导出为 O_0；PASS 5/6。稳定性：① 分离进程 + 文件重定向规避"shell 中断→断管道→孤儿进程空转"；② checkpoint 体积 162→469MB 稳定（all_pairs 三元组修复生效）。教训：长任务用重定向直写文件 + 心跳监控，别用管道 + 前台阻塞。
