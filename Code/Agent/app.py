@@ -45,6 +45,7 @@ from Agent.Inducer.inducer import inducer_node
 from Agent.Evaluator.evaluator import evaluator_node
 from Agent.Evaluator import revise as revise_module
 from Agent.Evaluator.revise import revise_node
+from Agent.Evaluator.abstract_merge import abstract_merge
 from Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
 from Bank.bank import ObservationBank
 from Retrieval.retrieval import Retriever
@@ -327,6 +328,9 @@ def export_node(state: NarrativePipelineState) -> dict:
             "discarded": True,
             "messages": [{"role": "system", "content": "[Finalize] 无达标函数，O_0 为空"}],
         }
+    # 全量抽象归并：把同一结构作用的函数合并为更高层类别（1 次 LLM 调用）
+    survivors = abstract_merge(survivors, get_bank())
+    store.replace_all(survivors)
     print("=== Registry 统计 ===")
     print(f"  共写入 Function: {len(survivors)}")
     for rec in survivors[:5]:

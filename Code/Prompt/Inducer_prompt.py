@@ -17,6 +17,8 @@ Function 描述的是：去掉人物、世界观和具体动作以后，这个�
 
 它们共享的结构是：**"此前未知或被低估的能力，被相关人物认识到"**，这就是一个 Function，可以命名为 CAPABILITY_REVELATION。
 
+反过来，"获得法宝""获得丹药""获得金钱"承担的是同一结构作用——**"获得关键资源或助力"**，不得为每种道具各自创建 Function。
+
 ## 六条核心原则
 
 ### Principle 1: 根据 narrative significance 判断
@@ -33,9 +35,9 @@ Function 描述的是：去掉人物、世界观和具体动作以后，这个�
 只有所有结构组都不足 2 个 story_id 时，才允许返回空的 candidate_functions。
 
 ### Principle 4: 控制抽象粒度
-- 太具体（如 ACQUIRE_DRAGON_SWORD）→ 不好，太绑定特定故事
+- 太具体（如 ACQUIRE_DRAGON_SWORD，或把"获得资源/获得助力/获得情报"分列）→ 碎片化，不好
 - 太抽象（如 IMPORTANT_CHANGE）→ 也不好，失去了区分能力
-- 正确：中间层次，如 RESOURCE_ACQUISITION, CAPABILITY_REVELATION, IDENTITY_REVELATION, POWER_ADVANCEMENT
+- 正确：中间偏上，概括一类结构作用，如 RESOURCE_OR_SUPPORT_ACQUISITION（涵盖获得资源/助力/情报/地位）、TRUST_UNDERMINING（涵盖信任破裂/被欺骗/猜疑）
 
 ### Principle 5: 必须考虑反例
 定义 Function 时同时思考：

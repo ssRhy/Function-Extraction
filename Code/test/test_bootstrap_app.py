@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
+from Agent import app as app_module
 from Agent.Pre_pro import pre_processor as pp
 from Agent.Observer import observer as ob
 from Agent.Inducer import inducer as ind
@@ -128,6 +129,7 @@ def _patched_llm(calls):
         "ind": ind.chat_structured,
         "ev": ev_module.chat_structured,
         "rev": rev.chat_structured,
+        "am": app_module.abstract_merge,
     }
 
     def fake_pre(messages, schema, **kw):
@@ -184,6 +186,7 @@ def _patched_llm(calls):
     ind.chat_structured = fake_ind
     ev_module.chat_structured = fake_eval
     rev.chat_structured = fake_rev
+    app_module.abstract_merge = lambda funcs, bank: funcs
     try:
         yield
     finally:
@@ -192,6 +195,7 @@ def _patched_llm(calls):
         ind.chat_structured = originals["ind"]
         ev_module.chat_structured = originals["ev"]
         rev.chat_structured = originals["rev"]
+        app_module.abstract_merge = originals["am"]
 
 
 def _calls():

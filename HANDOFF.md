@@ -203,6 +203,13 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - **产物**：DB `bootstrap`（59）+ `data/bootstrap/functions_bootstrap.jsonl`（59）/ `bank_bootstrap.jsonl`（998）/ `discarded_bootstrap.jsonl`（16 留档）；`trial30w`（16）保留。
 - **清理**（死代码审计）：删 `next_node` 字段、模块级 `bootstrap_app`、`PREPROCESSOR_SYSTEM_PROMPT`、`Embedding/__init__.py`/`Retrieval/__init__.py` 未用再导出；worktree 补齐 vendor 与 `.env`。
 
+## 本轮（2026-08-18 续 19）：全量抽象归并（识别近义组 + 复用 _llm_merge）+ O_0=52
+- 用户定调：OR 命名本身不该禁（同一结构作用的不同侧面用 OR 合法，如 TRUST_BREACH+UNCERTAINTY_AND_DOUBT 归类正是诉求）；真正该防的是 OR 连接相反方向/不同结构作用（双向混叠）。撤销 `_OR_` 代码过滤。
+- `abstract_merge`（export 前）：① 1 次全量 LLM 调用识别近义组（只输出 members）；② 每组复用 `revise._llm_merge` 重新归纳为一个新的统一函数（supporting 并集 + confidence 重算；"方向相反拒绝合并"；失败该组保持原样）。新增 `Prompt/Abstract_merge_prompt.py`。
+- **全量重跑 120（2026-08-18）**：985 obs → 归并 40→18（1 识别 + 14 次 `_llm_merge`）→ **O_0 = 52 个函数**（仅 1 个 OR 命名 `HARM_OR_VIOLENCE`；其余均为单一概念如 ABILITY_REVELATION / CRISIS_EVENT / DECEPTIVE_APPEARANCE / EXTERNAL_FORCE_INTERVENTION）。CSV → `data/functions_export.csv`（52 行）。
+- 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
+- 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
+
 ## 本轮（2026-08-16 续 11）：LangGraph 范式审查 + 仓库清理 + 修订历史落盘 + .env 去跟踪
 - **LangGraph 审查**：合规（State TypedDict+add_messages / node 返回字段 / 先节点后边再 compile / 条件边字符串路由 / MemorySaver + thread_id / 闭环有界）；未做非必要重构（重试沿用库内循环模式）。
 - **删除**：`test_app.py`、`test_bank.py` + 其路径 bug 产物 `Code/Code/data/bank_test`（git 跟踪）、`test/stories/`（30 篇）、`draw_graph.py` + `langgraph_overall.mmd/.png`、`nf_llm_result.json` / `nf_rule_result.json` / `_enc_probe.txt`、旧日志 `batch_run_v2.log` / `batch_run_zhihu_v5.log`。

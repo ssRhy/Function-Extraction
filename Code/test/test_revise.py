@@ -246,6 +246,21 @@ def _compile_bootstrap():
     return _build_bootstrap_graph().compile(checkpointer=saver)
 
 
+from contextlib import contextmanager
+
+
+@contextmanager
+def _noop_abstract_merge():
+    """图/出口测试里 export_node 会调 abstract_merge（真实 LLM），置为原样返回。"""
+    from Agent import app as app_module
+    orig = app_module.abstract_merge
+    app_module.abstract_merge = lambda funcs, bank: funcs
+    try:
+        yield
+    finally:
+        app_module.abstract_merge = orig
+
+
 def test_curate_max_rounds():
     from Agent.Registry import registry as reg_mod
     from Agent.Registry.registry import RegistryStore, set_active_store
@@ -357,12 +372,13 @@ def _export_with(report, funcs, tmp):
     store.replace_all(funcs)
     set_active_store(store)
     try:
-        result = export_node({
-            "namespace": "test_ns",
-            "out_dir": tmp,
-            "total_stories": 0,
-            "evaluation_report": report,
-        })
+        with _noop_abstract_merge():
+            result = export_node({
+                "namespace": "test_ns",
+                "out_dir": tmp,
+                "total_stories": 0,
+                "evaluation_report": report,
+            })
         return result, store
     finally:
         set_active_store(prev)
@@ -522,13 +538,14 @@ def test_curate_pass_early():
         orig = ev_module.chat_structured
         ev_module.chat_structured = lambda messages, schema, **kw: fake
         try:
-            result = app.invoke({
-                "messages": [],
-                "evaluation_context": {"registry_file": reg, "bank_file": bank, "report_path": report_path},
-                "evaluation_round": 0,
-                "out_dir": tmp,
-                "namespace": "test_ns",
-            }, config={"configurable": {"thread_id": "curate-pass"}})
+            with _noop_abstract_merge():
+                result = app.invoke({
+                    "messages": [],
+                    "evaluation_context": {"registry_file": reg, "bank_file": bank, "report_path": report_path},
+                    "evaluation_round": 0,
+                    "out_dir": tmp,
+                    "namespace": "test_ns",
+                }, config={"configurable": {"thread_id": "curate-pass"}})
         finally:
             ev_module.chat_structured = orig
         assert result["evaluator_decision"] == "PASS", result.get("evaluation_report", {}).get("dimensions")
