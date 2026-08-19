@@ -210,6 +210,12 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 31）：Curator 近义收敛改 Agglomerative 拎候选 + LLM 确认
+- 用户确认"先拎出近义组、LLM 处理"流程：`_full_merge_scan` 拎组从"全量 LLM 扫描"改为 **Agglomerative 聚类**（`AGGLOMERATIVE_SIM_THRESHOLD=0.75`、`scipy` linkage **complete** 防链式串簇 + fcluster 距离 0.25）→ 候选组喂 `Abstract_merge_prompt`（LLM 确认"同一结构作用"）→ `_llm_merge` 重新归纳；抽出 `_agglomerative_candidates` helper 便于测试。
+- **验收（19 → 18 函数）**：Agglomerative 拎出 3 候选组（KEY_DECISION_REVERSAL~TRANSFORMATIVE_CHANGE、PASSIVE_HARM_SUFFERING~SOCIAL_ISOLATION、RELATIONSHIP_BONDING~RELATIONSHIP_INTIMACY_ESCALATION）——正好 text2vec 实测 3 对、无漏无假；LLM 确认只合并关系族（→`RELATIONSHIP_DEEPENING`），拒绝 2 个边界/不同结构。
+- **终评 PASS 6/6**（18 函数）：coverage 0.847 / cohesion 0.849 / separation 0 / abstraction 0.944 / evidence 8.111 / diversity 36；对比 30→18。
+- 测试 **106 项全过**（新增 Agglomerative 不串簇 / 无候选不调 LLM 用例；scipy 1.18 可用）。
+
 ## 本轮（2026-08-19 续 30）：按 text2vec 分布校准阈值（coverage/cohesion/聚类）
 - 实测 text2vec 分布：非 supporting obs 与最近 definition 余弦 P50=0.613（0.65 偏严）；跨故事 obs 对 mean=0.630（MiniLM 时代 0.60 是噪声底线，text2vec 整体上移）；supporting obs fit mean=0.835 / P10=0.777（0.70 weak-fit 阈值正好抓真离群）。
 - 校准：`COVERAGE_SIM_THRESHOLD` 0.65 → **0.60**（coverage 0.748 → 0.847，309/365）；`BATCH_EDGE_SIM` 0.60 → **0.65**（聚类连边从 65% 降到 ~40%）；`OBS_FIT_THRESHOLD=0.70`、`COHESION_PASS=0.60` 保留（实测安全）。

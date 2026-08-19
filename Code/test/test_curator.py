@@ -243,7 +243,7 @@ def test_merge_near_dups_prescreen(tmp_path):
     names = {f["function_name"] for f in store.load_all()}
     assert "F_AB" in names and "F_A" not in names and "F_B" not in names
     assert "F_C" in names
-    assert any(p["action"] == "MERGE" and p.get("source") == "full_merge_scan" for p in plan)
+    assert any(p["action"] == "MERGE" and p.get("source") == "agglomerative+confirm" for p in plan)
     print("近义预筛合并: OK")
 
 
@@ -267,6 +267,40 @@ def test_merge_near_dups_threshold(tmp_path):
     names = {f["function_name"] for f in store.load_all()}
     assert "F_A" in names and "F_D" in names
     print("近义预筛门槛 SKIP: OK")
+
+
+def test_agglomerative_no_chain():
+    """complete 链接防链式串簇：A-B、B-C 近但 A-C 远 → 不把三者强行并入一组。"""
+    emb = FakeEmbedder()
+    funcs = {
+        "A": {"function_name": "A", "definition": "甲乙丙丁戊"},
+        "B": {"function_name": "B", "definition": "甲乙丙丁戊己庚"},
+        "C": {"function_name": "C", "definition": "甲乙丙丁己庚"},
+    }
+    cands = cu._agglomerative_candidates(["A", "B", "C"], funcs, emb)
+    for g in cands:
+        assert not (set(g) >= {"A", "C"}), cands  # A、C 余弦 ~0.68 <0.75 → 绝不同组
+        assert set(g) != {"A", "B", "C"}, cands
+    print(f"候选组: {cands}（A/C 隔离）")
+    print("Agglomerative complete 链接不串簇: OK")
+
+
+def test_agglomerative_no_candidate(tmp_path):
+    """全不同函数 → 无候选近义组 → 不调用确认 LLM。"""
+    bank, store, prev = _setup(str(tmp_path), [
+        _func("F_A", ["x1", "x2", "x3"], definition="甲乙丙丁戊"),
+        _func("F_B", ["x1", "x2", "x3"], definition="子丑寅卯辰巳"),
+    ])
+    orig = cu.chat_structured
+    cu.chat_structured = lambda m, s, **kw: (_ for _ in ()).throw(AssertionError("无候选不应调 LLM"))
+    try:
+        plan = []
+        changed = cu._revise_from_report({}, store, bank, plan)
+    finally:
+        cu.chat_structured = orig
+        _teardown(prev)
+    assert not changed and plan == []
+    print("无候选不调 LLM: OK")
 
 
 if __name__ == "__main__":

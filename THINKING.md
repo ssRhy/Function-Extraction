@@ -263,3 +263,10 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **校准**：`COVERAGE_SIM_THRESHOLD` 0.65→0.60（coverage 0.748→0.847）；`BATCH_EDGE_SIM` 0.60→0.65（聚类连边 65%→40%）；cohesion 阈值保留（supporting fit P10=0.777，0.70 weak-fit 正好抓真离群）。
 - **验证**：104 测试全过；终评 PASS 6/6（coverage 0.847）。
 - **状态**：阈值体系已对齐 text2vec 分布。
+
+## 29. Curator 近义收敛改 Agglomerative + LLM 确认（2026-08-19）
+
+- **用户思路**："先拎出近义组，再 LLM 处理"——早期向量阈值拎组失败（MiniLM 不可靠），text2vec 换模型后拎组可行；再用 Agglomerative（complete 链接）替代固定阈值连通，解决链式串簇（A-B 近、B-C 近但 A-C 远被强并）。
+- **实现**：`_full_merge_scan` 拎组 = `scipy` pdist(cosine) → linkage(complete) → fcluster(距离 0.25)；候选组喂 `Abstract_merge_prompt` 确认；确认组 `_llm_merge`。抽出 `_agglomerative_candidates` helper（单测不串簇）。
+- **验证**：19 函数拎出 3 候选组（= text2vec 实测 3 对），LLM 只确认合并关系族（→RELATIONSHIP_DEEPENING），拒绝 KDR~TC（可区分）与 PHS~SI（不同结构）——拎组全而稳、LLM 准而不误并。终评 PASS 6/6（18 函数）。测试 106 项全过。
+- **状态**：近义收敛 = Agglomerative 拎候选 + LLM 确认 + `_llm_merge`，每批 Curator 自动跑。

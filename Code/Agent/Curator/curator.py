@@ -11,6 +11,8 @@ import os
 import time
 
 import numpy as np
+from scipy.cluster.hierarchy import linkage, fcluster
+from scipy.spatial.distance import pdist
 
 from Agent.app import get_bank
 from Agent.Registry.registry import get_active_store
@@ -28,6 +30,7 @@ NOVEL_SIM_THRESHOLD = 0.60   # novel obs 聚类边阈值（与 bootstrap 聚类�
 
 _ACTIONABLE_KEYS = ("merge_groups", "revise_definitions", "genre_bound_functions",
                     "low_evidence_functions", "weak_fit_obs")
+AGGLOMERATIVE_SIM_THRESHOLD = 0.75   # 近义候选拎组阈值：definition 余弦 >= 该值视为候选（complete 链接防链式串簇；LLM 确认后合并）
 
 
 def _cosine(a: np.ndarray, b: np.ndarray) -> float:
@@ -111,42 +114,66 @@ def _induce_novelty(novel_occs: list[dict], bank, plan: list[dict]) -> int:
     return added
 
 
-def _full_merge_scan(funcs_by_name: dict, obs_by_id: dict, embedder, plan: list[dict], consumed: set) -> bool:
-    """全量 LLM 近义扫描：当前全部函数卡片 → LLM 识别"同一结构作用"组 → 每组 _llm_merge 重新归纳。
+def _agglomerative_candidates(names: list[str], funcs_by_name: dict, embedder) -> list[list[str]]:
+    """Agglomerative 拎候选近义组：definition 向量余弦距离，complete 链接防链式串簇。
 
-    bootstrap 验证过的机制（59→30 有效）；比向量预筛可靠（MiniLM 中文对用词不同但同义的
-    近义余弦不够、又会连上共享词汇的非近义），比 Evaluator 的附加 merge_groups 更专注（专门任务）。
+    返回簇内 >=2 个函数的候选组；complete 链接要求组内最远两点也在阈值内，
+    避免"A-B 近、B-C 近但 A-C 远"被链式并成一组。
     """
+    vecs = embedder.encode([funcs_by_name[n].get("definition", "") for n in names])
+    vecs = vecs / np.maximum(np.linalg.norm(vecs, axis=1, keepdims=True), 1e-9)
+    dist = pdist(vecs, metric="cosine")
+    Z = linkage(dist, method="complete")
+    labels = fcluster(Z, t=1 - AGGLOMERATIVE_SIM_THRESHOLD, criterion="distance")
+    groups: dict[int, list[str]] = {}
+    for name, lab in zip(names, labels):
+        groups.setdefault(int(lab), []).append(name)
+    return [g for g in groups.values() if len(g) >= 2]
+
+
+def _full_merge_scan(funcs_by_name: dict, obs_by_id: dict, embedder, plan: list[dict], consumed: set) -> bool:
+    """近义收敛：Agglomerative 拎候选（definition 向量、complete 链接防链式串簇）
+    → LLM 确认（Abstract_merge_prompt 宁少勿滥）→ 确认组 _llm_merge 重新归纳。"""
     names = [n for n in funcs_by_name if n not in consumed]
     if len(names) < 2:
         return False
+    # ① 拎候选：Agglomerative（complete 链接防链式串簇）
+    candidate_groups = _agglomerative_candidates(names, funcs_by_name, embedder)
+    if not candidate_groups:
+        return False
+
+    # ② LLM 确认：从候选组里挑真正同一结构作用的组
     cards = [{
-        "function_name": funcs_by_name[n].get("function_name"),
-        "definition": funcs_by_name[n].get("definition", ""),
-        "realization_patterns": funcs_by_name[n].get("realization_patterns", []),
-    } for n in names]
-    user_content = "请识别承担同一结构作用、应归并的函数组：\n" + json.dumps(cards, ensure_ascii=False, indent=1)
+        "group": members,
+        "functions": [{
+            "function_name": funcs_by_name[m].get("function_name"),
+            "definition": funcs_by_name[m].get("definition", ""),
+            "realization_patterns": funcs_by_name[m].get("realization_patterns", []),
+        } for m in members],
+    } for members in candidate_groups]
+    user_content = "请从以下候选近义组中，确认真正承担同一结构作用、应合并为一组的函数：\n" + \
+        json.dumps(cards, ensure_ascii=False, indent=1)
     try:
         result = chat_structured([
             {"role": "system", "content": ABSTRACT_MERGE_SYSTEM_PROMPT},
             {"role": "user", "content": user_content},
         ], AbstractMergeResponse)
-        groups = [g for g in result.merge_groups if isinstance(g, list) and len(g) >= 2]
+        confirmed = [g for g in result.merge_groups if isinstance(g, list) and len(g) >= 2]
     except Exception as e:
-        plan.append(_plan_record("SKIP_SMALL_SAMPLE", "FULL_MERGE_SCAN", reason=f"近义扫描失败：{e}"))
+        plan.append(_plan_record("SKIP_SMALL_SAMPLE", "FULL_MERGE_SCAN", reason=f"近义确认失败：{e}"))
         return False
-    if not groups:
+    if not confirmed:
         return False
 
     changed = False
-    for members in groups:
+    for members in confirmed:
         valid = [m for m in members if m in funcs_by_name and m not in consumed]
         if len(valid) < 2:
             continue
         if any(len(funcs_by_name[m].get("supporting_obs_ids", [])) < REVISE_MIN_SUPPORTING for m in valid):
             plan.append(_plan_record(
                 "SKIP_SMALL_SAMPLE", "+".join(valid),
-                reason=f"近义扫描：成员 supporting < {REVISE_MIN_SUPPORTING}",
+                reason=f"近义收敛：成员 supporting < {REVISE_MIN_SUPPORTING}",
             ))
             continue
         merged, err = rev._llm_merge([funcs_by_name[m] for m in valid], obs_by_id)
@@ -160,7 +187,7 @@ def _full_merge_scan(funcs_by_name: dict, obs_by_id: dict, embedder, plan: list[
             del funcs_by_name[m]
         funcs_by_name[merged["function_name"]] = merged
         changed = True
-        plan.append(_plan_record("MERGE", merged["function_name"], members=valid, source="full_merge_scan"))
+        plan.append(_plan_record("MERGE", merged["function_name"], members=valid, source="agglomerative+confirm"))
     return changed
 
 
