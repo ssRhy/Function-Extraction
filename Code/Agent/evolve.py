@@ -13,6 +13,7 @@ NOVEL→novelty_pool、CONFLICT/UNCERTAIN→challenge_pool → FunctionOccurrenc
 import argparse
 import json
 import os
+import shutil
 import sys
 import time
 from collections import Counter
@@ -193,6 +194,105 @@ def report_node(state: NarrativePipelineState) -> dict:
     return {"match_report": report}
 
 
+def _load_jsonl(path: str) -> list[dict]:
+    if not os.path.exists(path):
+        return []
+    with open(path, "r", encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def _compare_ontologies(baseline: list[dict], final: list[dict]) -> dict:
+    """演化前后对比：函数增删改、supporting/confidence 分布。"""
+    base_by_name = {f.get("function_name"): f for f in baseline}
+    final_by_name = {f.get("function_name"): f for f in final}
+    kept = sorted(set(base_by_name) & set(final_by_name))
+    added = sorted(set(final_by_name) - set(base_by_name))
+    removed = sorted(set(base_by_name) - set(final_by_name))
+
+    def _dist(funcs, key, transform=lambda v: v):
+        vals = [transform(f.get(key)) for f in funcs if f.get(key) is not None]
+        if not vals:
+            return None
+        return {"mean": round(sum(vals) / len(vals), 3), "min": round(min(vals), 3), "max": round(max(vals), 3)}
+
+    return {
+        "baseline_count": len(baseline),
+        "final_count": len(final),
+        "kept": kept,
+        "added": added,
+        "removed": removed,
+        "supporting": {
+            "baseline": _dist(baseline, "supporting_obs_ids", len),
+            "final": _dist(final, "supporting_obs_ids", len),
+        },
+        "confidence": {
+            "baseline": _dist(baseline, "confidence"),
+            "final": _dist(final, "confidence"),
+        },
+    }
+
+
+def evaluator_final_node(state: dict) -> dict:
+    """终期评估：六维终评（force_full_review）+ 演化前后对比 + 导出最终 Ontology 快照。"""
+    out_dir = state.get("out_dir", DEFAULT_OUT_DIR)
+    os.makedirs(out_dir, exist_ok=True)
+    ns = state.get("namespace", "bootstrap")
+    report_path = os.path.join(out_dir, "evaluation_final.json")
+    st = dict(state)
+    ctx = {"report_path": report_path}
+    bank_snap = os.path.join(out_dir, f"bank_{ns}.jsonl")
+    if os.path.exists(bank_snap):
+        ctx["bank_file"] = bank_snap  # --final-only 历史结果优先用 Bank 快照（活体 Bank 可能被清空）
+    st["evaluation_context"] = ctx
+    st["force_full_review"] = True
+    result = evaluator_node(st)
+    report = result.get("evaluation_report") or {}
+
+    final_funcs = get_active_store().load_all()
+    baseline = _load_jsonl(os.path.join(out_dir, f"functions_{ns}_start.jsonl"))
+    comparison = _compare_ontologies(baseline, final_funcs)
+    final_report = {
+        "verdict": result.get("evaluator_decision"),
+        "passed_dimensions": report.get("passed_dimensions", []),
+        "failed_dimensions": report.get("failed_dimensions", []),
+        "dimensions": {k: {"score": d.get("score"), "pass": d.get("pass")}
+                       for k, d in (report.get("dimensions") or {}).items()},
+        "recommendations": report.get("recommendations", {}),
+        "comparison": comparison,
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(final_report, f, ensure_ascii=False, indent=2)
+
+    get_active_store().export_jsonl(os.path.join(out_dir, f"functions_{ns}.jsonl"))
+    bank = get_bank()
+    if os.path.exists(bank.jsonl_path):
+        shutil.copyfile(bank.jsonl_path, os.path.join(out_dir, f"bank_{ns}.jsonl"))
+    print(f"[Evaluator_final] 判定: {final_report['verdict']}（达标 {len(final_report['passed_dimensions'])}/6）")
+    c = comparison
+    print(f"  comparison: 基线 {c['baseline_count']} → 最终 {c['final_count']} "
+          f"（新增 {len(c['added'])} / 移除 {len(c['removed'])} / 保留 {len(c['kept'])}）")
+    print(f"  Final Report → {report_path}")
+
+    mr_path = os.path.join(out_dir, "match_report.json")
+    if os.path.exists(mr_path):
+        with open(mr_path, "r", encoding="utf-8") as f:
+            mr = json.load(f)
+        mr["final_evaluation"] = {
+            "verdict": final_report["verdict"],
+            "passed_dimensions": final_report["passed_dimensions"],
+            "failed_dimensions": final_report["failed_dimensions"],
+            "comparison": comparison,
+        }
+        with open(mr_path, "w", encoding="utf-8") as f:
+            json.dump(mr, f, ensure_ascii=False, indent=2)
+
+    return {
+        "final_report": final_report,
+        "messages": [{"role": "system", "content": f"[Evaluator_final] {final_report['verdict']}（{len(final_report['passed_dimensions'])}/6）"}],
+    }
+
+
 def _build_evolve_graph() -> StateGraph:
     """构建 evolve_app 拓扑（条件边循环，逐篇处理）。"""
     graph = StateGraph(NarrativePipelineState)
@@ -206,6 +306,7 @@ def _build_evolve_graph() -> StateGraph:
     graph.add_node("evaluator_mid", evaluator_mid_node)
     graph.add_node("report", report_node)
     graph.add_node("curator", curator_node)
+    graph.add_node("evaluator_final", evaluator_final_node)
 
     graph.add_edge(START, "story_loader")
     graph.add_conditional_edges(
@@ -225,13 +326,14 @@ def _build_evolve_graph() -> StateGraph:
     )
     graph.add_edge("evaluator_mid", "story_loader")
     graph.add_edge("report", "curator")
-    graph.add_edge("curator", END)
+    graph.add_edge("curator", "evaluator_final")
+    graph.add_edge("evaluator_final", END)
     return graph
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evolve 单图：新文本 → 提取 obs → Matcher 五分类 → 直写/Pools/报告")
-    parser.add_argument("--corpus", type=str, required=True, help="新文本语料目录（含 .txt，递归收集）")
+    parser.add_argument("--corpus", type=str, default=None, help="新文本语料目录（含 .txt，递归收集；--final-only 不需要）")
     parser.add_argument("--namespace", type=str, default="bootstrap",
                         help="Registry 命名空间（读函数库 + MATCH/EXTEND 直写目标，缺省 bootstrap）")
     parser.add_argument("--out-dir", type=str, default=None, help="输出目录（缺省 data/evolve）")
@@ -239,7 +341,26 @@ def main() -> None:
     parser.add_argument("--stories", type=str, default=None, help="仅处理指定文件（逗号分隔，优先于 --limit）")
     parser.add_argument("--batch-size", type=int, default=matcher_module.MATCH_BATCH_SIZE, help="Matcher 每批 obs 数")
     parser.add_argument("--top-k", type=int, default=matcher_module.TOP_K, help="每 obs 召回候选函数数")
+    parser.add_argument("--final-only", action="store_true", help="仅终评：对已有命名空间跑 Evaluator_final（跳过提取/匹配/维护）")
     args = parser.parse_args()
+
+    matcher_module.MATCH_BATCH_SIZE = args.batch_size
+    matcher_module.TOP_K = args.top_k
+    store = RegistryStore(namespace=args.namespace)
+    set_active_store(store)
+    out_dir = os.path.abspath(args.out_dir) if args.out_dir else DEFAULT_OUT_DIR
+    os.makedirs(out_dir, exist_ok=True)
+    if args.final_only:
+        result = evaluator_final_node({"namespace": args.namespace, "out_dir": out_dir})
+        fr = result.get("final_report") or {}
+        print(f"=== Evaluator_final（--final-only）: {fr.get('verdict')} "
+              f"（达标 {len(fr.get('passed_dimensions', []))}/6）===")
+        return
+    if not args.corpus:
+        print("请提供 --corpus（新文本语料目录）或使用 --final-only")
+        sys.exit(1)
+    # 导出演化前基线（供 Evaluator_final 前后对比）
+    store.export_jsonl(os.path.join(out_dir, f"functions_{args.namespace}_start.jsonl"))
 
     stories_dir = os.path.abspath(args.corpus)
     if not os.path.isdir(stories_dir):
@@ -275,10 +396,6 @@ def main() -> None:
         print(f"目录 {stories_dir} 中没有可处理的 .txt 文件")
         sys.exit(1)
 
-    matcher_module.MATCH_BATCH_SIZE = args.batch_size
-    matcher_module.TOP_K = args.top_k
-    store = RegistryStore(namespace=args.namespace)
-    set_active_store(store)
     n_funcs = store.count()
     print(f"=== Evolve 启动：函数库 namespace={args.namespace}（{n_funcs} 个 Function），"
           f"语料 {len(story_files)} 篇 ===")
@@ -308,7 +425,7 @@ def main() -> None:
         "story_meta": story_meta,
         "errors": [],
         "namespace": args.namespace,
-        "out_dir": os.path.abspath(args.out_dir) if args.out_dir else DEFAULT_OUT_DIR,
+        "out_dir": out_dir,
     }
     app = _build_evolve_graph().compile()
     start_time = time.time()

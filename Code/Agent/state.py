@@ -51,6 +51,7 @@ class NarrativePipelineState(TypedDict):
     pending_evidence: list[dict]     # 待应用区：MATCH/EXTEND 与 Critic 归函数证据（function_name/obs_id/source）
     match_pending: list[dict]        # 当前故事 MATCH/EXTEND + Critic 归函数的 pending 条目（节点间传递）
     curator_plan: list[dict]         # Curator 收尾维护方案（动作/目标/依据/ts，Human Review 留档）
+    final_report: dict | None        # Evaluator_final 终期评估报告（六维终评 + 演化前后对比）
 
     # ---- 流程控制 ----
     current_story_index: int

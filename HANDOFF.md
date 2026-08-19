@@ -210,6 +210,13 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 26）：Evolve v5：Evaluator_final 终期评估 + 最终 Ontology 定稿
+- `evolve_app` 图末尾加 `evaluator_final_node`（`curator → evaluator_final → END`）：复用 `evaluator_node` 做全量六维终评（`force_full_review=True`），Final Report（`evaluation_final.json`）含演化前后对比（基线 `functions_<ns>_start.jsonl` → 最终：新增/移除/保留 + supporting/confidence 分布）；导出最终 Ontology 快照 `functions_<ns>.jsonl` + `bank_<ns>.jsonl`。
+- `main` 新增 `--final-only`（跳过提取/匹配/维护，对已有命名空间终评）；非 `--final-only` 启动自动导出演化前基线；`evaluator_final_node` 优先用 `bank_<ns>.jsonl` 快照（活体 Bank 可能被测试清空）。
+- 测试 **102 项全过**（test_evolve 更新图末尾 + 新增 final 前后对比用例）。
+- 验收（`evolve_official` 33 函数 / 542 obs，`--final-only`）：**PASS 4/6**（coverage 0.985 / cohesion 0.893 / abstraction 0.97 / diversity 60；separation 1 组近义、evidence 个别 <2 故事）；对比 基线 30 → 最终 33（新增 11 / 移除 8 / 保留 22）；终评还发现拆分产物镜像近义（RULE_ESTABLISHMENT≈PARANORMAL_RULE_OPERATION）、PARANORMAL_RULE_OPERATION 题材绑定、weak_fit 2、SOCIAL_DESCENT 低证据。
+- 环境：`--final-only` 首次验收时活体 Bank 已被 pytest 清空 → coverage/evidence 全 0；已从 `occurrences.jsonl` 重建 `bank_evolve_official.jsonl`（542 obs，缺 affected_aspect/narrative_effect）+ `evaluator_final_node` 优先读 Bank 快照。
+
 ## 本轮（2026-08-19 续 25）：正式 Evolve（60 篇 5 领域）+ Curator 缺陷修复
 - 用户删 120 原始语料、新增 `zhihu_story_subset_60_5domains_20260819_clean`（60 篇 / 5 领域 / 每类 12 篇 + manifest）并用它重跑了 bootstrap（新 O_0 仅 3 函数 / 155 obs）；正式 Evolve 要求**基于旧 O_0（30 函数）**——从 `data/functions_export.csv`（payload 整存）恢复 30 函数到 `evolve_official`（清空失效 supporting，让证据从新文本累积）。
 - **正式跑（60 篇全量，~1.5h 超时中断后补收尾）**：542 obs / 21 次 Evaluator_mid（末次 PASS 4/6：coverage 0.991 / cohesion 0.908 / abstraction 0.867 / diversity 57；separation 2 组近义、evidence 有个别 <2 故事）；Curator 动作 414 = 应用 pending 404 + 新增 5 函数 + MERGE 2 + SPLIT 2 + REMOVE 1 → 最终 33 函数（22 旧函数证据累积 ver2、5 新归纳、2 合并、2 组拆分、1 移除）。

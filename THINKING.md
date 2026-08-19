@@ -233,3 +233,11 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **发现缺陷**：`evaluator_mid_node` 的 `mid_reports` summary 没保存 `recommendations` → Curator `_revise_from_report` 拿到的报告无 merge_groups/revise 问题 → 体检问题永远消费不到（冒烟未暴露，正式跑暴露）。修复：summary 增加 `recommendations`。
 - **正式跑结果**：542 obs / 21 次体检（末次 PASS 4/6）；Curator 414 动作 → 33 函数（22 旧 + 5 新增 + 2 合并 + 2 组拆分 - 1 移除）。长任务 1h 超时中断、report 后 curator 未执行 → 手动补跑。
 - **状态**：数据流完整验证（提取→匹配→复检→体检→维护→写回）。Evaluator_final 为后续轮。
+
+## 25. Evolve v5：Evaluator_final 终期评估 + 最终 Ontology 定稿（2026-08-19）
+
+- **背景**：structure-rules 终期要求 Evaluator_final 全面评估、输出 Final Report + 最终 Ontology；用户确认"图内收尾 + 独立可跑（--final-only）"与"Final Report 含演化前后对比"。
+- **实现**：`evaluator_final_node`（`curator → evaluator_final → END`）复用 `evaluator_node`（`force_full_review=True`），Final Report 含六维终评 + 前后对比（基线 `functions_<ns>_start.jsonl` → 最终）；导出 `functions_<ns>.jsonl` + `bank_<ns>.jsonl`；`main --final-only` 独立终评。
+- **踩坑**：`--final-only` 验收时活体 Bank 已被 pytest 清空 → coverage/evidence 全 0；修复：`evaluator_final_node` 优先读 `bank_<ns>.jsonl` 快照，并从 `occurrences.jsonl` 重建 542 obs 快照。
+- **验证**：102 测试全过；`evolve_official` 终评 PASS 4/6（coverage 0.985 / abstraction 0.97 / diversity 60），对比 30→33（新增 11 / 移除 8 / 保留 22）；终评发现拆分产物镜像近义（RULE_ESTABLISHMENT≈PARANORMAL_RULE_OPERATION）与题材绑定残留。
+- **状态**：Evolve 阶段闭环完成（提取→匹配→复检→体检→维护→终评定稿）。后续：Plan.md 阶段一（Story Profile / Function 前置条件角色位置状态变化 / Instance Card）。

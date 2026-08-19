@@ -218,6 +218,12 @@ def test_evolve_flow():
         with open(os.path.join(tmp, "match_report.json"), "r", encoding="utf-8") as f:
             mr = json.load(f)
         assert "curator" in mr and mr["curator"]["actions"] >= 2, mr.get("curator")
+        # Evaluator_final：终评报告 + 最终 Ontology 快照 + 前后对比
+        assert os.path.exists(os.path.join(tmp, "evaluation_final.json"))
+        assert os.path.exists(os.path.join(tmp, "functions_evolve_test.jsonl"))
+        fr = result["final_report"]
+        assert fr["verdict"] in ("PASS", "FAIL")
+        assert fr["comparison"]["baseline_count"] == 0 and fr["comparison"]["final_count"] == 1
     print("evolve_app 全流程（逐篇循环 + pending + pools + 报告 + curator）: OK")
 
 
@@ -355,11 +361,49 @@ def test_evolve_mid_not_triggered(tmp_path, monkeypatch):
         finally:
             set_active_store(prev)
             bank.clear()
-        assert calls["eval"] == 0, calls
+        assert calls["eval"] == 1, calls  # 仅 Evaluator_final 一次（mid 未触发）
         assert result["mid_reports"] == []
         assert result["match_report"]["mid_evaluations"] == []
         assert not os.path.exists(os.path.join(tmp, "evaluation_mid_1.json"))
     print("evolve Evaluator_mid 不足阈值不触发: OK")
+
+
+def test_evaluator_final_with_baseline(tmp_path):
+    """evaluator_final：六维终评 + 前后对比（基线快照存在 → kept/added 正确）。"""
+    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0, "critic": 0}
+    with tempfile.TemporaryDirectory() as tmp:
+        from Agent.app import get_bank
+        bank = get_bank()
+        bank.clear()
+        bank.embedder = FakeEmbedder()
+        prev = get_active_store()
+        store = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="evolve_test")
+        store.replace_all([
+            _mid_func(),
+            {"schema_version": 2, "function_name": "OLD_FUNC", "definition": "旧函数定义",
+             "realization_patterns": ["旧模式"], "supporting_obs_ids": [], "confidence": 0.6},
+        ])
+        set_active_store(store)
+        # 基线快照：只有 OLD_FUNC（模拟演化前）
+        with open(os.path.join(tmp, "functions_evolve_test_start.jsonl"), "w", encoding="utf-8") as f:
+            f.write(json.dumps({
+                "schema_version": 2, "function_name": "OLD_FUNC", "definition": "旧函数定义",
+                "realization_patterns": ["旧模式"], "supporting_obs_ids": [], "confidence": 0.6,
+            }, ensure_ascii=False) + "\n")
+        try:
+            app = ev._build_evolve_graph().compile()
+            with _patched_llm(calls):
+                result = app.invoke(_initial(tmp, []))  # 空故事 → 直达 report/curator/final
+        finally:
+            set_active_store(prev)
+            bank.clear()
+        fr = result["final_report"]
+        cmp = fr["comparison"]
+        assert cmp["baseline_count"] == 1 and cmp["final_count"] == 2, cmp
+        assert "RESOURCE_ACQUISITION" in cmp["added"] and "OLD_FUNC" in cmp["kept"], cmp
+        assert fr["verdict"] in ("PASS", "FAIL")
+        assert "confidence" in cmp and "supporting" in cmp
+    print("evaluator_final 前后对比（基线存在）: OK")
 
 
 if __name__ == "__main__":

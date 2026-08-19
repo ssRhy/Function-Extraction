@@ -137,7 +137,9 @@ python -m Agent.evolve --corpus <dir> --batch-size 10 --top-k 5
 - 每个 obs 落一条 **FunctionOccurrence**（`occurrences.jsonl`：function_name/label/story_id/category/事件/参与者/前后状态/表层/原文下标/story_stage/top_candidates/reason），NOVEL 记为 `OTHER` 不强行分类（对齐 Plan.md：OTHER/低置信度是发现新 Function 的来源）。
 - **Evaluator_mid 周期体检**：每累计 `MID_OBS_THRESHOLD`（默认 20）个新 obs 触发一次六维评估（复用 `evaluator_node`；评估对象 = 当前 Registry + **pending 证据的"应用后视图"临时快照** + Bank）；体检只记录问题不触发修订，报告落盘 `evaluation_mid_<n>.json`，`match_report.json` 的 `mid_evaluations` 汇总各轮判定（含 `pending_applied`）。
 - **Curator 收尾维护**（图末尾 `report → curator → END`）：整合 pending（应用 exemplars）、novelty（跨故事 ≥2 且 ≥3 obs 才归纳新函数）、challenge/体检问题（合并/修订/剔除/移除）——**按动作分门槛**（`APPLY_EVIDENCE` 无门槛、`ADD_MIN_NOVEL=3`、`REVISE_MIN_SUPPORTING=3`），不足记 `SKIP_SMALL_SAMPLE` 保留累积；方案写 `curator_plan.jsonl`（Human Review 自动留档）后自动 Apply 写回 Registry（追加 `version_history`），清空已消费 pending。
-- 产物在 `data/evolve/`：`occurrences.jsonl` / `novelty_pool.jsonl` / `challenge_pool.jsonl`（含复检 RESOLVED）/ `pending_evidence.jsonl` / `curator_plan.jsonl` / `match_report.json`（分类计数 + `coverage=(MATCH+EXTEND)/total` + `novelty_rate=NOVEL/total` + `curator` 汇总）。
+- **Evaluator_final 终期评估**（图末尾 `curator → evaluator_final → END`）：复用 `evaluator_node` 对最终 Registry + Bank 做全量六维终评（`force_full_review=True`），Final Report（`evaluation_final.json`）含**演化前后对比**（基线 `functions_<ns>_start.jsonl` → 最终，新增/移除/保留 + supporting/confidence 分布），并导出最终 Ontology 快照 `functions_<ns>.jsonl` + `bank_<ns>.jsonl`；verdict 仅作验收报告，不阻断导出。
+- `python -m Agent.evolve --final-only --namespace <ns>`：对已有命名空间单独终评（跳过提取/匹配/维护；`--final-only` 优先用 `bank_<ns>.jsonl` 快照评估，活体 Bank 可能已被清空）。
+- 产物在 `data/evolve/`：`occurrences.jsonl` / `novelty_pool.jsonl` / `challenge_pool.jsonl`（含复检 RESOLVED）/ `pending_evidence.jsonl` / `curator_plan.jsonl` / `evaluation_final.json` / `match_report.json`（分类计数 + `coverage` + `novelty_rate` + `curator` + `final_evaluation` 汇总）。
 - `--namespace` 默认 `bootstrap`（读函数库 + 证据落区目标）；演示请用独立命名空间避免污染 O_0。不做 checkpoint（Bank.add 幂等，可整批重跑）。
 
 ### 语料清洗
