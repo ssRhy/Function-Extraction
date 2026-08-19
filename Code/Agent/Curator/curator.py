@@ -18,6 +18,8 @@ from Agent.Matcher.matcher import _apply_evidence
 from Agent.Inducer.cluster import cluster_similar_pairs
 from Agent.Inducer.inducer import inducer_node
 from Agent.Evaluator import revise as rev
+from Agent.llm import chat_structured
+from Prompt.Abstract_merge_prompt import ABSTRACT_MERGE_SYSTEM_PROMPT, AbstractMergeResponse
 
 # ---- 动作分门槛（可调）----
 ADD_MIN_NOVEL = 3            # 归纳新函数的最小 novel obs 数（另需跨故事 >= 2，文档 §9）
@@ -109,16 +111,71 @@ def _induce_novelty(novel_occs: list[dict], bank, plan: list[dict]) -> int:
     return added
 
 
+def _full_merge_scan(funcs_by_name: dict, obs_by_id: dict, embedder, plan: list[dict], consumed: set) -> bool:
+    """全量 LLM 近义扫描：当前全部函数卡片 → LLM 识别"同一结构作用"组 → 每组 _llm_merge 重新归纳。
+
+    bootstrap 验证过的机制（59→30 有效）；比向量预筛可靠（MiniLM 中文对用词不同但同义的
+    近义余弦不够、又会连上共享词汇的非近义），比 Evaluator 的附加 merge_groups 更专注（专门任务）。
+    """
+    names = [n for n in funcs_by_name if n not in consumed]
+    if len(names) < 2:
+        return False
+    cards = [{
+        "function_name": funcs_by_name[n].get("function_name"),
+        "definition": funcs_by_name[n].get("definition", ""),
+        "realization_patterns": funcs_by_name[n].get("realization_patterns", []),
+    } for n in names]
+    user_content = "请识别承担同一结构作用、应归并的函数组：\n" + json.dumps(cards, ensure_ascii=False, indent=1)
+    try:
+        result = chat_structured([
+            {"role": "system", "content": ABSTRACT_MERGE_SYSTEM_PROMPT},
+            {"role": "user", "content": user_content},
+        ], AbstractMergeResponse)
+        groups = [g for g in result.merge_groups if isinstance(g, list) and len(g) >= 2]
+    except Exception as e:
+        plan.append(_plan_record("SKIP_SMALL_SAMPLE", "FULL_MERGE_SCAN", reason=f"近义扫描失败：{e}"))
+        return False
+    if not groups:
+        return False
+
+    changed = False
+    for members in groups:
+        valid = [m for m in members if m in funcs_by_name and m not in consumed]
+        if len(valid) < 2:
+            continue
+        if any(len(funcs_by_name[m].get("supporting_obs_ids", [])) < REVISE_MIN_SUPPORTING for m in valid):
+            plan.append(_plan_record(
+                "SKIP_SMALL_SAMPLE", "+".join(valid),
+                reason=f"近义扫描：成员 supporting < {REVISE_MIN_SUPPORTING}",
+            ))
+            continue
+        merged, err = rev._llm_merge([funcs_by_name[m] for m in valid], obs_by_id)
+        if merged is None:
+            plan.append(_plan_record("SKIP_SMALL_SAMPLE", "+".join(valid), reason=f"近义合并失败：{err}"))
+            continue
+        rev._recalc_confidence(merged, obs_by_id, embedder)
+        _bump_version(merged, "MERGE")
+        for m in valid:
+            consumed.add(m)
+            del funcs_by_name[m]
+        funcs_by_name[merged["function_name"]] = merged
+        changed = True
+        plan.append(_plan_record("MERGE", merged["function_name"], members=valid, source="full_merge_scan"))
+    return changed
+
+
 def _revise_from_report(report: dict, store, bank, plan: list[dict]) -> bool:
     rec = (report or {}).get("recommendations") or {}
-    if not any(rec.get(k) for k in _ACTIONABLE_KEYS):
-        return False
     funcs = store.load_all()
     by_name = {f["function_name"]: dict(f) for f in funcs}
     obs_by_id = {o.get("obs_id"): o for o in bank.get_all()}
     embedder = bank.embedder
     consumed = set()
-    changed = False
+    changed = _full_merge_scan(by_name, obs_by_id, embedder, plan, consumed)
+    if not any(rec.get(k) for k in _ACTIONABLE_KEYS):
+        if changed:
+            store.replace_all(list(by_name.values()))
+        return changed
 
     for group in rec.get("merge_groups", []):
         members = [by_name[n] for n in group if n in by_name and n not in consumed]

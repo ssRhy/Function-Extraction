@@ -241,3 +241,11 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **踩坑**：`--final-only` 验收时活体 Bank 已被 pytest 清空 → coverage/evidence 全 0；修复：`evaluator_final_node` 优先读 `bank_<ns>.jsonl` 快照，并从 `occurrences.jsonl` 重建 542 obs 快照。
 - **验证**：102 测试全过；`evolve_official` 终评 PASS 4/6（coverage 0.985 / abstraction 0.97 / diversity 60），对比 30→33（新增 11 / 移除 8 / 保留 22）；终评发现拆分产物镜像近义（RULE_ESTABLISHMENT≈PARANORMAL_RULE_OPERATION）与题材绑定残留。
 - **状态**：Evolve 阶段闭环完成（提取→匹配→复检→体检→维护→终评定稿）。后续：Plan.md 阶段一（Story Profile / Function 前置条件角色位置状态变化 / Instance Card）。
+
+## 26. 近义碎片处理：向量预筛失败 → 全量 LLM 扫描（2026-08-19）
+
+- **问题**：用户指出 evolve_official 内部有近义碎片（资源/真相/关系/压力族），Evaluator 的 `merge_groups`（LLM 附加字段）漏检。
+- **尝试 1（失败）**：definition 向量余弦预筛——0.85 漏检（MiniLM 中文对"用词不同但同义"不够近）、0.78 假簇（把 ANOMALY_OMEN 连进真相族、FATAL_INCIDENT 连进资源族，LLM 确认也挡不住过度合并）。**教训：MiniLM 中文定义向量不适合做近义判定**（bootstrap 时代 0.85 漏/0.78 假簇的根源）。
+- **方案（落地）**：Curator 每批 `_full_merge_scan`——全量函数卡片喂 `Abstract_merge_prompt`（专门任务：识别同一结构作用组，宁少勿滥 + 超大类防护）→ 每组 `_llm_merge` 重新归纳。这是 bootstrap abstract_merge 验证过的机制（59→30），比 Evaluator 的"附加字段"更专注。
+- **验证**：40 篇碎片 24→19（5 组合并，1 组门槛 SKIP）；终评 PASS 6/6（separation 0 / abstraction 1.0）。测试 104 项全过。
+- **状态**：近义收敛机制已入 Curator（每批自动跑）；demo 结果干净（19 函数）。

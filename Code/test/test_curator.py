@@ -11,6 +11,7 @@ from Agent.Curator import curator as cu
 from Agent.Curator.curator import curator_node
 from Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
 from Agent.Evaluator import revise as rev
+from Prompt.Abstract_merge_prompt import AbstractMergeResponse
 
 
 class FakeEmbedder:
@@ -199,6 +200,57 @@ def test_no_accumulation(tmp_path):
     assert out["curator_plan"] == []
     assert out["pending_evidence"] == []
     print("curator 无累积跳过: OK")
+
+
+def test_merge_near_dups_prescreen(tmp_path):
+    """近义预筛：definition 余弦 > 阈值 的近义组经 _llm_merge 合并，不同函数保留。"""
+    bank, store, prev = _setup(str(tmp_path), [
+        _func("F_A", ["x1", "x2", "x3"], definition="角色获得外部资源改善自身处境"),
+        _func("F_B", ["x1", "x2", "x3"], definition="角色获得外部资源改善自身状况"),
+        _func("F_C", ["x1", "x2", "x3"], definition="角色遭遇致命意外引发紧张氛围"),
+    ])
+    merged = {
+        "function_name": "F_AB", "definition": "获得外部资源改善处境",
+        "realization_patterns": [], "hard_negatives": [],
+        "supporting_obs_ids": ["x1", "x2", "x3", "x4", "x5", "x6"],
+    }
+    orig = (cu.chat_structured, rev._llm_merge)
+    cu.chat_structured = lambda messages, schema, **kw: AbstractMergeResponse(merge_groups=[["F_A", "F_B"]])
+    rev._llm_merge = lambda members, obs_by_id: (dict(merged), None)
+    try:
+        plan = []
+        changed = cu._revise_from_report({}, store, bank, plan)  # 无报告也跑预筛
+    finally:
+        cu.chat_structured, rev._llm_merge = orig
+        _teardown(prev)
+    assert changed, plan
+    names = {f["function_name"] for f in store.load_all()}
+    assert "F_AB" in names and "F_A" not in names and "F_B" not in names
+    assert "F_C" in names
+    assert any(p["action"] == "MERGE" and p.get("source") == "full_merge_scan" for p in plan)
+    print("近义预筛合并: OK")
+
+
+def test_merge_near_dups_threshold(tmp_path):
+    """近义组成员 supporting < REVISE_MIN_SUPPORTING → SKIP，不合并。"""
+    bank, store, prev = _setup(str(tmp_path), [
+        _func("F_A", ["x1", "x2", "x3"], definition="角色获得外部资源改善自身处境"),
+        _func("F_D", ["x1", "x2"], definition="角色获得外部资源改善自身状况"),
+    ])
+    orig = (cu.chat_structured, rev._llm_merge)
+    cu.chat_structured = lambda messages, schema, **kw: AbstractMergeResponse(merge_groups=[["F_A", "F_D"]])
+    rev._llm_merge = lambda m, o: (_ for _ in ()).throw(AssertionError("门槛不足不应合并"))
+    try:
+        plan = []
+        changed = cu._revise_from_report({}, store, bank, plan)
+    finally:
+        cu.chat_structured, rev._llm_merge = orig
+        _teardown(prev)
+    assert not changed
+    assert any(p["action"] == "SKIP_SMALL_SAMPLE" for p in plan)
+    names = {f["function_name"] for f in store.load_all()}
+    assert "F_A" in names and "F_D" in names
+    print("近义预筛门槛 SKIP: OK")
 
 
 if __name__ == "__main__":

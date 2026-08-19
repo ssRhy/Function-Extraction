@@ -210,6 +210,19 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 28）：Curator 近义收敛机制（全量 LLM 扫描）+ 40 篇碎片处理
+- 用户反馈 evolve_official 内部有近义碎片（外部资源 2、真相 2、关系 3、压力/后果 2 等）。先试向量预筛（definition 余弦）：0.85 漏检（MiniLM 中文对"用词不同但同义"余弦不够）、0.78 假簇/争议（把 ANOMALY_OMEN 连进真相族、FATAL_INCIDENT 连进资源族）——**MiniLM 中文定义向量不适合近义预筛**。
+- 改为复用 bootstrap 验证过的机制：Curator 每批 `_full_merge_scan`（全量函数卡片 → `Abstract_merge_prompt` 专门识别"同一结构作用"组 → 每组 `_llm_merge` 重新归纳，`REVISE_MIN_SUPPORTING=3` 门槛）。删除临时 `Confirm_merge_prompt.py`。
+- 40 篇当前碎片收敛：24 → **19 函数**（合并 5 组：结盟+关系发展→RELATIONSHIP_BONDING、异常征兆+部分真相→CLUE_OMEN_REVELATION、外部资源介入+获得→EXTERNAL_ASSISTANCE_INTERVENTION、亲密增加+关系升级→RELATIONSHIP_INTIMACY_ESCALATION、社会压力+行为后果→SOCIAL_PRESSURE_CONSEQUENCE；1 组 SKIP：名誉受损+关系破裂 supporting<3）。
+- **终评 PASS 6/6**（19 函数）：coverage 0.986 / cohesion 0.915 / **separation 0** / abstraction 1.0 / evidence 7.895 / diversity 36；对比 30→19（新增 7 / 移除 18 / 保留 12）。
+- 测试 **104 项全过**（test_curator 近义扫描用例改为 mock `AbstractMergeResponse`）。
+
+## 本轮（2026-08-19 续 27）：重置 O_0 后 40 篇 Evolve → Evaluator_final PASS 6/6
+- 用户要求：`functions_export.csv`（bootstrap O_0 30 函数）覆盖 functions.db（清空全部命名空间）、删除之前 evolve 产物、基于 30 跑 evolve 40 篇。已执行：DB 清空 → bootstrap=30（清空失效 supporting，证据从新语料累积）→ 复制到 `evolve_official` → 删除 data/evolve_* 旧目录。
+- **40 篇（5 类 × 8）跑完**（2042.7s ≈ 34min）：365 obs / coverage 0.638 / novelty 0.093；Curator 243 动作（233 APPLY_EVIDENCE + ADD 1 + MERGE 1 + SPLIT 1 + REMOVE 6 + SKIP 1）。
+- **Evaluator_final PASS 6/6**：coverage 0.986 / cohesion 0.916 / separation 0 / abstraction 0.917 / evidence 6.708 / diversity 36；对比 **30 → 24 函数**（新增 3：ACTION_CONSEQUENCE / SOCIAL_ISOLATION / THREAT_ESCALATION_OR_LIFE_SAFETY；移除 9 个低证据 <2 故事；保留 21）。
+- 注意：MERGE 产物 `THREAT_ESCALATION_OR_LIFE_SAFETY`（sup 26）被终评标"双向混叠残留"（被动威胁 vs 主动应对），但不影响 PASS；confidence 整体仍偏低（0.39-0.62，apply_confusable 惩罚）。
+
 ## 本轮（2026-08-19 续 26）：Evolve v5：Evaluator_final 终期评估 + 最终 Ontology 定稿
 - `evolve_app` 图末尾加 `evaluator_final_node`（`curator → evaluator_final → END`）：复用 `evaluator_node` 做全量六维终评（`force_full_review=True`），Final Report（`evaluation_final.json`）含演化前后对比（基线 `functions_<ns>_start.jsonl` → 最终：新增/移除/保留 + supporting/confidence 分布）；导出最终 Ontology 快照 `functions_<ns>.jsonl` + `bank_<ns>.jsonl`。
 - `main` 新增 `--final-only`（跳过提取/匹配/维护，对已有命名空间终评）；非 `--final-only` 启动自动导出演化前基线；`evaluator_final_node` 优先用 `bank_<ns>.jsonl` 快照（活体 Bank 可能被测试清空）。
