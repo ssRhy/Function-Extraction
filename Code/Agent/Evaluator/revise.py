@@ -15,7 +15,7 @@ from Agent.llm import chat_structured
 from Agent.Inducer.confidence import calculate_confidence_detailed
 from Agent.Registry.registry import get_active_store
 from Agent.Evaluator import evaluator as ev
-from Agent.Evaluator.dimensions import _obs_text, _cosine
+from Agent.Evaluator.dimensions import _cosine
 from Prompt.Merge_prompt import MERGE_SYSTEM_PROMPT, MergeResponse
 from Prompt.Revise_prompt import REVISE_SYSTEM_PROMPT, ReviseResponse
 
@@ -169,7 +169,7 @@ def _assign_split_obs(supporting_ids, obs_by_id, sub_funcs, embedder, min_sim: f
         o = obs_by_id.get(oid)
         if not o:
             continue
-        obs_vec = embedder.encode([_obs_text(o)])[0]
+        obs_vec = embedder.encode_observation(o)
         sims = [_cosine(obs_vec, def_vecs[i]) for i in range(len(sub_funcs))]
         best = max(range(len(sub_funcs)), key=lambda i: sims[i])
         if sims[best] >= min_sim:

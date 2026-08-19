@@ -14,6 +14,17 @@ os.environ.pop("HF_ENDPOINT", None)  # 清除可能冲突的镜像设置
 from sentence_transformers import SentenceTransformer
 
 
+# 结构化 Observation 字段权重：核心结构字段高、表层字段低（可调）
+OBS_FIELD_WEIGHTS = [
+    ("before_state", 1.0),
+    ("event", 1.5),
+    ("after_state", 1.5),
+    ("affected_aspect", 0.8),
+    ("narrative_effect", 1.0),
+    ("surface_form", 0.6),
+]
+
+
 class Embedder:
     """
     统一 embedding 接口，封装 sentence-transformers。
@@ -72,3 +83,26 @@ class Embedder:
             np.ndarray, shape (dimension,)
         """
         return self.model.encode([text], convert_to_numpy=True, show_progress_bar=False)[0]
+
+    def encode_observation(self, obs: dict) -> np.ndarray:
+        """结构化 Observation 编码：逐字段编码 + 加权平均（L2 归一化）。
+
+        空字段跳过；全空返回零向量。比"拼串再编码"更尊重字段语义权重。
+        """
+        vecs, weights = [], []
+        for field, weight in OBS_FIELD_WEIGHTS:
+            text = (obs or {}).get(field, "")
+            if text and text.strip():
+                vecs.append(self.encode_single(text))
+                weights.append(weight)
+        if not vecs:
+            return np.zeros(self._dim)
+        pooled = np.average(np.array(vecs), axis=0, weights=np.array(weights))
+        norm = np.linalg.norm(pooled)
+        return pooled / norm if norm > 0 else pooled
+
+    def encode_observations(self, observations: list[dict]) -> np.ndarray:
+        """批量结构化编码（供 bank.add / evaluator 全量用）。"""
+        if not observations:
+            return np.zeros((0, self._dim))
+        return np.array([self.encode_observation(o) for o in observations])

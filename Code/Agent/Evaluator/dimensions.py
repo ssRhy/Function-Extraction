@@ -42,14 +42,6 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     return dot / (na * nb)
 
 
-def _obs_text(obs: dict) -> str:
-    return " | ".join(x for x in (
-        obs.get("before_state", ""),
-        obs.get("event", ""),
-        obs.get("after_state", ""),
-    ) if x) or obs.get("surface_form", "")
-
-
 # ========== 1. Coverage 覆盖率 ==========
 
 def compute_coverage(functions, all_obs, embedder, sim_threshold: float = COVERAGE_SIM_THRESHOLD) -> dict:
@@ -60,7 +52,7 @@ def compute_coverage(functions, all_obs, embedder, sim_threshold: float = COVERA
     for f in functions:
         supporting_ids.update(f.get("supporting_obs_ids", []))
     def_vecs = embedder.encode([f.get("definition", "") for f in functions])
-    obs_vecs = embedder.encode([_obs_text(o) for o in all_obs])
+    obs_vecs = embedder.encode_observations(all_obs)
     def_norm = def_vecs / np.maximum(np.linalg.norm(def_vecs, axis=1, keepdims=True), 1e-9)
     obs_norm = obs_vecs / np.maximum(np.linalg.norm(obs_vecs, axis=1, keepdims=True), 1e-9)
     sims = obs_norm @ def_norm.T
@@ -84,7 +76,7 @@ def compute_cohesion(functions, obs_by_id, embedder, fit_threshold: float = OBS_
         sup = [obs_by_id[oid] for oid in f.get("supporting_obs_ids", []) if oid in obs_by_id]
         if len(sup) < 2:
             continue
-        vecs = embedder.encode([_obs_text(o) for o in sup])
+        vecs = embedder.encode_observations(sup)
         centroid = vecs.mean(axis=0)
         sims = [_cosine(vecs[i], centroid) for i in range(len(vecs))]
         per_function.append(sum(sims) / len(sims))

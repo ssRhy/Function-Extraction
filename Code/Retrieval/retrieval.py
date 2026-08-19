@@ -45,7 +45,8 @@ class Retriever:
         text: str,
         top_k: int = 10,
         story_id: Optional[str] = None,
-        exclude_obs_ids: Optional[list[str]] = None
+        exclude_obs_ids: Optional[list[str]] = None,
+        query_vector: Optional[list] = None,
     ) -> list[RetrievedObservation]:
         """
         根据文本描述检索语义相似的 Observations。
@@ -62,7 +63,10 @@ class Retriever:
         if self.bank.count() == 0:
             return []
 
-        query_embedding = self.bank.embedder.encode_single(text).tolist()
+        if query_vector is not None:
+            query_embedding = query_vector
+        else:
+            query_embedding = self.bank.embedder.encode_single(text).tolist()
         seen_ids = set(exclude_obs_ids or [])
 
         where_filter = None
@@ -120,15 +124,6 @@ class Retriever:
         Returns:
             RetrievedObservation 列表
         """
-        # 用 Observation 的结构化字段构造检索文本
-        text = " | ".join([
-            obs.get("before_state", ""),
-            obs.get("event", ""),
-            obs.get("after_state", ""),
-            obs.get("affected_aspect", ""),
-            obs.get("narrative_effect", ""),
-        ])
-
         exclude_ids = list(exclude_obs_ids or [])
         if exclude_same_story:
             exclude_ids.extend(
@@ -136,7 +131,8 @@ class Retriever:
             )
 
         return self.query_similar(
-            text=text,
+            text="",
+            query_vector=self.bank.embedder.encode_observation(obs).tolist(),
             top_k=top_k,
             exclude_obs_ids=exclude_ids + [obs["obs_id"]]
         )

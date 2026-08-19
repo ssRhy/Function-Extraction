@@ -210,6 +210,13 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 20）：结构化 Observation embedding + 语义化 surface_diversity
+- 用户提出：`surface_diversity` 靠字符串匹配不合理、结构化数据拼起来算需要 embedding。落地：
+  - `Embedding/embedding.py` 新增 `encode_observation`/`encode_observations`（逐字段加权平均 + L2 归一化；`OBS_FIELD_WEIGHTS`：event/after=1.5、before/effect=1.0、affected=0.8、surface=0.6）；替换全部"拼串→encode"调用点（`Bank.add` / `Retrieval.query_by_observation` / confidence coherence / Evaluator coverage·cohesion / revise SPLIT 分配）。
+  - `_compute_surface_diversity`：精确字符串 `set()` → embedding 贪心语义去重（`SURFACE_SIM_THRESHOLD=0.80`）。
+- 验证：新增 `test_embedding.py` 3 项 + `test_evaluator` weak-fit 用例适配 → **79 项全过**。快照抽样 4 函数：coherence 0.81-0.84（旧 0.54-0.64）、surface 1.0。
+- 注意：Chroma 向量空间变更，旧 Bank 向量为旧拼串空间，fresh 重跑整体重建无混合；coverage 0.65 阈值可能在结构化编码后偏移，待集成校准。
+
 ## 本轮（2026-08-16 续 11）：LangGraph 范式审查 + 仓库清理 + 修订历史落盘 + .env 去跟踪
 - **LangGraph 审查**：合规（State TypedDict+add_messages / node 返回字段 / 先节点后边再 compile / 条件边字符串路由 / MemorySaver + thread_id / 闭环有界）；未做非必要重构（重试沿用库内循环模式）。
 - **删除**：`test_app.py`、`test_bank.py` + 其路径 bug 产物 `Code/Code/data/bank_test`（git 跟踪）、`test/stories/`（30 篇）、`draw_graph.py` + `langgraph_overall.mmd/.png`、`nf_llm_result.json` / `nf_rule_result.json` / `_enc_probe.txt`、旧日志 `batch_run_v2.log` / `batch_run_zhihu_v5.log`。

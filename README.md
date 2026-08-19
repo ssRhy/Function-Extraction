@@ -219,7 +219,7 @@ confidence = 0.3 × diversity + 0.3 × coherence + 0.2 × surface - 0.2 × confu
 |------|------|-----------|-----------|
 | `cross_story_diversity` | 跨故事证据充分性 | 证据来自同一故事（可能巧合） | 跨多个故事（结构通用） |
 | `semantic_coherence` | 语义一致性（基于 `supporting_obs_ids` 实际 obs） | obs 之间语义不一致 | obs 确实是同一结构 |
-| `surface_diversity` | 表层多样性 | 表层形式单一（领域偏见） | 多领域变体（去偏） |
+| `surface_diversity` | 表层多样性（embedding 语义去重，`SURFACE_SIM_THRESHOLD=0.80`） | 表层形式单一（领域偏见） | 多领域变体（去偏） |
 | `confusability_penalty` | 与已有 Function 的相似度（惩罚项） | 与已有 Function 重复 | 全新结构 |
 
 - `diversity` = supporting obs 中 story_id 去重数 / obs 总数

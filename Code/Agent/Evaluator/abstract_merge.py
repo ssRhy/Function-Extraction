@@ -16,14 +16,13 @@ from Prompt.Abstract_merge_prompt import (
 MAX_MERGE_OBS = 20
 
 
-def _merge_round(funcs: list[dict], bank) -> tuple[list[dict], bool]:
-    """单轮：全量识别近义组 → 每组复用 revise._llm_merge 重新归纳为一个新的统一函数。
+def abstract_merge(funcs: list[dict], bank) -> list[dict]:
+    """全量抽象归并：单轮识别近义组，逐组复用 revise._llm_merge 重新归纳为一个新的统一函数。
 
     粒度守卫：成员 supporting 并集 > MAX_MERGE_OBS 的组跳过（宁少勿滥，阻止超大类）。
-    返回 (归并后函数列表, 是否发生了合并)。
     """
     if len(funcs) < 2:
-        return funcs, False
+        return funcs
     by_name = {f.get("function_name"): f for f in funcs}
     cards = [{
         "function_name": f.get("function_name"),
@@ -38,7 +37,7 @@ def _merge_round(funcs: list[dict], bank) -> tuple[list[dict], bool]:
         ], AbstractMergeResponse)
     except Exception as e:
         print(f"  [AbstractMerge] 近义组识别失败，保持原样: {e}")
-        return funcs, False
+        return funcs
 
     obs_by_id = {o.get("obs_id"): o for o in bank.get_all()}
     consumed: set[str] = set()
@@ -82,13 +81,4 @@ def _merge_round(funcs: list[dict], bank) -> tuple[list[dict], bool]:
         f["function_name"] = name
     if consumed:
         print(f"  [AbstractMerge] 归并 {len(consumed)} 个函数 → {len(new_funcs)} 个新函数")
-    return out, bool(consumed)
-
-
-def abstract_merge(funcs: list[dict], bank) -> list[dict]:
-    """全量抽象归并：单轮识别近义组，逐组 _llm_merge 重新归纳为一个新的统一函数。
-
-    单轮保证中间粒度（符合文档 Principle 4：太抽象不好）；迭代会过度上卷成超大类。
-    """
-    result, _ = _merge_round(funcs, bank)
-    return result
+    return out

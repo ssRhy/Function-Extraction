@@ -44,6 +44,21 @@ class FakeEmbedder:
     def encode_single(self, text):
         return self._vec(text)
 
+    def encode_observation(self, obs):
+        vecs = []
+        for f in ("before_state", "event", "after_state", "affected_aspect", "narrative_effect", "surface_form"):
+            t = (obs or {}).get(f, "")
+            if t and t.strip():
+                vecs.append(self._vec(t))
+        if not vecs:
+            return np.zeros(self.dim)
+        m = np.mean(vecs, axis=0)
+        n = np.linalg.norm(m)
+        return m / n if n else m
+
+    def encode_observations(self, observations):
+        return np.array([self.encode_observation(o) for o in observations])
+
 
 def _cfg(thread_id):
     return {"configurable": {"thread_id": thread_id}}

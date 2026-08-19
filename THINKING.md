@@ -187,3 +187,13 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **严格舍弃 vs LLM 非确定性（同日尾）**：全量 120 中途 6/6，final_review 全量复核暴露 2 组近义 + 2 混叠 → PASS 5/6 带残差 → 舍弃。矛盾：全量复核的 LLM 判定总会挑残差、3 轮上限常排不完 → 严格语义下多数全量跑会被舍弃（需加轮/放宽/重跑）。
 - **舍弃语义修正（同日尾）**：用户澄清"舍弃 = 舍弃不达标的 function，不是全部舍弃"——整批清空是理解偏差。改为 `export_node` 逐函数移除（`merge_groups` 每组保留 supporting obs 最多者），幸存者导出、被移除函数写 `discarded_<ns>.jsonl` 留档；仅全部被移除才判定"无 O_0"。教训：把"剔除坏函数"误实现成"整批丢弃"，应在实现前确认用户意图的粒度。
 - **全量 120 验收（同日尾）**：75 候选 → 逐函数舍弃 16 → 幸存 59 导出为 O_0；PASS 5/6。稳定性：① 分离进程 + 文件重定向规避"shell 中断→断管道→孤儿进程空转"；② checkpoint 体积 162→469MB 稳定（all_pairs 三元组修复生效）。教训：长任务用重定向直写文件 + 心跳监控，别用管道 + 前台阻塞。
+
+## 19. 结构化 Observation embedding + 语义化 surface_diversity（2026-08-19）
+
+- **难点（用户提出）**：① `surface_diversity` 靠精确字符串去重（`len(set(surface_form))/3`）——同义改写被算成多个模式、同串误判一个；② obs 被拼成一句（`before | event | after | …`）再 embedding——字段结构丢失、语义权重不分，结构化数据拼起来算不合理。
+- **方案**：
+  - `Embedding/embedding.py` 新增 `encode_observation`：逐字段 `encode_single` 加权平均 + L2 归一化（`OBS_FIELD_WEIGHTS`：event/after=1.5、before/effect=1.0、affected=0.8、surface=0.6——核心结构字段高、表层低；空字段跳过、全空返回零向量）+ `encode_observations` 批量版；
+  - 统一替换所有"拼串→encode"调用点：`Bank.add`、`Retrieval.query_by_observation`、`confidence._compute_semantic_coherence`、`Evaluator coverage/cohesion`、`revise SPLIT 分配`；
+  - `_compute_surface_diversity` 改为 embedding 贪心语义去重（`SURFACE_SIM_THRESHOLD=0.80`：与已选模式 centroid 余弦 ≥ 阈值视为同一模式），替代精确 `set()`。
+- **验证**：新增 `test_embedding.py` 3 项（同义改写算 1 个模式 / encode 维度·归一化·空字段·单字段等价 / confidence 结构化重算）；`test_evaluator` 的 weak-fit 用例适配结构化编码（离群更难触发，改 8 支持 obs + `[1,9)` 索引）；**79 项全过**。快照抽样 4 函数：新 coherence 0.81-0.84 vs 旧 0.54-0.64（结构化更稳定）；surface 均到上限 1.0。
+- **状态**：已落地。Chroma 向量空间变更：旧库 obs 向量仍是旧"拼串"空间，fresh 跑整体重建 Bank 无混合；coverage 阈值 0.65 可能在结构化编码后偏移，验证时若偏差明显同步校准。

@@ -95,13 +95,19 @@ def test_coverage():
 
 
 def test_cohesion_weak_fit():
-    obs, funcs = make_set()
     emb = get_embedder()
+    obs = [_obs(f"s{i % 4 + 1}", f"obs_{i:03d}") for i in range(1, 9)]
+    funcs = [{
+        "function_name": "F_A",
+        "definition": "角色获知关键信息，改变认知或推动行动",
+        "supporting_obs_ids": [f"obs_{i:03d}" for i in range(1, 9)],
+    }]
     obs_by_id = {o["obs_id"]: o for o in obs}
     r = dim.compute_cohesion(funcs, obs_by_id, emb)
     assert 0.0 <= r["score"] <= 1.0
     # 把一个 obs 换成语义无关的文本 -> 与 centroid 贴合低，被默认阈值标记 weak-fit
     outlier = _obs("s1", "obs_001", "窗外的雨下了一整夜，院子里的积水没过了台阶，邻居家的小孩在门口玩泥巴")
+    outlier["surface_form"] = "雨夜琐事"  # 结构化编码含 surface_form，需一并改为无关内容
     obs_by_id["obs_001"] = outlier
     r2 = dim.compute_cohesion(funcs, obs_by_id, emb)
     flagged = [w["obs_id"] for w in r2["weak_fit_obs"]]

@@ -33,6 +33,12 @@ class _FakeEmbedder:
     def encode_single(self, text):
         return np.zeros(8)
 
+    def encode_observation(self, obs):
+        return np.zeros(8)
+
+    def encode_observations(self, observations):
+        return np.zeros((len(observations), 8))
+
 
 class _FakeBank:
     def __init__(self, obs_by_id):

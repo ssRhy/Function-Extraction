@@ -17,6 +17,8 @@ W_CONFUSABLE = 0.2      # confusability_penalty
 
 # 近义判定阈值（definition embedding 余弦相似度）
 NEAR_DUP_THRESHOLD = 0.85
+# surface_form 语义去重阈值：与已有模式 centroid 余弦 >= 该值视为同一模式
+SURFACE_SIM_THRESHOLD = 0.80
 
 
 def _cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
@@ -82,11 +84,7 @@ def _compute_semantic_coherence(supporting_obs: list[dict], embedder: Embedder) 
     """
     if len(supporting_obs) < 2:
         return 0.0
-    texts = [
-        f"{o.get('before_state', '')} | {o.get('event', '')} | {o.get('after_state', '')}"
-        for o in supporting_obs
-    ]
-    embeddings = embedder.encode(texts)
+    embeddings = embedder.encode_observations(supporting_obs)
     n = len(embeddings)
     similarities = []
     for i in range(n):
@@ -95,18 +93,23 @@ def _compute_semantic_coherence(supporting_obs: list[dict], embedder: Embedder) 
     return float(np.mean(similarities)) if similarities else 0.0
 
 
-def _compute_surface_diversity(supporting_obs: list[dict]) -> float:
-    """
-    因子3: surface_diversity
-    supporting obs 的 surface_form 跨领域变体数归一化
+def _compute_surface_diversity(supporting_obs: list[dict], embedder: Embedder) -> float:
+    """因子3: surface_diversity —— 语义去重后的 surface_form 模式数归一化。
+
+    用 embedding 贪心聚类（与已选模式 centroid 余弦 >= SURFACE_SIM_THRESHOLD 视为同一模式），
+    替代精确字符串去重：同义改写算一个模式，不同模式才累计。
     """
     if not supporting_obs:
         return 0.0
-    surface_forms = [o.get("surface_form", "") for o in supporting_obs if o.get("surface_form")]
+    surface_forms = [o.get("surface_form", "").strip() for o in supporting_obs if o.get("surface_form", "").strip()]
     if not surface_forms:
         return 0.0
-    unique_forms = set(surface_forms)
-    return min(len(unique_forms) / 3.0, 1.0)
+    vecs = embedder.encode(surface_forms)
+    centroids: list = []
+    for v in vecs:
+        if not any(_cosine_similarity(v, c) >= SURFACE_SIM_THRESHOLD for c in centroids):
+            centroids.append(v)
+    return min(len(centroids) / 3.0, 1.0)
 
 
 def calculate_confidence_detailed(
@@ -125,7 +128,7 @@ def calculate_confidence_detailed(
     supporting_obs = _load_supporting_obs(supporting_obs_ids, bank)
     diversity = _compute_cross_story_diversity(supporting_obs_ids, bank)
     coherence = _compute_semantic_coherence(supporting_obs, embedder)
-    surface = _compute_surface_diversity(supporting_obs)
+    surface = _compute_surface_diversity(supporting_obs, embedder)
     if apply_confusable:
         confusable = max_definition_similarity(candidate_def, load_registry_functions(), embedder)
     else:

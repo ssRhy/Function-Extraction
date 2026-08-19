@@ -12,20 +12,15 @@ from Embedding.embedding import Embedder
 
 
 def _observation_to_text(obs: dict) -> str:
-    """
-    将 Observation 字典转换为用于 embedding 的文本。
-
-    策略：拼接结构化字段，减少表层词汇（如"修为""灵气"）对语义的干扰。
-    """
-    fields = [
+    """仅用于 Chroma 存储的 document 文本（检索向量已改用结构化 encode_observation）。"""
+    return " | ".join(f for f in (
         obs.get("before_state", ""),
         obs.get("event", ""),
         obs.get("after_state", ""),
         obs.get("affected_aspect", ""),
         obs.get("narrative_effect", ""),
         obs.get("surface_form", ""),
-    ]
-    return " | ".join(f for f in fields if f)
+    ) if f)
 
 
 class ObservationBank:
@@ -137,8 +132,7 @@ class ObservationBank:
         if not to_add:
             return []
 
-        texts = [_observation_to_text(obs) for obs in to_add]
-        embeddings = self.embedder.encode(texts)
+        embeddings = self.embedder.encode_observations(to_add)
 
         ids = []
         vectors = []
@@ -154,7 +148,7 @@ class ObservationBank:
                 "surface_form": obs.get("surface_form", ""),
                 "affected_aspect": obs.get("affected_aspect", ""),
             })
-            documents.append(texts[i])
+            documents.append(_observation_to_text(obs))
 
         self.collection.add(ids=ids, embeddings=vectors, metadatas=metadatas, documents=documents)
 
