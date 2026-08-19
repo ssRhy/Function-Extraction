@@ -13,7 +13,7 @@ Evaluator_v0 六维评估纯函数模块（无 LLM、可复现）
 import numpy as np
 
 # ---- 阈值（集中可调，集成验收时按真实分布校准）----
-COVERAGE_SIM_THRESHOLD = 0.65   # obs 文本向量与任一 definition 余弦 >= 该值视为可解释（MiniLM 中文基线 ~0.5-0.6）
+COVERAGE_SIM_THRESHOLD = 0.60   # obs 向量与任一 definition 余弦 >= 该值视为可解释（text2vec 分布实测：非 supporting obs P50=0.61，0.65 偏严、0.60 覆盖 ~0.85）
 COVERAGE_PASS = 0.60            # 覆盖率达标线
 COHESION_PASS = 0.60            # 内聚度达标线（MiniLM 中文同质 obs ~0.97、无关 ~0.57）
 OBS_FIT_THRESHOLD = 0.70        # 单 obs 与函数 centroid 余弦低于该值标记 weak-fit（0.80 在真实数据标记 49 条过噪，<0.70 仅 5 条为真离群）

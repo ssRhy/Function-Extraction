@@ -210,6 +210,12 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 30）：按 text2vec 分布校准阈值（coverage/cohesion/聚类）
+- 实测 text2vec 分布：非 supporting obs 与最近 definition 余弦 P50=0.613（0.65 偏严）；跨故事 obs 对 mean=0.630（MiniLM 时代 0.60 是噪声底线，text2vec 整体上移）；supporting obs fit mean=0.835 / P10=0.777（0.70 weak-fit 阈值正好抓真离群）。
+- 校准：`COVERAGE_SIM_THRESHOLD` 0.65 → **0.60**（coverage 0.748 → 0.847，309/365）；`BATCH_EDGE_SIM` 0.60 → **0.65**（聚类连边从 65% 降到 ~40%）；`OBS_FIT_THRESHOLD=0.70`、`COHESION_PASS=0.60` 保留（实测安全）。
+- 测试：更新 `test_batch_induction.test_constants`（0.65）；curator 测试包 `_no_merge_scan`（避免近义扫描触发真实 LLM）；**104 项全过**。
+- 终评（校准后 text2vec）**PASS 6/6**：coverage 0.847 / cohesion 0.848 / separation 0 / abstraction 1.0 / evidence 7.895 / diversity 36。
+
 ## 本轮（2026-08-19 续 29）：Embedding 换中文模型（text2vec-base-chinese，768 维）
 - 用户要求把 MiniLM 定义向量换成适合中文的模型：`all-MiniLM-L6-v2`（384 维）→ **`shibing624/text2vec-base-chinese`**（768 维，中文 STS 基准）。已下载到 HF 缓存（离线加载正常）。
 - **效果对比**：近义对"获得外部资源/通过外部援助"余弦 MiniLM <0.78 → text2vec **0.853**；不同结构 0.422——中文近义区分度大幅改善。19 函数 definition 近义对：关系族 0.85、决定反转~转变 0.82（MiniLM 下资源族都 <0.78 抓不到）。

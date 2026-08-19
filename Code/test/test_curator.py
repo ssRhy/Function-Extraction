@@ -2,6 +2,7 @@
 
 import os
 import sys
+from contextlib import contextmanager
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -91,13 +92,25 @@ def _teardown(prev):
     get_bank().clear()
 
 
+@contextmanager
+def _no_merge_scan():
+    """近义扫描返回空组（避免测试触发真实识别 LLM）。"""
+    orig = cu.chat_structured
+    cu.chat_structured = lambda messages, schema, **kw: AbstractMergeResponse(merge_groups=[])
+    try:
+        yield
+    finally:
+        cu.chat_structured = orig
+
+
 def test_apply_pending(tmp_path):
     bank, store, prev = _setup(str(tmp_path), [_func("F_A")])
     try:
-        out = curator_node({
-            "pending_evidence": [{"function_name": "F_A", "obs_id": "o1", "source": "matcher"}],
-            "occurrences": [], "mid_reports": [], "out_dir": str(tmp_path),
-        })
+        with _no_merge_scan():
+            out = curator_node({
+                "pending_evidence": [{"function_name": "F_A", "obs_id": "o1", "source": "matcher"}],
+                "occurrences": [], "mid_reports": [], "out_dir": str(tmp_path),
+            })
     finally:
         _teardown(prev)
     fa = store.load_all()[0]
@@ -125,11 +138,12 @@ def test_novelty_threshold(tmp_path):
         "function_name": "NEW_FUNC", "supporting_obs_ids": ["n1", "n2", "n3"],
     }]}
     try:
-        out = curator_node({
-            "pending_evidence": [],
-            "occurrences": [_occ(o["obs_id"]) for o in obs],
-            "mid_reports": [], "out_dir": str(tmp_path),
-        })
+        with _no_merge_scan():
+            out = curator_node({
+                "pending_evidence": [],
+                "occurrences": [_occ(o["obs_id"]) for o in obs],
+                "mid_reports": [], "out_dir": str(tmp_path),
+            })
     finally:
         cu.inducer_node = orig_ind
         _teardown(prev)
@@ -155,10 +169,11 @@ def test_merge_threshold(tmp_path):
     rev._llm_merge = lambda members, obs_by_id: (dict(merged), None)
     rev._llm_revise = lambda func, reasons: None  # 不应被调用
     try:
-        out = curator_node({
-            "pending_evidence": [], "occurrences": [], "out_dir": str(tmp_path),
-            "mid_reports": [{"recommendations": {"merge_groups": [["F_A", "F_B"], ["F_C", "F_D"]]}}],
-        })
+        with _no_merge_scan():
+            out = curator_node({
+                "pending_evidence": [], "occurrences": [], "out_dir": str(tmp_path),
+                "mid_reports": [{"recommendations": {"merge_groups": [["F_A", "F_B"], ["F_C", "F_D"]]}}],
+            })
     finally:
         rev._llm_merge, rev._llm_revise = orig_merge, orig_revise
         _teardown(prev)
@@ -174,10 +189,11 @@ def test_merge_threshold(tmp_path):
 def test_low_evidence_removed(tmp_path):
     bank, store, prev = _setup(str(tmp_path), [_func("F_E"), _func("F_KEEP")])
     try:
-        out = curator_node({
-            "pending_evidence": [], "occurrences": [], "out_dir": str(tmp_path),
-            "mid_reports": [{"recommendations": {"low_evidence_functions": [{"function_name": "F_E"}]}}],
-        })
+        with _no_merge_scan():
+            out = curator_node({
+                "pending_evidence": [], "occurrences": [], "out_dir": str(tmp_path),
+                "mid_reports": [{"recommendations": {"low_evidence_functions": [{"function_name": "F_E"}]}}],
+            })
     finally:
         _teardown(prev)
     names = {f["function_name"] for f in store.load_all()}

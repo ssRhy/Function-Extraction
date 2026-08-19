@@ -6,9 +6,9 @@
 """
 
 # 相似图边阈值：obs 向量余弦相似度 >= 该值才连边
-# 注：all-MiniLM-L6-v2 对中文结构化 obs 的相似度整体偏低（实测 max≈0.69），
-# 0.60 作为噪声底线（过滤 top-5 检索里明显无关的弱边）。
-BATCH_EDGE_SIM = 0.60
+# 注：text2vec（中文）下跨故事 obs 对相似度整体上移（实测 mean≈0.63、P90≈0.73），
+# 0.65 作为噪声底线（过滤检索里明显无关的弱边；MiniLM 时代为 0.60）。
+BATCH_EDGE_SIM = 0.65
 # 单次 Inducer 调用最多容纳的 obs 数（防止上下文过大）
 BATCH_MAX_OBS_PER_CALL = 40
 

@@ -68,7 +68,7 @@ def test_empty_and_single():
 
 
 def test_constants():
-    assert BATCH_EDGE_SIM == 0.60
+    assert BATCH_EDGE_SIM == 0.65
     assert BATCH_MAX_OBS_PER_CALL == 40
 
 

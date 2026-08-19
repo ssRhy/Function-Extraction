@@ -256,3 +256,10 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **选择**：`shibing624/text2vec-base-chinese`（中文语义相似度 STS 基准，768 维）。实测近义对 0.853 vs MiniLM <0.78，不同结构 0.422——区分度显著改善。
 - **影响**：维度 384→768 → Chroma 重建（Bank 365 obs 重嵌入）；测试 FakeEmbedder 默认维度对齐 768（4 文件）；coverage/cohesion 阈值基于 MiniLM 分布，text2vec 下偏保守（coverage 0.986→0.748，仍 PASS 6/6）。
 - **状态**：104 测试全过；终评 PASS 6/6。Curator 近义收敛用 LLM 扫描（不依赖向量），不受换模型影响。阈值如需对齐可后续校准。
+
+## 28. 按 text2vec 分布校准阈值（2026-08-19）
+
+- **实测**：text2vec 下相似度整体上移（跨故事 obs 对 mean 0.63、非 supporting obs 与定义 P50 0.61）——MiniLM 时代阈值偏严/偏松。
+- **校准**：`COVERAGE_SIM_THRESHOLD` 0.65→0.60（coverage 0.748→0.847）；`BATCH_EDGE_SIM` 0.60→0.65（聚类连边 65%→40%）；cohesion 阈值保留（supporting fit P10=0.777，0.70 weak-fit 正好抓真离群）。
+- **验证**：104 测试全过；终评 PASS 6/6（coverage 0.847）。
+- **状态**：阈值体系已对齐 text2vec 分布。
