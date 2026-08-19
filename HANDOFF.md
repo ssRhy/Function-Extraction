@@ -210,6 +210,11 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 33）：切换 bge-small-zh-v1.5（512 维）+ Bank 重建
+- 网络恢复后成功下载 `BAAI/bge-small-zh-v1.5`（512 维）；`embedding.py` 默认模型 text2vec → **bge-small-zh-v1.5**；Bank 用 bge 重建（340 obs，**34s** vs text2vec 133s，embedding 快 ~4 倍）。
+- 测试 FakeEmbedder 维度 768 → 512（4 文件）；**106 项全过**（且测试总耗时 46s，明显更快）。
+- **终评（bge）PASS 6/6**：coverage 0.888 / cohesion 0.863 / separation 0 / abstraction 1.0 / evidence 7.208 / diversity 38；对比 30→24。函数定义向量缓存（encode_cached）保留生效。
+
 ## 本轮（2026-08-19 续 32）：函数定义向量缓存（bge 下载受阻，暂留 text2vec）
 - 用户要求换 `BAAI/bge-small-zh-v1.5` + 缓存函数定义向量；**bge 下载失败**（hf-mirror 与 HF 直连均 SSL UNEXPECTED_EOF，网络对 huggingface 不可达，text2vec 是此前成功下载的缓存）→ 暂留 text2vec（768 维），等网络恢复后可一行切换 + 重建 Bank。
 - **已落地缓存**：`Embedder.encode_cached(texts)`（文本→向量缓存，函数定义固定文本复用）；调用点 Matcher 召回、Evaluator coverage、Curator Agglomerative 拎候选均改用它（函数定义在单次 Evolve 中不变，Curator 最后才改）。测试 FakeEmbedder 补 `encode_cached`（4 文件）。

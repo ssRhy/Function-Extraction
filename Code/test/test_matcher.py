@@ -17,7 +17,7 @@ from Prompt.Matcher_prompt import MatchDecision, MatchResponse
 class FakeEmbedder:
     """字符袋向量：共享字符越多余弦越高（与 test_bootstrap_app 同模式）。"""
 
-    def __init__(self, dim=768):
+    def __init__(self, dim=512):
         self.dim = dim
 
     def _vec(self, text):

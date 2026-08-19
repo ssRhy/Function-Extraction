@@ -277,3 +277,9 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **bge 受阻**：hf-mirror 与 huggingface.co 均 SSL UNEXPECTED_EOF（网络对 HF 不可达）——bge 无法下载，暂留 text2vec。
 - **已落地**：`Embedder.encode_cached`（文本→向量缓存）+ Matcher/Evaluator/Curator 的函数定义 encode 改用它——单次运行中函数定义不变，跨节点复用，消除每篇重复 encode 30 定义。
 - **状态**：106 测试全过；bge 切换待网络恢复（改模型名 + 重建 Bank）。
+
+## 31. 切换 bge-small-zh-v1.5（512 维，2026-08-19）
+
+- 网络恢复后 bge 下载成功；换 `BAAI/bge-small-zh-v1.5`（512 维）替代 text2vec（768 维）——embedding 快 ~4 倍（重建 Bank 34s vs 133s），中文效果接近。
+- 终评 PASS 6/6（coverage 0.888 / separation 0）；106 测试全过。函数定义向量缓存（encode_cached）继续生效。
+- **状态**：模型链 text2vec → bge（更小更快），40 篇结果 24 函数保留。

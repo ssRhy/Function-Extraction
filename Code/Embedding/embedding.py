@@ -32,7 +32,7 @@ class Embedder:
 
     def __init__(
         self,
-        model_name: str = "shibing624/text2vec-base-chinese",
+        model_name: str = "BAAI/bge-small-zh-v1.5",
         device: str = "cpu",
     ):
         self.model_name = model_name

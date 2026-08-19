@@ -28,7 +28,7 @@ from Prompt.Critic_prompt import CriticResponse, CriticReview
 class FakeEmbedder:
     """字符袋向量（与 test_bootstrap_app / test_matcher 同模式）。"""
 
-    def __init__(self, dim=768):
+    def __init__(self, dim=512):
         self.dim = dim
 
     def _vec(self, text):
