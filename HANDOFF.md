@@ -210,6 +210,13 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 24）：Evolve v4：Curator 收尾维护（按动作分门槛）
+- 新增 `Code/Agent/Curator/curator.py`（图 `report → curator → END`）：整合 pending_evidence / novelty_pool / challenge_pool / 最新 evaluation_mid 问题，执行完整维护——应用 pending exemplars（复用 `_apply_evidence`，version_history append `APPLY_EVIDENCE`）、跨故事 ≥2 且 ≥3 obs 的 novel 聚类归纳新函数（复用 `cluster_similar_pairs` + `inducer_node`）、挑战/体检问题修订（复用 `_llm_merge/_llm_revise`，`REVISE_MIN_SUPPORTING=3` 门槛）、low_evidence 移除、weak_fit 剔除。
+- **按动作分门槛**：APPLY_EVIDENCE 无门槛；ADD 需跨故事 ≥2 + novel obs ≥3；MERGE/REVISE 需涉及函数 supporting ≥3；不足记 `SKIP_SMALL_SAMPLE` 保留累积。方案写 `data/evolve/curator_plan.jsonl`（Human Review 自动留档）后自动 Apply，清空已消费 pending；`match_report.json` 增加 `curator` 汇总。
+- 测试 **101 项全过**（新增 test_curator 5：应用 pending+version / novelty 门槛 / 合并门槛 / 低证据移除 / 无累积跳过）。
+- 冒烟（3 篇跨题材 / 27 obs）：Curator 应用 pending 18 条（12 个函数更新，如 IRREVERSIBLE_LOSS ver1→2）、novelty 2 obs 样本不足 SKIP、19 个动作留档；Registry 被 Curator 写回（此前 v1-v3 均不直写）。
+- 踩坑：`from Agent.Inducer.inducer import inducer_node` 是模块级名字绑定，测试需 mock `cu.inducer_node`（curator 模块引用）而非 `ind.inducer_node`；生成脚本里 `"\n"` 需写成 `"\\n"` 否则被解释成换行。
+
 ## 本轮（2026-08-19 续 23）：Evolve v3：Critic 边界复检 + 待应用区（pending_evidence）
 - 按用户定调"MATCH/EXTEND 之后需要 evaluator 不是直接 update"：证据**不再直写 Registry**，`matcher_node` 的 MATCH/EXTEND 改为返回 `pending_evidence`（`source="matcher"`），`_apply_evidence` 纯函数保留供 Curator 应用时复用。
 - 新增 `Code/Agent/Critic/critic.py` + `Code/Prompt/Critic_prompt.py`：图拓扑 `matcher→critic→collector`；对 CONFLICT/UNCERTAIN 观测（函数卡片含 `hard_negatives` 边界反例）输出四类最终判定——`match/extend`→归函数进 pending（`resolved_by="critic"`）、`novel`→novelty_pool、`resolved`→challenge_pool；复检失败保持原始 label。
@@ -232,6 +239,11 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 冒烟（9 篇跨题材、clean 语料抽取、独立命名空间 `evolve_smoke`）：317s / 89 obs → MATCH 36 / EXTEND 5 / CONFLICT 4 / UNCERTAIN 38 / NOVEL 6，coverage 0.461 / novelty 0.067；直写生效。
 - 环境：终止残留 `python -m Agent.app` 进程（PID 18728，fresh 全量会清空 bootstrap 命名空间/Bank）；其破坏的 O_0 已从快照恢复（30 函数/1062 obs）+ 迁移；首次冒烟（Tee-Object 管道）后曾见 bootstrap 命名空间消失，二次复现（文件重定向）稳定——疑似管道环境偶发，已恢复并改用重定向。
 - 后续（structure-rules/Plan.md 蓝图，下一轮起）：Critic 复检、触发条件（≥20 obs Evaluator_mid / pools ≥5 Curator）、Curator + Human Review（自动+留档）、Evaluator_final；Plan.md 阶段一（Story Profile、Function 前置条件/角色位置/状态变化、Instance Card）。
+
+## 本轮（2026-08-19 续 22）：新增五领域 60 篇语料（zhihu_story_subset_60_5domains_20260819_clean）
+- 用 `test/clean_corpus.py` 清洗 `Code/zhihu_story_subset_60_5domains_20260819/`（5 领域 × 12 篇：悬疑惊悚/古风仙侠/现代情感/末世科幻/现实家庭职场）→ `Code/zhihu_story_subset_60_5domains_20260819_clean/`，结构与 120_clean 一致（仅清洗后 txt + manifest.json/csv + clean_report.json）。
+- 结果：60 篇全部清洗，17 篇截断脚注，剔除噪音 311 行；幂等检查 60/60 通过；manifest 元数据（category/question_title）完整，`Agent.app`/`Agent.evolve` 可直接 `--corpus Code/zhihu_story_subset_60_5domains_20260819_clean` 消费。
+- 与 120 子集无 answer_id 重复；题材为关键词初筛（story_score ≥ 0.85），非人工金标准。
 
 ## 本轮（2026-08-19 续 20）：结构化 Observation embedding + 语义化 surface_diversity
 - 用户提出：`surface_diversity` 靠字符串匹配不合理、结构化数据拼起来算需要 embedding。落地：

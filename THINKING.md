@@ -219,3 +219,10 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **实现**：`matcher_node` 删直写（MATCH/EXTEND → `pending_evidence`，`_apply_evidence` 保留给 Curator）；新增 `Agent/Critic/critic.py` + `Prompt/Critic_prompt.py`（图 `matcher→critic→collector`，四类分流）；`evaluator_mid_node` 用"当前函数 + pending 证据"的临时 registry 快照评估（应用后视图，`pending_applied` 记录）。
 - **验证**：96 测试全过；冒烟 3 篇/30 obs——Critic 复检 15 边界 → match 5 / novel 2 / resolved 8，coverage 0.633（v1 直写 0.318，Critic 归函数后提升），pending 19 / challenge 8 / novelty 3，Registry 未被直写。
 - **状态**：已落地。Curator（应用 pending + 消费 pools/体检问题 → 增删改方案 → Human Review 自动留档）为下一轮。
+
+## 23. Evolve v4：Curator 收尾维护（按动作分门槛，2026-08-19）
+
+- **背景**：用户问"非空就触发会不会样本不够"——采纳**按动作分门槛**：APPLY_EVIDENCE 无门槛（纯累积）、ADD 需跨故事 ≥2 且 ≥3 obs、MERGE/REVISE 需 supporting ≥3；不足记 SKIP_SMALL_SAMPLE 保留累积，避免小样本误改本体。
+- **实现**：新增 `Agent/Curator/curator.py`（图 `report → curator → END`）：应用 pending（复用 `_apply_evidence` + version_history）、novelty 归纳（复用 `cluster_similar_pairs` + `inducer_node`）、体检修订（复用 `_llm_merge/_llm_revise`）；方案写 `curator_plan.jsonl` 自动留档后 Apply，清空已消费 pending。
+- **验证**：101 测试全过；冒烟 3 篇/27 obs——Curator 应用 pending 18 条、novelty 2 obs 样本不足 SKIP、19 动作留档、IRREVERSIBLE_LOSS version v1→v2。
+- **状态**：已落地。Evaluator_final（终期全面评估）为后续轮。

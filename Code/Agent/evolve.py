@@ -35,6 +35,7 @@ from Agent.Matcher.matcher import matcher_node
 from Agent.Registry.registry import RegistryStore, set_active_store, get_active_store
 from Agent.Evaluator.evaluator import evaluator_node
 from Agent.Critic.critic import critic_node
+from Agent.Curator.curator import curator_node
 
 
 def _collect_txt(root: str) -> list[str]:
@@ -203,6 +204,7 @@ def _build_evolve_graph() -> StateGraph:
     graph.add_node("collector", collector_node)
     graph.add_node("evaluator_mid", evaluator_mid_node)
     graph.add_node("report", report_node)
+    graph.add_node("curator", curator_node)
 
     graph.add_edge(START, "story_loader")
     graph.add_conditional_edges(
@@ -221,7 +223,8 @@ def _build_evolve_graph() -> StateGraph:
         {"evaluator_mid": "evaluator_mid", "story_loader": "story_loader"},
     )
     graph.add_edge("evaluator_mid", "story_loader")
-    graph.add_edge("report", END)
+    graph.add_edge("report", "curator")
+    graph.add_edge("curator", END)
     return graph
 
 
@@ -296,6 +299,7 @@ def main() -> None:
         "mid_reports": [],
         "pending_evidence": [],
         "match_pending": [],
+        "curator_plan": [],
         "current_story_index": 0,
         "total_stories": total,
         "story_files": story_files,

@@ -156,6 +156,7 @@ def _initial(tmp, story_files):
         "match_report": None,
         "obs_since_eval": 0,
         "mid_reports": [],
+        "curator_plan": [],
         "current_story_index": 0,
         "total_stories": len(story_files),
         "story_files": story_files,
@@ -209,11 +210,15 @@ def test_evolve_flow():
         # 证据进待应用区（不直写 Registry）
         loaded = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="evolve_test").load_all()
         fa = loaded[0]
-        assert fa["supporting_obs_ids"] == [], fa["supporting_obs_ids"]
+        assert set(fa["supporting_obs_ids"]) == {"s1_obs_001", "s2_obs_001"}, fa["supporting_obs_ids"]
         assert fa.get("function_id") and fa.get("version_history")
-        assert len(result["pending_evidence"]) == 2, result["pending_evidence"]
+        assert result["pending_evidence"] == [], result["pending_evidence"]  # curator 已应用并清空
         assert os.path.exists(os.path.join(tmp, "pending_evidence.jsonl"))
-    print("evolve_app 全流程（逐篇循环 + 直写 + pools + 报告）: OK")
+        assert len(result["curator_plan"]) >= 2, result["curator_plan"]  # 2 条 APPLY_EVIDENCE
+        with open(os.path.join(tmp, "match_report.json"), "r", encoding="utf-8") as f:
+            mr = json.load(f)
+        assert "curator" in mr and mr["curator"]["actions"] >= 2, mr.get("curator")
+    print("evolve_app 全流程（逐篇循环 + pending + pools + 报告 + curator）: OK")
 
 
 def test_evolve_report_novel_and_uncertain(tmp_path):

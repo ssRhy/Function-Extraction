@@ -136,7 +136,8 @@ python -m Agent.evolve --corpus <dir> --batch-size 10 --top-k 5
 - **Critic 边界复检器**：对 `CONFLICT/UNCERTAIN` 观测做二次校验（函数卡片含 `hard_negatives` 边界反例），输出四类最终判定——`match/extend` → 归函数并进 `pending_evidence`（`resolved_by="critic"`）、`novel` → 进 `novelty_pool`、`resolved` → 进 `challenge_pool`；复检失败保持原始 label 留 `challenge_pool`。
 - 每个 obs 落一条 **FunctionOccurrence**（`occurrences.jsonl`：function_name/label/story_id/category/事件/参与者/前后状态/表层/原文下标/story_stage/top_candidates/reason），NOVEL 记为 `OTHER` 不强行分类（对齐 Plan.md：OTHER/低置信度是发现新 Function 的来源）。
 - **Evaluator_mid 周期体检**：每累计 `MID_OBS_THRESHOLD`（默认 20）个新 obs 触发一次六维评估（复用 `evaluator_node`；评估对象 = 当前 Registry + **pending 证据的"应用后视图"临时快照** + Bank）；体检只记录问题不触发修订，报告落盘 `evaluation_mid_<n>.json`，`match_report.json` 的 `mid_evaluations` 汇总各轮判定（含 `pending_applied`）。
-- 产物在 `data/evolve/`：`occurrences.jsonl` / `novelty_pool.jsonl` / `challenge_pool.jsonl`（含复检 RESOLVED）/ `pending_evidence.jsonl`（待 Curator 应用）/ `match_report.json`（分类计数 + `coverage=(MATCH+EXTEND)/total` + `novelty_rate=NOVEL/total`）。
+- **Curator 收尾维护**（图末尾 `report → curator → END`）：整合 pending（应用 exemplars）、novelty（跨故事 ≥2 且 ≥3 obs 才归纳新函数）、challenge/体检问题（合并/修订/剔除/移除）——**按动作分门槛**（`APPLY_EVIDENCE` 无门槛、`ADD_MIN_NOVEL=3`、`REVISE_MIN_SUPPORTING=3`），不足记 `SKIP_SMALL_SAMPLE` 保留累积；方案写 `curator_plan.jsonl`（Human Review 自动留档）后自动 Apply 写回 Registry（追加 `version_history`），清空已消费 pending。
+- 产物在 `data/evolve/`：`occurrences.jsonl` / `novelty_pool.jsonl` / `challenge_pool.jsonl`（含复检 RESOLVED）/ `pending_evidence.jsonl` / `curator_plan.jsonl` / `match_report.json`（分类计数 + `coverage=(MATCH+EXTEND)/total` + `novelty_rate=NOVEL/total` + `curator` 汇总）。
 - `--namespace` 默认 `bootstrap`（读函数库 + 证据落区目标）；演示请用独立命名空间避免污染 O_0。不做 checkpoint（Bank.add 幂等，可整批重跑）。
 
 ### 语料清洗
