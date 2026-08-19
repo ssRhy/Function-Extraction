@@ -162,10 +162,6 @@ class ObservationBank:
         """通过 obs_id 精确查询完整记录"""
         return self._records_by_id.get(obs_id)
 
-    def exists(self, obs_id: str) -> bool:
-        """检查 obs_id 是否已存在"""
-        return obs_id in self._records_by_id
-
     def count(self) -> int:
         """返回总 Observation 数量"""
         return self.collection.count()

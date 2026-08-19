@@ -1,9 +1,0 @@
-flowchart LR
-    A["preprocessor<br/>LLM 分句分段"] --> B["observer<br/>提取叙事观察"]
-    B --> C["bank<br/>obs 入库<br/>ChromaDB + JSONL"]
-    C --> D["retrieval<br/>跨故事相似检索"]
-    D --> E["inducer<br/>聚类归纳 Function"]
-    E --> F["evaluator<br/>六维评估"]
-    F -->|"不通过"| R["revise<br/>自动修订"]
-    R --> F
-    F -->|"通过"| G["registry<br/>O₀ 入库 + 快照"]
