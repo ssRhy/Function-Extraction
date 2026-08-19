@@ -210,6 +210,13 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 29）：Embedding 换中文模型（text2vec-base-chinese，768 维）
+- 用户要求把 MiniLM 定义向量换成适合中文的模型：`all-MiniLM-L6-v2`（384 维）→ **`shibing624/text2vec-base-chinese`**（768 维，中文 STS 基准）。已下载到 HF 缓存（离线加载正常）。
+- **效果对比**：近义对"获得外部资源/通过外部援助"余弦 MiniLM <0.78 → text2vec **0.853**；不同结构 0.422——中文近义区分度大幅改善。19 函数 definition 近义对：关系族 0.85、决定反转~转变 0.82（MiniLM 下资源族都 <0.78 抓不到）。
+- **配套**：Bank 重建（Chroma 维度 384→768，365 obs 用 text2vec 重嵌入，~3min）；测试 FakeEmbedder 默认维度 384→768（4 个文件）；**104 项测试全过**。
+- **终评（text2vec）PASS 6/6**：coverage 0.748（MiniLM 时 0.986——text2vec 分布更严格，阈值 0.65 仍达标）/ cohesion 0.848 / separation 0 / abstraction 1.0 / evidence 7.895 / diversity 36；weak_fit 2 条（0.69/0.67 边缘）。
+- 注意：coverage 等阈值基于 MiniLM 分布，text2vec 下偏保守（语义更严格）；如需对齐可校准（`COVERAGE_SIM_THRESHOLD` 等）。Curator 近义收敛用 LLM 扫描（不依赖向量），不受影响。
+
 ## 本轮（2026-08-19 续 28）：Curator 近义收敛机制（全量 LLM 扫描）+ 40 篇碎片处理
 - 用户反馈 evolve_official 内部有近义碎片（外部资源 2、真相 2、关系 3、压力/后果 2 等）。先试向量预筛（definition 余弦）：0.85 漏检（MiniLM 中文对"用词不同但同义"余弦不够）、0.78 假簇/争议（把 ANOMALY_OMEN 连进真相族、FATAL_INCIDENT 连进资源族）——**MiniLM 中文定义向量不适合近义预筛**。
 - 改为复用 bootstrap 验证过的机制：Curator 每批 `_full_merge_scan`（全量函数卡片 → `Abstract_merge_prompt` 专门识别"同一结构作用"组 → 每组 `_llm_merge` 重新归纳，`REVISE_MIN_SUPPORTING=3` 门槛）。删除临时 `Confirm_merge_prompt.py`。

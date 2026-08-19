@@ -17,7 +17,7 @@ from Prompt.Abstract_merge_prompt import AbstractMergeResponse
 class FakeEmbedder:
     """字符袋向量（与 test_evolve 同模式）。"""
 
-    def __init__(self, dim=384):
+    def __init__(self, dim=768):
         self.dim = dim
 
     def _vec(self, text):

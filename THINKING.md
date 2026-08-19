@@ -249,3 +249,10 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **方案（落地）**：Curator 每批 `_full_merge_scan`——全量函数卡片喂 `Abstract_merge_prompt`（专门任务：识别同一结构作用组，宁少勿滥 + 超大类防护）→ 每组 `_llm_merge` 重新归纳。这是 bootstrap abstract_merge 验证过的机制（59→30），比 Evaluator 的"附加字段"更专注。
 - **验证**：40 篇碎片 24→19（5 组合并，1 组门槛 SKIP）；终评 PASS 6/6（separation 0 / abstraction 1.0）。测试 104 项全过。
 - **状态**：近义收敛机制已入 Curator（每批自动跑）；demo 结果干净（19 函数）。
+
+## 27. Embedding 换中文模型（text2vec-base-chinese，2026-08-19）
+
+- **背景**：MiniLM（all-MiniLM-L6-v2）对中文"用词不同但同义"的近义余弦不够（向量预筛 0.85 漏、0.78 假簇的根源）。用户要求换适合中文的模型。
+- **选择**：`shibing624/text2vec-base-chinese`（中文语义相似度 STS 基准，768 维）。实测近义对 0.853 vs MiniLM <0.78，不同结构 0.422——区分度显著改善。
+- **影响**：维度 384→768 → Chroma 重建（Bank 365 obs 重嵌入）；测试 FakeEmbedder 默认维度对齐 768（4 文件）；coverage/cohesion 阈值基于 MiniLM 分布，text2vec 下偏保守（coverage 0.986→0.748，仍 PASS 6/6）。
+- **状态**：104 测试全过；终评 PASS 6/6。Curator 近义收敛用 LLM 扫描（不依赖向量），不受换模型影响。阈值如需对齐可后续校准。

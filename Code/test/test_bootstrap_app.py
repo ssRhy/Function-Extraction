@@ -26,7 +26,7 @@ class FakeEmbedder:
     """字符袋向量：共享字符越多余弦越高（模拟语义相似，无真实模型）。
     维度 384 与真实 all-MiniLM-L6-v2 一致（ChromaDB 持久化 collection 维度固定）。"""
 
-    def __init__(self, dim=384):
+    def __init__(self, dim=768):
         self.dim = dim
 
     def _vec(self, text):
