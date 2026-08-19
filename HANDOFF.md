@@ -210,6 +210,13 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 23）：Evolve v3：Critic 边界复检 + 待应用区（pending_evidence）
+- 按用户定调"MATCH/EXTEND 之后需要 evaluator 不是直接 update"：证据**不再直写 Registry**，`matcher_node` 的 MATCH/EXTEND 改为返回 `pending_evidence`（`source="matcher"`），`_apply_evidence` 纯函数保留供 Curator 应用时复用。
+- 新增 `Code/Agent/Critic/critic.py` + `Code/Prompt/Critic_prompt.py`：图拓扑 `matcher→critic→collector`；对 CONFLICT/UNCERTAIN 观测（函数卡片含 `hard_negatives` 边界反例）输出四类最终判定——`match/extend`→归函数进 pending（`resolved_by="critic"`）、`novel`→novelty_pool、`resolved`→challenge_pool；复检失败保持原始 label。
+- `evaluator_mid_node` 纳入 pending：构造临时 registry 快照（当前函数 supporting 并集 pending 证据，不重算 confidence）传给 `evaluator_node`，体检反映"应用后视图"，`match_report.mid_evaluations` 记录 `pending_applied`。
+- 测试 **96 项全过**（新增 test_critic 3：四类分流+卡片含 hard_negatives / LLM 失败保持 / 无目标跳过；matcher/evolve 断言改为 pending 不直写）。
+- 冒烟（3 篇跨题材 / 30 obs）：Critic 复检 15 个边界 → match=5 novel=2 resolved=8；pending 19（matcher 14 + critic 5）、challenge_pool 8（RESOLVED）、novelty_pool 3；coverage 0.633（v1 直写时 0.318，Critic 归函数后提升）；Evaluator_mid FAIL 3/6（pending_applied=12）；Registry 未被直写。
+
 ## 本轮（2026-08-19 续 22）：Evolve v2：Evaluator_mid 周期体检（每 20 obs 触发）
 - `evolve_app` 新增 `Evaluator_mid` 周期体检：`collector` 累加 `obs_since_eval`，达 `MID_OBS_THRESHOLD`（默认 20）→ 条件边路由到 `evaluator_mid_node`（薄包装复用 `evaluator_node`，`evaluation_context` 仅覆盖 `report_path`），评估当前 Registry（含 MATCH/EXTEND 直写证据）+ Bank，报告落盘 `evaluation_mid_<n>.json`，`match_report.json` 汇总 `mid_evaluations`（round/verdict/六维/问题数），体检后计数归零（滚动触发）。
 - 体检只记录问题不触发修订（Curator 后续轮）；State 新增 `obs_since_eval` / `mid_reports`。

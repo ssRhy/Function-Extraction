@@ -212,3 +212,10 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **实现**：`evolve_app` 的 `collector` 累加 `obs_since_eval`，达 `MID_OBS_THRESHOLD=20` → `evaluator_mid_node`（薄包装复用 `evaluator_node`）→ 报告 `evaluation_mid_<n>.json` + `match_report.mid_evaluations` 汇总；滚动触发（体检后归零），不足阈值不体检（Evaluator_final 后续轮）。
 - **验证**：93 测试全过；冒烟 3 篇/22 obs 触发 1 次体检 FAIL 3/6（separation 8 组近义是真实信号，diversity/evidence 小样本未达标属预期）。
 - **状态**：已落地。Curator/Critic/Evaluator_final 为后续轮。
+
+## 22. Evolve v3：Critic 边界复检 + 待应用区（2026-08-19）
+
+- **背景**：用户定调"MATCH/EXTEND 之后需要 evaluator 不是直接 update"→ 证据应用收口到 Curator；用户给的 Critic 参考表把复检输出细化为四类（match/extend/novel/resolved），并强调用 Hard Negatives 边界反例校验，减少假匹配/假扩展。
+- **实现**：`matcher_node` 删直写（MATCH/EXTEND → `pending_evidence`，`_apply_evidence` 保留给 Curator）；新增 `Agent/Critic/critic.py` + `Prompt/Critic_prompt.py`（图 `matcher→critic→collector`，四类分流）；`evaluator_mid_node` 用"当前函数 + pending 证据"的临时 registry 快照评估（应用后视图，`pending_applied` 记录）。
+- **验证**：96 测试全过；冒烟 3 篇/30 obs——Critic 复检 15 边界 → match 5 / novel 2 / resolved 8，coverage 0.633（v1 直写 0.318，Critic 归函数后提升），pending 19 / challenge 8 / novelty 3，Registry 未被直写。
+- **状态**：已落地。Curator（应用 pending + 消费 pools/体检问题 → 增删改方案 → Human Review 自动留档）为下一轮。

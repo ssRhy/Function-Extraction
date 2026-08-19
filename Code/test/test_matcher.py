@@ -144,8 +144,10 @@ def test_matcher_node_mixed_labels(tmp_path):
     assert occs["o1"]["story_stage"] == "beginning" and occs["o1"]["category"] == "悬疑"
     loaded = RegistryStore(db_path=str(tmp_path / "f.db"), namespace="evolve_test").load_all()
     fa = [f for f in loaded if f["function_name"] == "F_A"][0]
-    assert "o1" in fa["supporting_obs_ids"] and "o2" not in fa["supporting_obs_ids"]
+    assert "o1" not in fa["supporting_obs_ids"]  # MATCH/EXTEND 不再直写
     assert fa.get("function_id") and fa.get("status") == "provisional" and fa.get("version_history")
+    pending = [p for p in out["match_pending"] if p["function_name"] == "F_A"]
+    assert pending == [{"function_name": "F_A", "obs_id": "o1", "source": "matcher"}], pending
 
 
 def test_matcher_node_empty_registry(tmp_path):

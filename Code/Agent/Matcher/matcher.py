@@ -173,17 +173,14 @@ def matcher_node(state: dict) -> dict:
             for o in observations
         ]
 
-    # 直写 exemplars
-    func_map = {f["function_name"]: f for f in funcs}
-    matched = [
-        (d.matched_function, o)
+    # MATCH/EXTEND 证据进待应用区（不直写 Registry，由 Curator 统一应用 exemplars）
+    match_pending = [
+        {"function_name": d.matched_function, "obs_id": o.get("obs_id"), "source": "matcher"}
         for o, d in zip(observations, decisions)
         if d.label in ("MATCH", "EXTEND") and d.matched_function
     ]
-    changed = _apply_evidence(func_map, matched, bank)
-    if changed:
-        get_active_store().replace_all(list(func_map.values()))
-        print(f"  [Matcher] 直写 exemplars: {len(set(changed))} 个函数证据更新")
+    if match_pending:
+        print(f"  [Matcher] {len(match_pending)} 条 MATCH/EXTEND 证据进入待应用区")
 
     # occurrences
     n_sentences = len((state.get("normalized_story") or {}).get("sentences", [])) or None
@@ -197,6 +194,7 @@ def matcher_node(state: dict) -> dict:
     return {
         "match_decisions": [d.model_dump() for d in decisions],
         "match_occurrences": occs,
+        "match_pending": match_pending,
         "errors": errors,
         "messages": [{"role": "system", "content": f"[Matcher] {len(occs)} obs 五分类完成"}],
     }

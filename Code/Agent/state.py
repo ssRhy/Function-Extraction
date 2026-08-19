@@ -48,6 +48,8 @@ class NarrativePipelineState(TypedDict):
     match_report: dict | None        # 匹配报告（分类计数 / coverage / novelty_rate）
     obs_since_eval: int              # 自上次 Evaluator_mid 体检以来处理的新 obs 数
     mid_reports: list[dict]          # Evaluator_mid 体检历史（round/ts/verdict/六维/问题数）
+    pending_evidence: list[dict]     # 待应用区：MATCH/EXTEND 与 Critic 归函数证据（function_name/obs_id/source）
+    match_pending: list[dict]        # 当前故事 MATCH/EXTEND + Critic 归函数的 pending 条目（节点间传递）
 
     # ---- 流程控制 ----
     current_story_index: int

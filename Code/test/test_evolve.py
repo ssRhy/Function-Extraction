@@ -16,11 +16,13 @@ from Agent.Pre_pro import pre_processor as pp
 from Agent.Observer import observer as ob
 from Agent.Matcher import matcher as mm
 from Agent.Evaluator import evaluator as ev_module
+from Agent.Critic import critic as cc
 from Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
 from Agent.Pre_pro.pre_processor import PreCorrection
 from Agent.Observer.observer import ObservationResponse, ObservationItem
 from Prompt.Matcher_prompt import MatchResponse, MatchDecision
 from Prompt.Evaluator_prompt import EvaluatorReviewResponse, FunctionQualityReview
+from Prompt.Critic_prompt import CriticResponse, CriticReview
 
 
 class FakeEmbedder:
@@ -68,7 +70,7 @@ def _write_story(tmp, name, text="角色发现关键线索。角色决定采取�
 @contextmanager
 def _patched_llm(calls, matcher_fn=None):
     originals = {"pp": pp.chat_structured, "ob": ob.chat_structured, "mm": mm.chat_structured,
-                 "ev": ev_module.chat_structured}
+                 "ev": ev_module.chat_structured, "cc": cc.chat_structured}
 
     def fake_pre(messages, schema, **kw):
         calls["pre"] += 1
@@ -114,10 +116,21 @@ def _patched_llm(calls, matcher_fn=None):
             for c in cards
         ])
 
+    def fake_critic(messages, schema, **kw):
+        calls["critic"] += 1
+        content = messages[1]["content"]
+        oids = re.findall(r'"obs_id": "([^"]+)"', content)
+        return CriticResponse(decisions=[
+            CriticReview(obs_id=o, final_label="match", matched_function="RESOURCE_ACQUISITION",
+                         reason="复检确认归函数")
+            for o in oids
+        ])
+
     pp.chat_structured = fake_pre
     ob.chat_structured = fake_obs
     mm.chat_structured = fake_matcher
     ev_module.chat_structured = fake_eval
+    cc.chat_structured = fake_critic
     try:
         yield
     finally:
@@ -125,6 +138,7 @@ def _patched_llm(calls, matcher_fn=None):
         ob.chat_structured = originals["ob"]
         mm.chat_structured = originals["mm"]
         ev_module.chat_structured = originals["ev"]
+        cc.chat_structured = originals["cc"]
 
 
 def _initial(tmp, story_files):
@@ -154,7 +168,7 @@ def _initial(tmp, story_files):
 
 
 def test_evolve_flow():
-    calls = {"pre": 0, "obs": 0, "matcher": 0}
+    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0, "critic": 0}
     with tempfile.TemporaryDirectory() as tmp:
         _write_story(tmp, "s1.txt")
         _write_story(tmp, "s2.txt")
@@ -183,7 +197,7 @@ def test_evolve_flow():
 
         assert result["current_story_index"] == 2, result["current_story_index"]
         assert result["errors"] == [], result["errors"]
-        assert calls["pre"] == 2 and calls["obs"] == 2 and calls["matcher"] == 2, calls
+        assert calls["pre"] == 2 and calls["obs"] == 2 and calls["matcher"] == 2 and calls["critic"] == 0, calls
         assert len(result["occurrences"]) == 2
         report = result["match_report"]
         assert report["total_obs"] == 2
@@ -192,11 +206,13 @@ def test_evolve_flow():
         assert os.path.exists(os.path.join(tmp, "novelty_pool.jsonl"))
         assert os.path.exists(os.path.join(tmp, "challenge_pool.jsonl"))
         assert os.path.exists(os.path.join(tmp, "match_report.json"))
-        # 直写：两篇 obs 都追加到函数 exemplars
+        # 证据进待应用区（不直写 Registry）
         loaded = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="evolve_test").load_all()
         fa = loaded[0]
-        assert len(fa["supporting_obs_ids"]) == 2, fa["supporting_obs_ids"]
+        assert fa["supporting_obs_ids"] == [], fa["supporting_obs_ids"]
         assert fa.get("function_id") and fa.get("version_history")
+        assert len(result["pending_evidence"]) == 2, result["pending_evidence"]
+        assert os.path.exists(os.path.join(tmp, "pending_evidence.jsonl"))
     print("evolve_app 全流程（逐篇循环 + 直写 + pools + 报告）: OK")
 
 
@@ -227,7 +243,7 @@ def test_evolve_report_novel_and_uncertain(tmp_path):
 
         try:
             app = ev._build_evolve_graph().compile()
-            with _patched_llm({"pre": 0, "obs": 0, "matcher": 0}, matcher_fn=fake_matcher):
+            with _patched_llm({"pre": 0, "obs": 0, "matcher": 0, "eval": 0, "critic": 0}, matcher_fn=fake_matcher):
                 result = app.invoke(_initial(tmp, ["s1.txt"]))
         finally:
             set_active_store(prev)
@@ -254,7 +270,7 @@ def _mid_func():
 def test_evolve_mid_triggered(tmp_path, monkeypatch):
     """累计 obs 达阈值触发 Evaluator_mid：体检一次、计数归零、报告落盘、match_report 汇总。"""
     monkeypatch.setattr(ev, "MID_OBS_THRESHOLD", 2)
-    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0}
+    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0, "critic": 0}
     with tempfile.TemporaryDirectory() as tmp:
         _write_story(tmp, "s1.txt")
         _write_story(tmp, "s2.txt")
@@ -279,6 +295,7 @@ def test_evolve_mid_triggered(tmp_path, monkeypatch):
         assert os.path.exists(os.path.join(tmp, "evaluation_mid_1.json"))
         mids = result["match_report"]["mid_evaluations"]
         assert len(mids) == 1 and mids[0]["verdict"] in ("PASS", "FAIL")
+        assert mids[0]["pending_applied"] == 2, mids[0]  # Evaluator_mid 纳入 pending 评估
         assert "dimensions" in mids[0] and "issue_counts" in mids[0]
     print("evolve Evaluator_mid 触发（2 篇 ≥ 阈值）: OK")
 
@@ -286,7 +303,7 @@ def test_evolve_mid_triggered(tmp_path, monkeypatch):
 def test_evolve_mid_rollover(tmp_path, monkeypatch):
     """滚动触发：每达阈值体检一次，多轮累积 mid_reports。"""
     monkeypatch.setattr(ev, "MID_OBS_THRESHOLD", 2)
-    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0}
+    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0, "critic": 0}
     with tempfile.TemporaryDirectory() as tmp:
         for name in ("s1.txt", "s2.txt", "s3.txt", "s4.txt"):
             _write_story(tmp, name)
@@ -314,7 +331,7 @@ def test_evolve_mid_rollover(tmp_path, monkeypatch):
 def test_evolve_mid_not_triggered(tmp_path, monkeypatch):
     """不足阈值不触发体检。"""
     monkeypatch.setattr(ev, "MID_OBS_THRESHOLD", 10)
-    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0}
+    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0, "critic": 0}
     with tempfile.TemporaryDirectory() as tmp:
         _write_story(tmp, "s1.txt")
         _write_story(tmp, "s2.txt")

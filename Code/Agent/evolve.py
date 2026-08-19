@@ -32,8 +32,9 @@ from Agent.Pre_pro.pre_processor import preprocessor_node
 from Agent.Observer.observer import observer_node
 from Agent.Matcher import matcher as matcher_module
 from Agent.Matcher.matcher import matcher_node
-from Agent.Registry.registry import RegistryStore, set_active_store
+from Agent.Registry.registry import RegistryStore, set_active_store, get_active_store
 from Agent.Evaluator.evaluator import evaluator_node
+from Agent.Critic.critic import critic_node
 
 
 def _collect_txt(root: str) -> list[str]:
@@ -65,6 +66,8 @@ def collector_node(state: NarrativePipelineState) -> dict:
     """累积 occurrence、打印逐篇摘要、推进 story 下标、清空临时字段。"""
     occurrences = list(state.get("occurrences", []))
     occurrences.extend(state.get("match_occurrences", []))
+    pending_evidence = list(state.get("pending_evidence", []))
+    pending_evidence.extend(state.get("match_pending", []))
     labels = Counter(o.get("label") for o in state.get("match_occurrences", []))
     ns = state.get("normalized_story") or {}
     print(f"  → 句子={len(ns.get('sentences', []))}, obs={len(state.get('observations', []))}, "
@@ -72,6 +75,8 @@ def collector_node(state: NarrativePipelineState) -> dict:
     obs_since_eval = state.get("obs_since_eval", 0) + len(state.get("match_occurrences", []))
     return {
         "occurrences": occurrences,
+        "pending_evidence": pending_evidence,
+        "match_pending": [],
         "obs_since_eval": obs_since_eval,
         "current_story_index": state.get("current_story_index", 0) + 1,
         "raw_text": None,
@@ -99,7 +104,23 @@ def evaluator_mid_node(state: NarrativePipelineState) -> dict:
     os.makedirs(out_dir, exist_ok=True)
     report_path = os.path.join(out_dir, f"evaluation_mid_{n}.json")
     st = dict(state)
-    st["evaluation_context"] = {"report_path": report_path}
+    pending = state.get("pending_evidence", [])
+    if pending:
+        by_name = {}
+        for f in get_active_store().load_all():
+            by_name.setdefault(f.get("function_name"), dict(f))
+        for p in pending:
+            f = by_name.get(p.get("function_name"))
+            if f:
+                sup = list(f.get("supporting_obs_ids", []))
+                if p.get("obs_id") and p["obs_id"] not in sup:
+                    sup.append(p["obs_id"])
+                    f["supporting_obs_ids"] = sup
+        tmp_registry = os.path.join(out_dir, f"registry_pending_{n}.jsonl")
+        _write_jsonl(tmp_registry, list(by_name.values()))
+        st["evaluation_context"] = {"registry_file": tmp_registry, "report_path": report_path}
+    else:
+        st["evaluation_context"] = {"report_path": report_path}
     result = evaluator_node(st)
     report = result.get("evaluation_report") or {}
     dims = report.get("dimensions", {})
@@ -111,6 +132,7 @@ def evaluator_mid_node(state: NarrativePipelineState) -> dict:
         "passed_dimensions": report.get("passed_dimensions", []),
         "failed_dimensions": report.get("failed_dimensions", []),
         "dimensions": {k: {"score": d.get("score"), "pass": d.get("pass")} for k, d in dims.items()},
+        "pending_applied": len(state.get("pending_evidence", [])),
         "issue_counts": {
             "merge_groups": len(rec.get("merge_groups", [])),
             "revise": len(rec.get("revise_definitions", [])),
@@ -149,8 +171,9 @@ def report_node(state: NarrativePipelineState) -> dict:
     _write_jsonl(os.path.join(out_dir, "novelty_pool.jsonl"), [o for o in occs if o.get("label") == "NOVEL"])
     _write_jsonl(
         os.path.join(out_dir, "challenge_pool.jsonl"),
-        [o for o in occs if o.get("label") in ("CONFLICT", "UNCERTAIN")],
+        [o for o in occs if o.get("label") in ("CONFLICT", "UNCERTAIN", "RESOLVED")],
     )
+    _write_jsonl(os.path.join(out_dir, "pending_evidence.jsonl"), state.get("pending_evidence", []))
     with open(os.path.join(out_dir, "match_report.json"), "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
     print("\n=== Evolve 匹配报告 ===")
@@ -176,6 +199,7 @@ def _build_evolve_graph() -> StateGraph:
     graph.add_node("observer", observer_node)
     graph.add_node("bank_adder", bank_adder_node)
     graph.add_node("matcher", matcher_node)
+    graph.add_node("critic", critic_node)
     graph.add_node("collector", collector_node)
     graph.add_node("evaluator_mid", evaluator_mid_node)
     graph.add_node("report", report_node)
@@ -189,7 +213,8 @@ def _build_evolve_graph() -> StateGraph:
     graph.add_edge("preprocessor", "observer")
     graph.add_edge("observer", "bank_adder")
     graph.add_edge("bank_adder", "matcher")
-    graph.add_edge("matcher", "collector")
+    graph.add_edge("matcher", "critic")
+    graph.add_edge("critic", "collector")
     graph.add_conditional_edges(
         "collector",
         check_mid,
@@ -269,6 +294,8 @@ def main() -> None:
         "match_report": None,
         "obs_since_eval": 0,
         "mid_reports": [],
+        "pending_evidence": [],
+        "match_pending": [],
         "current_story_index": 0,
         "total_stories": total,
         "story_files": story_files,

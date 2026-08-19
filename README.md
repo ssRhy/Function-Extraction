@@ -131,12 +131,13 @@ python -m Agent.evolve --corpus <dir> --stories "a.txt,b.txt" --limit 5
 python -m Agent.evolve --corpus <dir> --batch-size 10 --top-k 5
 ```
 
-- 一次运行完成（单图 `evolve_app`）：逐篇 `story_loader→preprocessor→observer→bank_adder→matcher→collector` 循环 → `report`；新 obs 写入 Bank（按 `obs_id` 幂等），不新建/清空命名空间。
-- **Matcher 五分类**：obs 结构化向量 vs 函数 definition 余弦召回 top-k 候选（默认 5）→ LLM 按批判定（默认 10 obs/批，共享函数卡片）→ `MATCH/EXTEND` 直写 Registry（幂等 append `supporting_obs_ids` 并重算 confidence，`apply_confusable=True`）、`NOVEL` 进 `novelty_pool`、`CONFLICT/UNCERTAIN` 进 `challenge_pool`（供后续 Critic 复检）。
+- 一次运行完成（单图 `evolve_app`）：逐篇 `story_loader→preprocessor→observer→bank_adder→matcher→critic→collector` 循环 → `report`；新 obs 写入 Bank（按 `obs_id` 幂等），不新建/清空命名空间。
+- **Matcher 五分类**：obs 结构化向量 vs 函数 definition 余弦召回 top-k 候选（默认 5）→ LLM 按批判定（默认 10 obs/批，共享函数卡片）→ `MATCH/EXTEND` 证据进 **待应用区 `pending_evidence`**（不直写 Registry，由 Curator 统一应用 exemplars）、`NOVEL` 进 `novelty_pool`、`CONFLICT/UNCERTAIN` 交给 **Critic 复检**。
+- **Critic 边界复检器**：对 `CONFLICT/UNCERTAIN` 观测做二次校验（函数卡片含 `hard_negatives` 边界反例），输出四类最终判定——`match/extend` → 归函数并进 `pending_evidence`（`resolved_by="critic"`）、`novel` → 进 `novelty_pool`、`resolved` → 进 `challenge_pool`；复检失败保持原始 label 留 `challenge_pool`。
 - 每个 obs 落一条 **FunctionOccurrence**（`occurrences.jsonl`：function_name/label/story_id/category/事件/参与者/前后状态/表层/原文下标/story_stage/top_candidates/reason），NOVEL 记为 `OTHER` 不强行分类（对齐 Plan.md：OTHER/低置信度是发现新 Function 的来源）。
-- **Evaluator_mid 周期体检**：每累计 `MID_OBS_THRESHOLD`（默认 20）个新 obs 触发一次六维评估（复用 `evaluator_node`，评估对象 = 当前 Registry 含直写证据 + Bank）；体检只记录问题不触发修订，报告落盘 `evaluation_mid_<n>.json`，`match_report.json` 的 `mid_evaluations` 汇总各轮判定（Critic/Curator 为后续轮）。
-- 产物在 `data/evolve/`：`occurrences.jsonl` / `novelty_pool.jsonl` / `challenge_pool.jsonl` / `match_report.json`（分类计数 + `coverage=(MATCH+EXTEND)/total` + `novelty_rate=NOVEL/total`）。
-- `--namespace` 默认 `bootstrap`（读函数库 + 直写目标）；演示请用独立命名空间避免污染 O_0。不做 checkpoint（Bank.add 幂等，可整批重跑）。
+- **Evaluator_mid 周期体检**：每累计 `MID_OBS_THRESHOLD`（默认 20）个新 obs 触发一次六维评估（复用 `evaluator_node`；评估对象 = 当前 Registry + **pending 证据的"应用后视图"临时快照** + Bank）；体检只记录问题不触发修订，报告落盘 `evaluation_mid_<n>.json`，`match_report.json` 的 `mid_evaluations` 汇总各轮判定（含 `pending_applied`）。
+- 产物在 `data/evolve/`：`occurrences.jsonl` / `novelty_pool.jsonl` / `challenge_pool.jsonl`（含复检 RESOLVED）/ `pending_evidence.jsonl`（待 Curator 应用）/ `match_report.json`（分类计数 + `coverage=(MATCH+EXTEND)/total` + `novelty_rate=NOVEL/total`）。
+- `--namespace` 默认 `bootstrap`（读函数库 + 证据落区目标）；演示请用独立命名空间避免污染 O_0。不做 checkpoint（Bank.add 幂等，可整批重跑）。
 
 ### 语料清洗
 
