@@ -210,6 +210,16 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 21）：Evolve v1：Matcher 五分类 + 直写 + Pools + FunctionOccurrence
+- 新建 `Code/Agent/evolve.py`（`evolve_app` 单图 + CLI `python -m Agent.evolve`）：逐篇 `story_loader→preprocessor→observer→bank_adder→matcher→collector` 循环 → `report`；复用 bootstrap 节点，不做 checkpoint。
+- 新增 `Code/Agent/Matcher/matcher.py` + `Code/Prompt/Matcher_prompt.py`：obs 结构化向量 vs 函数 definition 余弦召回 top-k（默认 5，无硬阈值）→ LLM 按批判定（10 obs/批，共享函数卡片）五分类。
+- **MATCH/EXTEND 直写 Registry**（幂等 append `supporting_obs_ids` + 重算 confidence，`apply_confusable=True`）；**NOVEL→novelty_pool、CONFLICT/UNCERTAIN→challenge_pool**；每 obs 落 **FunctionOccurrence**（occurrence_id=obs_id、NOVEL=OTHER、story_stage 按句子下标占比确定性划分）→ `data/evolve/occurrences.jsonl`。
+- `RegistryStore.replace_all` 幂等 enrich Card 字段：`function_id`（F_+sha256[:8]）、`status=provisional`、`version_history=[CREATE v1]`；`test/migrate_function_cards.py` 已给 bootstrap 30 函数补齐并同步快照。
+- 测试 **90 项全过**（新增 test_matcher 5 / test_evolve 2 / test_registry +2）；schema 允许 `matched_function=null` 后 LLM 校验重试从 20+ 降到 3（39 obs）。
+- 冒烟（9 篇跨题材、clean 语料抽取、独立命名空间 `evolve_smoke`）：317s / 89 obs → MATCH 36 / EXTEND 5 / CONFLICT 4 / UNCERTAIN 38 / NOVEL 6，coverage 0.461 / novelty 0.067；直写生效。
+- 环境：终止残留 `python -m Agent.app` 进程（PID 18728，fresh 全量会清空 bootstrap 命名空间/Bank）；其破坏的 O_0 已从快照恢复（30 函数/1062 obs）+ 迁移；首次冒烟（Tee-Object 管道）后曾见 bootstrap 命名空间消失，二次复现（文件重定向）稳定——疑似管道环境偶发，已恢复并改用重定向。
+- 后续（structure-rules/Plan.md 蓝图，下一轮起）：Critic 复检、触发条件（≥20 obs Evaluator_mid / pools ≥5 Curator）、Curator + Human Review（自动+留档）、Evaluator_final；Plan.md 阶段一（Story Profile、Function 前置条件/角色位置/状态变化、Instance Card）。
+
 ## 本轮（2026-08-19 续 20）：结构化 Observation embedding + 语义化 surface_diversity
 - 用户提出：`surface_diversity` 靠字符串匹配不合理、结构化数据拼起来算需要 embedding。落地：
   - `Embedding/embedding.py` 新增 `encode_observation`/`encode_observations`（逐字段加权平均 + L2 归一化；`OBS_FIELD_WEIGHTS`：event/after=1.5、before/effect=1.0、affected=0.8、surface=0.6）；替换全部"拼串→encode"调用点（`Bank.add` / `Retrieval.query_by_observation` / confidence coherence / Evaluator coverage·cohesion / revise SPLIT 分配）。

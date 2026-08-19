@@ -60,7 +60,7 @@ def test_payload_preserves_unknown_fields(tmp_path):
     loaded = store.load_all()[0]
     assert loaded["function_id"] == "F-001"
     assert loaded["status"] == "provisional"
-    assert loaded["version_history"] == []
+    assert loaded["version_history"] == []  # 显式空列表不被覆盖
 
 
 def test_export_import_jsonl_roundtrip(tmp_path):
@@ -68,13 +68,40 @@ def test_export_import_jsonl_roundtrip(tmp_path):
     store = RegistryStore(db_path=db, namespace="ns1")
     funcs = [_func("F_A"), _func("F_B", extra_field="x")]
     store.replace_all(funcs)
+    stored = store.load_all()  # replace_all 后（含 enrich 字段）
     dst = str(tmp_path / "out.jsonl")
     store.export_jsonl(dst)
 
     imported = RegistryStore(db_path=db, namespace="ns2")
     n = imported.import_jsonl(dst, "ns2")
     assert n == 2
-    assert imported.load_all() == funcs
+    assert imported.load_all() == stored
     # 幂等：重复导入结果一致
     imported.import_jsonl(dst, "ns2")
     assert imported.count() == 2
+
+
+def test_replace_all_enriches_card_fields(tmp_path):
+    """replace_all 写入时幂等补齐 function_id / status / version_history。"""
+    store = RegistryStore(db_path=str(tmp_path / "f.db"), namespace="ns1")
+    store.replace_all([_func("F_A")])
+    f = store.load_all()[0]
+    assert f["function_id"].startswith("F_") and len(f["function_id"]) == 10
+    assert f["status"] == "provisional"
+    assert f["version_history"][0]["version"] == 1 and f["version_history"][0]["action"] == "CREATE"
+
+
+def test_enrich_idempotent_and_deterministic(tmp_path):
+    """已有字段不覆盖；同一定义重复写入得到相同 function_id。"""
+    db = str(tmp_path / "f.db")
+    store = RegistryStore(db_path=db, namespace="ns1")
+    store.replace_all([_func("F_A")])
+    first = store.load_all()[0]
+    store.replace_all([_func("F_A")])
+    second = store.load_all()[0]
+    assert first["function_id"] == second["function_id"]
+    assert second["function_id"] == first["function_id"]
+    store.replace_all([_func("F_A", function_id="CUSTOM", status="stable")])
+    kept = store.load_all()[0]
+    assert kept["function_id"] == "CUSTOM" and kept["status"] == "stable"  # 不覆盖已有字段
+    assert len(kept["version_history"]) == 1  # 已有 v1 不重复追加

@@ -28,6 +28,7 @@ python -m Agent.app  （bootstrap_app 单图，一次运行全流程）
 Code/
 ├── Agent/
 │   ├── app.py              # 唯一编译图 bootstrap_app + CLI（python -m Agent.app，SqliteSaver 持久化）
+│   ├── evolve.py           # Evolve 编译图 evolve_app + CLI（python -m Agent.evolve）
 │   ├── llm.py              # DeepSeek API 统一封装
 │   ├── state.py            # LangGraph State 定义
 │   ├── Pre_pro/pre_processor.py   # Pre-Processor 节点：LLM 分句分段（规则兜底）
@@ -38,6 +39,7 @@ Code/
 │   ├── Evaluator/evaluator.py     # Evaluator 节点：六维评估 + PASS/FAIL + 建议清单
 │   ├── Evaluator/dimensions.py    # 六维纯函数与阈值（无 LLM、可复现）
 │   ├── Evaluator/revise.py        # 修订节点：MERGE/REVISE/SPLIT + weak-fit 剔除 + 写回
+│   ├── Matcher/matcher.py          # Matcher 节点：obs 五分类（MATCH/EXTEND/CONFLICT/UNCERTAIN/NOVEL）
 │   └── Registry/registry.py     # RegistryStore：SQLite 存储（命名空间隔离，payload 整存）
 ├── Bank/
 │   └── bank.py             # ObservationBank：ChromaDB + JSONL 双存储（data/bank/observations.jsonl）
@@ -51,13 +53,15 @@ Code/
 │   ├── Inducer_prompt.py   # Inducer 系统提示词
 │   ├── Evaluator_prompt.py # Evaluator 抽象质量复核提示词
 │   ├── Merge_prompt.py     # 近义组合并提示词
-│   └── Revise_prompt.py    # 定义修订/拆分提示词
+│   ├── Revise_prompt.py    # 定义修订/拆分提示词
+│   └── Matcher_prompt.py   # Matcher 五分类判定提示词
 ├── data/                    # 统一数据根目录（全部 gitignored 运行时产物）
 │   ├── registry/functions.db # Registry（SQLite，命名空间隔离）
 │   ├── bank/                # ObservationBank 运行时存储（JSONL + ChromaDB）
 │   ├── bootstrap/           # 快照（functions_<ns>.jsonl / bank_<ns>.jsonl）
 │   ├── checkpoints/         # LangGraph checkpoint（bootstrap-<ns>.sqlite3，--resume 续跑）
-│   └── evaluation/          # 评估报告与修订历史（evaluation_report.json / revise_rounds.jsonl）
+│   ├── evaluation/          # 评估报告与修订历史（evaluation_report.json / revise_rounds.jsonl）
+│   └── evolve/              # Evolve 产物（occurrences.jsonl / novelty_pool.jsonl / challenge_pool.jsonl / match_report.json）
 ├── vendor/                  # langgraph-checkpoint-sqlite 本地依赖（gitignored，见安装）
 ├── test/
 │   ├── clean_corpus.py     # 语料清洗（脚注/促销/碎片行/数字标记）
@@ -65,6 +69,9 @@ Code/
 │   ├── test_revise.py      # 修订节点 + bootstrap_app 修订闭环测试（mock LLM）
 │   ├── test_bootstrap_app.py # bootstrap_app 单图全流程测试（mock LLM + FakeEmbedder）
 │   ├── test_registry.py    # RegistryStore 单元测试（CRUD/隔离/字段无损/JSONL 往返）
+│   ├── test_matcher.py     # Matcher 单元测试（召回/直写/occurrence，mock LLM）
+│   ├── test_evolve.py      # evolve_app 单图全流程测试（mock LLM + FakeEmbedder）
+│   ├── migrate_function_cards.py # 一次性迁移：O_0 补 function_id/status/version_history
 │   ├── test_batch_induction.py  # 批后归纳聚类纯函数测试（无 LLM）
 │   ├── test_preprocessor.py # Pre-Processor 测试（mock LLM）
 │   ├── test_confidence.py  # 置信度计算测试
@@ -114,6 +121,22 @@ python -m Agent.app --namespace o0 --out-dir data/o0       # 自定义命名空�
 - Abstraction 复核为"首轮全量 + 后续轮增量"：只重评 `revise_node` 标记的变更集，未变更函数按 function_name 沿用旧评审；确定性五维每轮全量（向量秒级）
 - LLM 统一 `reasoning_effort="none"`（`Agent/llm.py` 硬编码）；设 `LLM_USAGE=1` 可打印按调用方归因的 usage/耗时
 
+### Evolve（增量匹配，Bootstrap 之后持续运行）
+
+```bash
+cd Code
+python -m Agent.evolve --corpus <新文本目录>                          # 全量匹配
+python -m Agent.evolve --corpus <dir> --namespace smoke --out-dir data/evolve_smoke  # 独立命名空间（演示/防污染）
+python -m Agent.evolve --corpus <dir> --stories "a.txt,b.txt" --limit 5
+python -m Agent.evolve --corpus <dir> --batch-size 10 --top-k 5
+```
+
+- 一次运行完成（单图 `evolve_app`）：逐篇 `story_loader→preprocessor→observer→bank_adder→matcher→collector` 循环 → `report`；新 obs 写入 Bank（按 `obs_id` 幂等），不新建/清空命名空间。
+- **Matcher 五分类**：obs 结构化向量 vs 函数 definition 余弦召回 top-k 候选（默认 5）→ LLM 按批判定（默认 10 obs/批，共享函数卡片）→ `MATCH/EXTEND` 直写 Registry（幂等 append `supporting_obs_ids` 并重算 confidence，`apply_confusable=True`）、`NOVEL` 进 `novelty_pool`、`CONFLICT/UNCERTAIN` 进 `challenge_pool`（供后续 Critic 复检）。
+- 每个 obs 落一条 **FunctionOccurrence**（`occurrences.jsonl`：function_name/label/story_id/category/事件/参与者/前后状态/表层/原文下标/story_stage/top_candidates/reason），NOVEL 记为 `OTHER` 不强行分类（对齐 Plan.md：OTHER/低置信度是发现新 Function 的来源）。
+- 产物在 `data/evolve/`：`occurrences.jsonl` / `novelty_pool.jsonl` / `challenge_pool.jsonl` / `match_report.json`（分类计数 + `coverage=(MATCH+EXTEND)/total` + `novelty_rate=NOVEL/total`）。
+- `--namespace` 默认 `bootstrap`（读函数库 + 直写目标）；演示请用独立命名空间避免污染 O_0。不做 checkpoint（Bank.add 幂等，可整批重跑）。
+
 ### 语料清洗
 
 ```bash
@@ -155,7 +178,8 @@ result = bootstrap_app.invoke(initial_state, config=config)
 cd Code
 python -m pytest test/test_preprocessor.py test/test_confidence.py test/test_evaluator.py \
     test/test_revise.py test/test_bootstrap_app.py test/test_registry.py \
-    test/test_batch_induction.py test/test_clean_corpus.py -q   # 全部离线回归（mock LLM / 无 LLM）
+    test/test_matcher.py test/test_evolve.py test/test_batch_induction.py \
+    test/test_clean_corpus.py -q   # 全部离线回归（mock LLM / 无 LLM）
 ```
 
 ## NarrativeObservation 数据结构

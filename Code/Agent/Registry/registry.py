@@ -8,7 +8,9 @@ RegistryStore - Function Registry 持久化存储（SQLite，命名空间隔离�
 
 import json
 import os
+import hashlib
 import sqlite3
+import time
 from contextlib import closing
 
 _DEFAULT_DB_PATH = os.path.join(
@@ -78,8 +80,8 @@ class RegistryStore:
         return [json.loads(r["payload"]) for r in rows]
 
     def replace_all(self, funcs: list[dict]) -> None:
-        """事务：清空当前 namespace 后全量写入（等价旧整文件重写）。"""
-        self._insert_rows(self.namespace, funcs)
+        """事务：清空当前 namespace 后全量写入；写入时幂等补齐 Card 字段。"""
+        self._insert_rows(self.namespace, [_with_card_fields(f) for f in funcs])
 
     def count(self) -> int:
         with closing(self._connect()) as conn:
@@ -138,3 +140,27 @@ def get_active_store() -> RegistryStore:
 def set_active_store(store: RegistryStore | None) -> None:
     global _active_store
     _active_store = store
+
+
+def _with_card_fields(func: dict) -> dict:
+    """幂等补齐 Function Card 字段：function_id / status / version_history。
+
+    已有字段不覆盖；function_id 由 (function_name, definition) 确定性生成，
+    保证同一定义重跑得到相同 ID；status 缺省 provisional（文档 §6.4 初始本体非最终答案）；
+    version_history 缺省 v1=CREATE。
+    """
+    f = dict(func)
+    if not f.get("function_id"):
+        digest = hashlib.sha256(
+            f"{f.get('function_name', '')}|{f.get('definition', '')}".encode("utf-8")
+        ).hexdigest()[:8]
+        f["function_id"] = f"F_{digest.upper()}"
+    if not f.get("status"):
+        f["status"] = "provisional"
+    if f.get("version_history") is None:
+        f["version_history"] = [{
+            "version": 1,
+            "action": "CREATE",
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }]
+    return f

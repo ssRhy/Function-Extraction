@@ -197,3 +197,11 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
   - `_compute_surface_diversity` 改为 embedding 贪心语义去重（`SURFACE_SIM_THRESHOLD=0.80`：与已选模式 centroid 余弦 ≥ 阈值视为同一模式），替代精确 `set()`。
 - **验证**：新增 `test_embedding.py` 3 项（同义改写算 1 个模式 / encode 维度·归一化·空字段·单字段等价 / confidence 结构化重算）；`test_evaluator` 的 weak-fit 用例适配结构化编码（离群更难触发，改 8 支持 obs + `[1,9)` 索引）；**79 项全过**。快照抽样 4 函数：新 coherence 0.81-0.84 vs 旧 0.54-0.64（结构化更稳定）；surface 均到上限 1.0。
 - **状态**：已落地。Chroma 向量空间变更：旧库 obs 向量仍是旧"拼串"空间，fresh 跑整体重建 Bank 无混合；coverage 阈值 0.65 可能在结构化编码后偏移，验证时若偏差明显同步校准。
+
+## 20. Evolve v1：Matcher 五分类 + 直写 + Pools + FunctionOccurrence 对齐（2026-08-19）
+
+- **背景**：Bootstrap 完成后进入 Evolve。用户给出 `structure-rules.mdc`（完整 Evolve 结构：Matcher→Critic→Pools→触发→Curator→Human Review→Evaluator_final）与 `Plan.md`（大项目方向：Part A 从文本归纳 Function、Part B 用 Function 写大纲），并澄清"Evolve 仍是从文本归纳功能，Plan 是据功能写大纲"。
+- **关键决策**：本轮只做 Matcher+直写+Pools（Critic/Curator/触发留后续轮，Pools 格式为其预留）；MATCH/EXTEND 直写 Registry（对齐 rules"更新 exemplars"）；每 obs 落 FunctionOccurrence（对齐 Plan.md 阶段二"obs→Function 映射"，NOVEL=OTHER 不强行分类）；Human Review 自动+留档。
+- **实现**：`evolve_app` 单图复用 bootstrap 节点；Matcher = embedding 召回（`encode_observation` vs definition，top-k=5，无硬阈值）+ LLM 按批判定（10 obs/批共享函数卡片）；`RegistryStore.replace_all` 幂等 enrich Card 字段（function_id/status/version_history）。
+- **踩坑**：① `MatchDecision` 的 str 字段不允许 null → LLM 常输出 null 触发大量校验重试，改 `str | None` 后重试 20+ → 3（39 obs）；② 残留 `python -m Agent.app` 进程 fresh 启动会清空 bootstrap 命名空间/Bank，必须先终止并从快照恢复（30/1062）+ 迁移；③ 首次冒烟（Tee-Object 管道）后 bootstrap 命名空间消失、二次复现（文件重定向）稳定——疑似管道环境偶发，已恢复并改用重定向。
+- **状态**：已落地并验收（90 测试全过；9 篇冒烟 coverage 0.461 / novelty 0.067）。
