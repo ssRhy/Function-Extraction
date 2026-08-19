@@ -226,3 +226,10 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **实现**：新增 `Agent/Curator/curator.py`（图 `report → curator → END`）：应用 pending（复用 `_apply_evidence` + version_history）、novelty 归纳（复用 `cluster_similar_pairs` + `inducer_node`）、体检修订（复用 `_llm_merge/_llm_revise`）；方案写 `curator_plan.jsonl` 自动留档后 Apply，清空已消费 pending。
 - **验证**：101 测试全过；冒烟 3 篇/27 obs——Curator 应用 pending 18 条、novelty 2 obs 样本不足 SKIP、19 动作留档、IRREVERSIBLE_LOSS version v1→v2。
 - **状态**：已落地。Evaluator_final（终期全面评估）为后续轮。
+
+## 24. 正式 Evolve（60 篇 5 领域）+ Curator 体检问题消费缺陷（2026-08-19）
+
+- **背景**：用户删 120 原始语料、加 60 篇 5 领域语料（5 类 × 12 篇 + manifest）并重跑 bootstrap（新 O_0 仅 3 函数）；正式 Evolve 要基于旧 O_0（30 函数）——从 `data/functions_export.csv`（DB 导出，payload 整存）恢复，清空失效 supporting。
+- **发现缺陷**：`evaluator_mid_node` 的 `mid_reports` summary 没保存 `recommendations` → Curator `_revise_from_report` 拿到的报告无 merge_groups/revise 问题 → 体检问题永远消费不到（冒烟未暴露，正式跑暴露）。修复：summary 增加 `recommendations`。
+- **正式跑结果**：542 obs / 21 次体检（末次 PASS 4/6）；Curator 414 动作 → 33 函数（22 旧 + 5 新增 + 2 合并 + 2 组拆分 - 1 移除）。长任务 1h 超时中断、report 后 curator 未执行 → 手动补跑。
+- **状态**：数据流完整验证（提取→匹配→复检→体检→维护→写回）。Evaluator_final 为后续轮。

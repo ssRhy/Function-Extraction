@@ -210,6 +210,12 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 25）：正式 Evolve（60 篇 5 领域）+ Curator 缺陷修复
+- 用户删 120 原始语料、新增 `zhihu_story_subset_60_5domains_20260819_clean`（60 篇 / 5 领域 / 每类 12 篇 + manifest）并用它重跑了 bootstrap（新 O_0 仅 3 函数 / 155 obs）；正式 Evolve 要求**基于旧 O_0（30 函数）**——从 `data/functions_export.csv`（payload 整存）恢复 30 函数到 `evolve_official`（清空失效 supporting，让证据从新文本累积）。
+- **正式跑（60 篇全量，~1.5h 超时中断后补收尾）**：542 obs / 21 次 Evaluator_mid（末次 PASS 4/6：coverage 0.991 / cohesion 0.908 / abstraction 0.867 / diversity 57；separation 2 组近义、evidence 有个别 <2 故事）；Curator 动作 414 = 应用 pending 404 + 新增 5 函数 + MERGE 2 + SPLIT 2 + REMOVE 1 → 最终 33 函数（22 旧函数证据累积 ver2、5 新归纳、2 合并、2 组拆分、1 移除）。
+- **缺陷修复**：`evaluator_mid_node` 的 summary 此前**未保存 `recommendations`**，Curator 消费不到体检问题（merge_groups 等）——正式跑时 2 组近义未被消费；已修复（summary 增加 `recommendations`），补跑后 MERGE/SPLIT/REMOVE 生效。
+- 环境：shell 工具 1h 超时中断了 evolve 前台命令，但 python 进程后台继续到 58/60 后被杀；report 产物完整、curator 未执行 → 手动补跑 curator_node（pending/occurrences/mid_reports 从文件构造）+ `_revise_from_report`（从最新 `evaluation_mid_21.json` 读完整 recommendations）。
+
 ## 本轮（2026-08-19 续 24）：Evolve v4：Curator 收尾维护（按动作分门槛）
 - 新增 `Code/Agent/Curator/curator.py`（图 `report → curator → END`）：整合 pending_evidence / novelty_pool / challenge_pool / 最新 evaluation_mid 问题，执行完整维护——应用 pending exemplars（复用 `_apply_evidence`，version_history append `APPLY_EVIDENCE`）、跨故事 ≥2 且 ≥3 obs 的 novel 聚类归纳新函数（复用 `cluster_similar_pairs` + `inducer_node`）、挑战/体检问题修订（复用 `_llm_merge/_llm_revise`，`REVISE_MIN_SUPPORTING=3` 门槛）、low_evidence 移除、weak_fit 剔除。
 - **按动作分门槛**：APPLY_EVIDENCE 无门槛；ADD 需跨故事 ≥2 + novel obs ≥3；MERGE/REVISE 需涉及函数 supporting ≥3；不足记 `SKIP_SMALL_SAMPLE` 保留累积。方案写 `data/evolve/curator_plan.jsonl`（Human Review 自动留档）后自动 Apply，清空已消费 pending；`match_report.json` 增加 `curator` 汇总。

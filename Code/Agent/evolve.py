@@ -134,6 +134,7 @@ def evaluator_mid_node(state: NarrativePipelineState) -> dict:
         "failed_dimensions": report.get("failed_dimensions", []),
         "dimensions": {k: {"score": d.get("score"), "pass": d.get("pass")} for k, d in dims.items()},
         "pending_applied": len(state.get("pending_evidence", [])),
+        "recommendations": report.get("recommendations", {}),
         "issue_counts": {
             "merge_groups": len(rec.get("merge_groups", [])),
             "revise": len(rec.get("revise_definitions", [])),
