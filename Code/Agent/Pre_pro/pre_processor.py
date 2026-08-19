@@ -158,18 +158,28 @@ class PreCorrection(BaseModel):
     splits: list[PreSplitItem] = Field(default_factory=list, description="需拆分的句子")
 
 
-def _apply_corrections(sentences: list[str], merges: list[list[int]], splits: list[PreSplitItem]) -> list[str]:
-    """应用 LLM 修正：先合并（非法组忽略），再对未合并句按 。！？ 拆分。"""
-    valid = []
-    seen = set()
+def _valid_merges(merges: list[list[int]], n: int) -> list[list[int]]:
+    """过滤非法合并组：非空、>=2 个元素、下标在界内、连续升序、组间不重叠。
+
+    LLM 可能输出负数/越界/单元素/乱序组（如 [0, -1]），若直接消费会使
+    _orig_to_final 的游标不前进而死循环，_apply_corrections 与 _orig_to_final
+    必须共用同一过滤。
+    """
+    valid, seen = [], set()
     for g in sorted(merges, key=lambda x: min(x) if x else 0):
         g = sorted(set(g))
-        if len(g) < 2 or any(i < 0 or i >= len(sentences) or i in seen for i in g):
+        if len(g) < 2 or any(i < 0 or i >= n or i in seen for i in g):
             continue
         if not all(g[i] + 1 == g[i + 1] for i in range(len(g) - 1)):
             continue
         seen.update(g)
         valid.append(g)
+    return valid
+
+
+def _apply_corrections(sentences: list[str], merges: list[list[int]], splits: list[PreSplitItem]) -> list[str]:
+    """应用 LLM 修正：先合并（非法组忽略），再对未合并句按 。！？ 拆分。"""
+    valid = _valid_merges(merges, len(sentences))
     split_set = {s.index for s in splits if 0 <= s.index < len(sentences) and s.parts >= 2}
     out = []
     i = 0
@@ -191,8 +201,9 @@ def _apply_corrections(sentences: list[str], merges: list[list[int]], splits: li
 def _orig_to_final(sentences: list[str], merges: list[list[int]], split_set: set[int]) -> dict[int, int]:
     """原始规则句子编号 -> 应用合并/拆分后的首个 final 编号（供段落映射）。"""
     m, fi, i = {}, 0, 0
+    valid = _valid_merges(merges, len(sentences))
     while i < len(sentences):
-        group = next((g for g in merges if g[0] == i), None)
+        group = next((g for g in valid if g[0] == i), None)
         if group:
             for j in group:
                 m[j] = fi

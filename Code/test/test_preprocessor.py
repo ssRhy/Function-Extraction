@@ -133,6 +133,17 @@ def test_llm_not_collapsed_kept():
     print("正常修正保留规则切句: OK")
 
 
+def test_invalid_merge_groups_ignored():
+    """非法合并组（负数/越界/单元素）被过滤，不触发 _orig_to_final 死循环。"""
+    sentences = ["a。", "b。", "c。"]
+    merges = [[0, -1], [0, 5], [2], [1, 2]]
+    m = pp._orig_to_final(sentences, merges, set())
+    assert m == {0: 0, 1: 1, 2: 1}, m
+    out = pp._apply_corrections(sentences, merges, [])
+    assert out == ["a。", "b。c。"], out
+    print("非法合并组过滤（负数/越界/单元素，防死循环）: OK")
+
+
 if __name__ == "__main__":
     test_clean_lines_markers()
     test_join_paragraphs_fragments()
@@ -144,4 +155,5 @@ if __name__ == "__main__":
     test_empty()
     test_llm_collapse_fallback()
     test_llm_not_collapsed_kept()
+    test_invalid_merge_groups_ignored()
     print("所有测试通过!")
