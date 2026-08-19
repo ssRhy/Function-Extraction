@@ -29,7 +29,7 @@ def recall_candidates(observations: list[dict], funcs: list[dict], embedder, top
     if not funcs:
         return [[] for _ in observations]
     obs_vecs = embedder.encode_observations(observations)
-    def_vecs = embedder.encode([f.get("definition", "") for f in funcs])
+    def_vecs = embedder.encode_cached([f.get("definition", "") for f in funcs])
     sims = _cosine_sims(obs_vecs, def_vecs)
     out = []
     for i in range(len(observations)):

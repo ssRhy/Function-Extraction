@@ -51,7 +51,7 @@ def compute_coverage(functions, all_obs, embedder, sim_threshold: float = COVERA
     supporting_ids = set()
     for f in functions:
         supporting_ids.update(f.get("supporting_obs_ids", []))
-    def_vecs = embedder.encode([f.get("definition", "") for f in functions])
+    def_vecs = embedder.encode_cached([f.get("definition", "") for f in functions])
     obs_vecs = embedder.encode_observations(all_obs)
     def_norm = def_vecs / np.maximum(np.linalg.norm(def_vecs, axis=1, keepdims=True), 1e-9)
     obs_norm = obs_vecs / np.maximum(np.linalg.norm(obs_vecs, axis=1, keepdims=True), 1e-9)

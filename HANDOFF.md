@@ -210,6 +210,11 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 32）：函数定义向量缓存（bge 下载受阻，暂留 text2vec）
+- 用户要求换 `BAAI/bge-small-zh-v1.5` + 缓存函数定义向量；**bge 下载失败**（hf-mirror 与 HF 直连均 SSL UNEXPECTED_EOF，网络对 huggingface 不可达，text2vec 是此前成功下载的缓存）→ 暂留 text2vec（768 维），等网络恢复后可一行切换 + 重建 Bank。
+- **已落地缓存**：`Embedder.encode_cached(texts)`（文本→向量缓存，函数定义固定文本复用）；调用点 Matcher 召回、Evaluator coverage、Curator Agglomerative 拎候选均改用它（函数定义在单次 Evolve 中不变，Curator 最后才改）。测试 FakeEmbedder 补 `encode_cached`（4 文件）。
+- 测试 **106 项全过**；40 篇重跑（82min）仍是 text2vec，换 bge 后 embedding 应显著提速。
+
 ## 本轮（2026-08-19 续 31）：Curator 近义收敛改 Agglomerative 拎候选 + LLM 确认
 - 用户确认"先拎出近义组、LLM 处理"流程：`_full_merge_scan` 拎组从"全量 LLM 扫描"改为 **Agglomerative 聚类**（`AGGLOMERATIVE_SIM_THRESHOLD=0.75`、`scipy` linkage **complete** 防链式串簇 + fcluster 距离 0.25）→ 候选组喂 `Abstract_merge_prompt`（LLM 确认"同一结构作用"）→ `_llm_merge` 重新归纳；抽出 `_agglomerative_candidates` helper 便于测试。
 - **验收（19 → 18 函数）**：Agglomerative 拎出 3 候选组（KEY_DECISION_REVERSAL~TRANSFORMATIVE_CHANGE、PASSIVE_HARM_SUFFERING~SOCIAL_ISOLATION、RELATIONSHIP_BONDING~RELATIONSHIP_INTIMACY_ESCALATION）——正好 text2vec 实测 3 对、无漏无假；LLM 确认只合并关系族（→`RELATIONSHIP_DEEPENING`），拒绝 2 个边界/不同结构。

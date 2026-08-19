@@ -61,6 +61,11 @@ class FakeEmbedder:
     def encode_observations(self, observations):
         return np.array([self.encode_observation(o) for o in observations])
 
+    def encode_cached(self, texts):
+        if isinstance(texts, str):
+            texts = [texts]
+        return self.encode(texts)
+
 
 def _write_story(tmp, name, text="角色发现关键线索。角色决定采取新行动。"):
     with open(os.path.join(tmp, name), "w", encoding="utf-8") as f:

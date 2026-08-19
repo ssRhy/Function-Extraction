@@ -270,3 +270,10 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **实现**：`_full_merge_scan` 拎组 = `scipy` pdist(cosine) → linkage(complete) → fcluster(距离 0.25)；候选组喂 `Abstract_merge_prompt` 确认；确认组 `_llm_merge`。抽出 `_agglomerative_candidates` helper（单测不串簇）。
 - **验证**：19 函数拎出 3 候选组（= text2vec 实测 3 对），LLM 只确认合并关系族（→RELATIONSHIP_DEEPENING），拒绝 KDR~TC（可区分）与 PHS~SI（不同结构）——拎组全而稳、LLM 准而不误并。终评 PASS 6/6（18 函数）。测试 106 项全过。
 - **状态**：近义收敛 = Agglomerative 拎候选 + LLM 确认 + `_llm_merge`，每批 Curator 自动跑。
+
+## 30. 函数定义向量缓存（2026-08-19）
+
+- **背景**：text2vec（768 维 BERT）比 MiniLM 慢 ~4 倍，40 篇 Evolve 82min（每篇 123s）。优化 ① 换小模型 bge-small-zh-v1.5、② 缓存函数定义向量。
+- **bge 受阻**：hf-mirror 与 huggingface.co 均 SSL UNEXPECTED_EOF（网络对 HF 不可达）——bge 无法下载，暂留 text2vec。
+- **已落地**：`Embedder.encode_cached`（文本→向量缓存）+ Matcher/Evaluator/Curator 的函数定义 encode 改用它——单次运行中函数定义不变，跨节点复用，消除每篇重复 encode 30 定义。
+- **状态**：106 测试全过；bge 切换待网络恢复（改模型名 + 重建 Bank）。

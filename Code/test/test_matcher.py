@@ -50,6 +50,11 @@ class FakeEmbedder:
     def encode_observations(self, observations):
         return np.array([self.encode_observation(o) for o in observations])
 
+    def encode_cached(self, texts):
+        if isinstance(texts, str):
+            texts = [texts]
+        return self.encode(texts)
+
 
 def _obs(sid, oid, text="角色发现关键线索并改变认知", surface="发现线索", idx=(0,)):
     return {

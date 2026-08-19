@@ -120,7 +120,7 @@ def _agglomerative_candidates(names: list[str], funcs_by_name: dict, embedder) -
     返回簇内 >=2 个函数的候选组；complete 链接要求组内最远两点也在阈值内，
     避免"A-B 近、B-C 近但 A-C 远"被链式并成一组。
     """
-    vecs = embedder.encode([funcs_by_name[n].get("definition", "") for n in names])
+    vecs = embedder.encode_cached([funcs_by_name[n].get("definition", "") for n in names])
     vecs = vecs / np.maximum(np.linalg.norm(vecs, axis=1, keepdims=True), 1e-9)
     dist = pdist(vecs, metric="cosine")
     Z = linkage(dist, method="complete")

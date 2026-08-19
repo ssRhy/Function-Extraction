@@ -59,6 +59,11 @@ class FakeEmbedder:
     def encode_observations(self, observations):
         return np.array([self.encode_observation(o) for o in observations])
 
+    def encode_cached(self, texts):
+        if isinstance(texts, str):
+            texts = [texts]
+        return self.encode(texts)
+
 
 def _cfg(thread_id):
     return {"configurable": {"thread_id": thread_id}}

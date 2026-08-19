@@ -39,6 +39,7 @@ class Embedder:
         self.device = device
         self.model = self._load_with_retry(max_retries=5, base_delay=3)
         self._dim = self.model.get_embedding_dimension()
+        self._text_cache: dict[str, np.ndarray] = {}  # 文本 -> 向量（函数定义等固定文本复用）
 
     def _load_with_retry(self, max_retries=5, base_delay=3):
         """带重试的模型加载，强制读本地缓存"""
@@ -106,3 +107,18 @@ class Embedder:
         if not observations:
             return np.zeros((0, self._dim))
         return np.array([self.encode_observation(o) for o in observations])
+
+    def encode_cached(self, texts) -> np.ndarray:
+        """批量 encode，命中 self._text_cache 的文本直接复用（函数定义等固定文本）。
+
+        函数定义在单次 Evolve 运行中不变（Curator 在最后才修改），跨节点
+        （Matcher 每篇 / Evaluator 每轮 / Curator 近义拎候选）复用向量，省重复 encode。
+        """
+        if isinstance(texts, str):
+            texts = [texts]
+        missing = [t for t in texts if t not in self._text_cache]
+        if missing:
+            vecs = self.encode(missing)
+            for t, v in zip(missing, vecs):
+                self._text_cache[t] = v
+        return np.array([self._text_cache[t] for t in texts])
