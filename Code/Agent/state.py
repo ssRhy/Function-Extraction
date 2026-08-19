@@ -46,6 +46,8 @@ class NarrativePipelineState(TypedDict):
     match_occurrences: list[dict]    # 当前故事 FunctionOccurrence
     occurrences: list[dict]          # 全流程累积 FunctionOccurrence
     match_report: dict | None        # 匹配报告（分类计数 / coverage / novelty_rate）
+    obs_since_eval: int              # 自上次 Evaluator_mid 体检以来处理的新 obs 数
+    mid_reports: list[dict]          # Evaluator_mid 体检历史（round/ts/verdict/六维/问题数）
 
     # ---- 流程控制 ----
     current_story_index: int

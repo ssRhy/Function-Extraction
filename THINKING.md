@@ -205,3 +205,10 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - **实现**：`evolve_app` 单图复用 bootstrap 节点；Matcher = embedding 召回（`encode_observation` vs definition，top-k=5，无硬阈值）+ LLM 按批判定（10 obs/批共享函数卡片）；`RegistryStore.replace_all` 幂等 enrich Card 字段（function_id/status/version_history）。
 - **踩坑**：① `MatchDecision` 的 str 字段不允许 null → LLM 常输出 null 触发大量校验重试，改 `str | None` 后重试 20+ → 3（39 obs）；② 残留 `python -m Agent.app` 进程 fresh 启动会清空 bootstrap 命名空间/Bank，必须先终止并从快照恢复（30/1062）+ 迁移；③ 首次冒烟（Tee-Object 管道）后 bootstrap 命名空间消失、二次复现（文件重定向）稳定——疑似管道环境偶发，已恢复并改用重定向。
 - **状态**：已落地并验收（90 测试全过；9 篇冒烟 coverage 0.461 / novelty 0.067）。
+
+## 21. Evolve v2：Evaluator_mid 周期体检（每 20 obs 触发，2026-08-19）
+
+- **背景**：用户问"match 之后需要 evaluator 吗"——澄清 Evolve 阶段 Evaluator 不是门禁而是触发式体检（structure-rules：累计 ≥20 obs → Evaluator_mid）；用户方案"MATCH/EXTEND 给 Evaluator、CONFLICT/UNCERTAIN 给 Critic"等价于"证据累积到阈值再整体体检 + 单条不确定走复检"，粒度不同、时机不同，最终都喂 Curator。
+- **实现**：`evolve_app` 的 `collector` 累加 `obs_since_eval`，达 `MID_OBS_THRESHOLD=20` → `evaluator_mid_node`（薄包装复用 `evaluator_node`）→ 报告 `evaluation_mid_<n>.json` + `match_report.mid_evaluations` 汇总；滚动触发（体检后归零），不足阈值不体检（Evaluator_final 后续轮）。
+- **验证**：93 测试全过；冒烟 3 篇/22 obs 触发 1 次体检 FAIL 3/6（separation 8 组近义是真实信号，diversity/evidence 小样本未达标属预期）。
+- **状态**：已落地。Curator/Critic/Evaluator_final 为后续轮。

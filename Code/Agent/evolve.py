@@ -19,6 +19,7 @@ from collections import Counter
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_OUT_DIR = os.path.join(_ROOT, "data", "evolve")
+MID_OBS_THRESHOLD = 20  # 累计处理多少个新 obs 触发一次 Evaluator_mid 周期体检（滚动重置）
 _VENDOR = os.path.join(_ROOT, "vendor")
 if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
     sys.path.insert(0, _VENDOR)
@@ -32,6 +33,7 @@ from Agent.Observer.observer import observer_node
 from Agent.Matcher import matcher as matcher_module
 from Agent.Matcher.matcher import matcher_node
 from Agent.Registry.registry import RegistryStore, set_active_store
+from Agent.Evaluator.evaluator import evaluator_node
 
 
 def _collect_txt(root: str) -> list[str]:
@@ -67,8 +69,10 @@ def collector_node(state: NarrativePipelineState) -> dict:
     ns = state.get("normalized_story") or {}
     print(f"  → 句子={len(ns.get('sentences', []))}, obs={len(state.get('observations', []))}, "
           f"判定={dict(labels)}, 累计 occurrence={len(occurrences)}")
+    obs_since_eval = state.get("obs_since_eval", 0) + len(state.get("match_occurrences", []))
     return {
         "occurrences": occurrences,
+        "obs_since_eval": obs_since_eval,
         "current_story_index": state.get("current_story_index", 0) + 1,
         "raw_text": None,
         "story_config": None,
@@ -77,6 +81,50 @@ def collector_node(state: NarrativePipelineState) -> dict:
         "added_obs_ids": [],
         "match_decisions": [],
         "match_occurrences": [],
+    }
+
+
+def check_mid(state: NarrativePipelineState) -> str:
+    """collector 后路由：自上次体检累计 >= MID_OBS_THRESHOLD 个 obs → 体检；否则继续下一篇。"""
+    if state.get("obs_since_eval", 0) >= MID_OBS_THRESHOLD:
+        return "evaluator_mid"
+    return "story_loader"
+
+
+def evaluator_mid_node(state: NarrativePipelineState) -> dict:
+    """Evaluator_mid 周期体检：复用 evaluator_node 六维评估当前 Registry+Bank，只记录不修订。"""
+    mid_reports = list(state.get("mid_reports", []))
+    n = len(mid_reports) + 1
+    out_dir = state.get("out_dir", DEFAULT_OUT_DIR)
+    os.makedirs(out_dir, exist_ok=True)
+    report_path = os.path.join(out_dir, f"evaluation_mid_{n}.json")
+    st = dict(state)
+    st["evaluation_context"] = {"report_path": report_path}
+    result = evaluator_node(st)
+    report = result.get("evaluation_report") or {}
+    dims = report.get("dimensions", {})
+    rec = report.get("recommendations") or {}
+    summary = {
+        "round": n,
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "verdict": result.get("evaluator_decision"),
+        "passed_dimensions": report.get("passed_dimensions", []),
+        "failed_dimensions": report.get("failed_dimensions", []),
+        "dimensions": {k: {"score": d.get("score"), "pass": d.get("pass")} for k, d in dims.items()},
+        "issue_counts": {
+            "merge_groups": len(rec.get("merge_groups", [])),
+            "revise": len(rec.get("revise_definitions", [])),
+            "low_evidence": len(rec.get("low_evidence_functions", [])),
+            "weak_fit": len(rec.get("weak_fit_obs", [])),
+        },
+    }
+    mid_reports.append(summary)
+    passed = len(summary["passed_dimensions"])
+    print(f"  [Evaluator_mid] 第 {n} 次体检: {summary['verdict']}（达标 {passed}/6）→ {report_path}")
+    return {
+        "mid_reports": mid_reports,
+        "obs_since_eval": 0,
+        "messages": [{"role": "system", "content": f"[Evaluator_mid] 第 {n} 次体检 {summary['verdict']}（{passed}/6）"}],
     }
 
 
@@ -93,6 +141,7 @@ def report_node(state: NarrativePipelineState) -> dict:
         "coverage": round(coverage, 4),
         "novelty_rate": round(novelty, 4),
         "occurrences": occs,
+        "mid_evaluations": state.get("mid_reports", []),
     }
     out_dir = state.get("out_dir", DEFAULT_OUT_DIR)
     os.makedirs(out_dir, exist_ok=True)
@@ -109,6 +158,12 @@ def report_node(state: NarrativePipelineState) -> dict:
     for label in ("MATCH", "EXTEND", "CONFLICT", "UNCERTAIN", "NOVEL"):
         print(f"    {label}: {counts.get(label, 0)}")
     print(f"  coverage={report['coverage']:.3f} (MATCH+EXTEND) / novelty_rate={report['novelty_rate']:.3f} (NOVEL)")
+    mids = state.get("mid_reports", [])
+    if mids:
+        print("  Evaluator_mid 体检:")
+        for m in mids:
+            print(f"    第 {m['round']} 次: {m['verdict']}（达标 {len(m['passed_dimensions'])}/6）"
+                  f" 问题={m['issue_counts']}")
     print(f"  输出目录 → {out_dir}")
     return {"match_report": report}
 
@@ -122,6 +177,7 @@ def _build_evolve_graph() -> StateGraph:
     graph.add_node("bank_adder", bank_adder_node)
     graph.add_node("matcher", matcher_node)
     graph.add_node("collector", collector_node)
+    graph.add_node("evaluator_mid", evaluator_mid_node)
     graph.add_node("report", report_node)
 
     graph.add_edge(START, "story_loader")
@@ -134,7 +190,12 @@ def _build_evolve_graph() -> StateGraph:
     graph.add_edge("observer", "bank_adder")
     graph.add_edge("bank_adder", "matcher")
     graph.add_edge("matcher", "collector")
-    graph.add_edge("collector", "story_loader")
+    graph.add_conditional_edges(
+        "collector",
+        check_mid,
+        {"evaluator_mid": "evaluator_mid", "story_loader": "story_loader"},
+    )
+    graph.add_edge("evaluator_mid", "story_loader")
     graph.add_edge("report", END)
     return graph
 
@@ -206,6 +267,8 @@ def main() -> None:
         "match_occurrences": [],
         "occurrences": [],
         "match_report": None,
+        "obs_since_eval": 0,
+        "mid_reports": [],
         "current_story_index": 0,
         "total_stories": total,
         "story_files": story_files,

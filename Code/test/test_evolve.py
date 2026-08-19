@@ -15,10 +15,12 @@ from Agent import evolve as ev
 from Agent.Pre_pro import pre_processor as pp
 from Agent.Observer import observer as ob
 from Agent.Matcher import matcher as mm
+from Agent.Evaluator import evaluator as ev_module
 from Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
 from Agent.Pre_pro.pre_processor import PreCorrection
 from Agent.Observer.observer import ObservationResponse, ObservationItem
 from Prompt.Matcher_prompt import MatchResponse, MatchDecision
+from Prompt.Evaluator_prompt import EvaluatorReviewResponse, FunctionQualityReview
 
 
 class FakeEmbedder:
@@ -65,7 +67,8 @@ def _write_story(tmp, name, text="角色发现关键线索。角色决定采取�
 
 @contextmanager
 def _patched_llm(calls, matcher_fn=None):
-    originals = {"pp": pp.chat_structured, "ob": ob.chat_structured, "mm": mm.chat_structured}
+    originals = {"pp": pp.chat_structured, "ob": ob.chat_structured, "mm": mm.chat_structured,
+                 "ev": ev_module.chat_structured}
 
     def fake_pre(messages, schema, **kw):
         calls["pre"] += 1
@@ -97,15 +100,31 @@ def _patched_llm(calls, matcher_fn=None):
             for o in oids
         ])
 
+    def fake_eval(messages, schema, **kw):
+        calls["eval"] += 1
+        payload = messages[1]["content"].split("\n", 1)[1]
+        cards = json.loads(payload)
+        return EvaluatorReviewResponse(reviews=[
+            FunctionQualityReview(
+                function_name=c["function_name"],
+                bidirectional_conflation=False, conflation_reason="",
+                genre_surface_binding=False, binding_reason="",
+                granularity="ok", recommendation="OK",
+            )
+            for c in cards
+        ])
+
     pp.chat_structured = fake_pre
     ob.chat_structured = fake_obs
     mm.chat_structured = fake_matcher
+    ev_module.chat_structured = fake_eval
     try:
         yield
     finally:
         pp.chat_structured = originals["pp"]
         ob.chat_structured = originals["ob"]
         mm.chat_structured = originals["mm"]
+        ev_module.chat_structured = originals["ev"]
 
 
 def _initial(tmp, story_files):
@@ -121,6 +140,8 @@ def _initial(tmp, story_files):
         "match_occurrences": [],
         "occurrences": [],
         "match_report": None,
+        "obs_since_eval": 0,
+        "mid_reports": [],
         "current_story_index": 0,
         "total_stories": len(story_files),
         "story_files": story_files,
@@ -217,6 +238,106 @@ def test_evolve_report_novel_and_uncertain(tmp_path):
             pool = [json.loads(line) for line in f if line.strip()]
         assert len(pool) == 1 and pool[0]["function_name"] == "OTHER"
     print("evolve NOVEL 分流与报告计数: OK")
+
+
+def _mid_func():
+    return {
+        "schema_version": 2,
+        "function_name": "RESOURCE_ACQUISITION",
+        "definition": "角色获得关键资源或助力",
+        "realization_patterns": ["获得资源"],
+        "supporting_obs_ids": [],
+        "confidence": 0.6,
+    }
+
+
+def test_evolve_mid_triggered(tmp_path, monkeypatch):
+    """累计 obs 达阈值触发 Evaluator_mid：体检一次、计数归零、报告落盘、match_report 汇总。"""
+    monkeypatch.setattr(ev, "MID_OBS_THRESHOLD", 2)
+    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0}
+    with tempfile.TemporaryDirectory() as tmp:
+        _write_story(tmp, "s1.txt")
+        _write_story(tmp, "s2.txt")
+        from Agent.app import get_bank
+        bank = get_bank()
+        bank.clear()
+        bank.embedder = FakeEmbedder()
+        prev = get_active_store()
+        store = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="evolve_test")
+        store.replace_all([_mid_func()])
+        set_active_store(store)
+        try:
+            app = ev._build_evolve_graph().compile()
+            with _patched_llm(calls):
+                result = app.invoke(_initial(tmp, ["s1.txt", "s2.txt"]))
+        finally:
+            set_active_store(prev)
+            bank.clear()
+        assert calls["eval"] >= 1, calls
+        assert len(result["mid_reports"]) == 1, result["mid_reports"]
+        assert result["obs_since_eval"] == 0
+        assert os.path.exists(os.path.join(tmp, "evaluation_mid_1.json"))
+        mids = result["match_report"]["mid_evaluations"]
+        assert len(mids) == 1 and mids[0]["verdict"] in ("PASS", "FAIL")
+        assert "dimensions" in mids[0] and "issue_counts" in mids[0]
+    print("evolve Evaluator_mid 触发（2 篇 ≥ 阈值）: OK")
+
+
+def test_evolve_mid_rollover(tmp_path, monkeypatch):
+    """滚动触发：每达阈值体检一次，多轮累积 mid_reports。"""
+    monkeypatch.setattr(ev, "MID_OBS_THRESHOLD", 2)
+    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0}
+    with tempfile.TemporaryDirectory() as tmp:
+        for name in ("s1.txt", "s2.txt", "s3.txt", "s4.txt"):
+            _write_story(tmp, name)
+        from Agent.app import get_bank
+        bank = get_bank()
+        bank.clear()
+        bank.embedder = FakeEmbedder()
+        prev = get_active_store()
+        store = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="evolve_test")
+        store.replace_all([_mid_func()])
+        set_active_store(store)
+        try:
+            app = ev._build_evolve_graph().compile()
+            with _patched_llm(calls):
+                result = app.invoke(_initial(tmp, ["s1.txt", "s2.txt", "s3.txt", "s4.txt"]))
+        finally:
+            set_active_store(prev)
+            bank.clear()
+        assert len(result["mid_reports"]) == 2, result["mid_reports"]
+        assert [m["round"] for m in result["mid_reports"]] == [1, 2]
+        assert os.path.exists(os.path.join(tmp, "evaluation_mid_2.json"))
+    print("evolve Evaluator_mid 滚动触发（4 篇 → 2 次体检）: OK")
+
+
+def test_evolve_mid_not_triggered(tmp_path, monkeypatch):
+    """不足阈值不触发体检。"""
+    monkeypatch.setattr(ev, "MID_OBS_THRESHOLD", 10)
+    calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0}
+    with tempfile.TemporaryDirectory() as tmp:
+        _write_story(tmp, "s1.txt")
+        _write_story(tmp, "s2.txt")
+        from Agent.app import get_bank
+        bank = get_bank()
+        bank.clear()
+        bank.embedder = FakeEmbedder()
+        prev = get_active_store()
+        store = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="evolve_test")
+        store.replace_all([_mid_func()])
+        set_active_store(store)
+        try:
+            app = ev._build_evolve_graph().compile()
+            with _patched_llm(calls):
+                result = app.invoke(_initial(tmp, ["s1.txt", "s2.txt"]))
+        finally:
+            set_active_store(prev)
+            bank.clear()
+        assert calls["eval"] == 0, calls
+        assert result["mid_reports"] == []
+        assert result["match_report"]["mid_evaluations"] == []
+        assert not os.path.exists(os.path.join(tmp, "evaluation_mid_1.json"))
+    print("evolve Evaluator_mid 不足阈值不触发: OK")
 
 
 if __name__ == "__main__":

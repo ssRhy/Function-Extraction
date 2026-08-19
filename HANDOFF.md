@@ -210,6 +210,12 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 - 测试 75 项全过（abstract_merge 单测 6 项：并集/失败保持/过滤/重名/识别失败降级/单函数跳过）。
 - 环境清理：杀掉自 2026-08-17 残留卡死的 `python -m Agent.app` 进程（PID 3724，20h CPU）。
 
+## 本轮（2026-08-19 续 22）：Evolve v2：Evaluator_mid 周期体检（每 20 obs 触发）
+- `evolve_app` 新增 `Evaluator_mid` 周期体检：`collector` 累加 `obs_since_eval`，达 `MID_OBS_THRESHOLD`（默认 20）→ 条件边路由到 `evaluator_mid_node`（薄包装复用 `evaluator_node`，`evaluation_context` 仅覆盖 `report_path`），评估当前 Registry（含 MATCH/EXTEND 直写证据）+ Bank，报告落盘 `evaluation_mid_<n>.json`，`match_report.json` 汇总 `mid_evaluations`（round/verdict/六维/问题数），体检后计数归零（滚动触发）。
+- 体检只记录问题不触发修订（Curator 后续轮）；State 新增 `obs_since_eval` / `mid_reports`。
+- 测试 **93 项全过**（test_evolve 新增 3：达阈值触发+计数归零+落盘 / 滚动 4 篇→2 次 / 不足阈值不触发）。
+- 冒烟（3 篇跨题材 / 22 obs → 触发 1 次体检）：verdict FAIL 3/6（coverage 1.0 / cohesion 0.945 / abstraction 0.933 达标；separation 8 组近义 / evidence 0.733 / diversity 3 未达标——小样本预期），`evaluation_mid_1.json` 含六维与问题清单。
+
 ## 本轮（2026-08-19 续 21）：Evolve v1：Matcher 五分类 + 直写 + Pools + FunctionOccurrence
 - 新建 `Code/Agent/evolve.py`（`evolve_app` 单图 + CLI `python -m Agent.evolve`）：逐篇 `story_loader→preprocessor→observer→bank_adder→matcher→collector` 循环 → `report`；复用 bootstrap 节点，不做 checkpoint。
 - 新增 `Code/Agent/Matcher/matcher.py` + `Code/Prompt/Matcher_prompt.py`：obs 结构化向量 vs 函数 definition 余弦召回 top-k（默认 5，无硬阈值）→ LLM 按批判定（10 obs/批，共享函数卡片）五分类。
