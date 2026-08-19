@@ -57,7 +57,9 @@ def get_client():
         env_path = os.path.join(os.path.dirname(__file__), ".env")
         with open(env_path, "r") as f:
             api_key = f.read().strip()
-        get_client._client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
+        # timeout：API 偶发挂起时避免无限等待（长任务 40+ 分钟，卡死代价高）
+        get_client._client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com",
+                                    timeout=120.0, max_retries=1)
     return get_client._client
 
 
