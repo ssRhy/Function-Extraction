@@ -16,10 +16,7 @@ _SPEC.loader.exec_module(_MODULE)
 
 inputs = sys.modules[f"{_NAME}.inputs"]
 clusters = sys.modules[f"{_NAME}.clusters"]
-catalog = sys.modules[f"{_NAME}.catalog"]
 summaries = sys.modules[f"{_NAME}.summaries"]
-stories = sys.modules[f"{_NAME}.stories"]
 sequences = sys.modules[f"{_NAME}.sequences"]
 variants = sys.modules[f"{_NAME}.variants"]
 review = sys.modules[f"{_NAME}.review"]
-review_queue = sys.modules[f"{_NAME}.review_queue"]

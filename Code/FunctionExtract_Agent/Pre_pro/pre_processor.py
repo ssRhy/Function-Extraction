@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from Agent.state import NarrativePipelineState
 from Agent.llm import chat_structured
 from Prompt.Pre_prompt import PRE_HYBRID_SYSTEM_PROMPT
+from Contracts.versioning import story_version_id
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？])")
 # 句末标点（可带闭合引号）：用于判断段落是否已收束
@@ -305,6 +306,8 @@ def preprocessor_node(state: NarrativePipelineState) -> NarrativePipelineState:
 
     metadata = {
         "story_id": story_id,
+        "story_version_id": story_version_id(story_id, raw_text),
+        "content_sha256": hashlib.sha256(raw_text.encode("utf-8")).hexdigest(),
         "story_type": story_type,
         "title": title,
         "processed_at": datetime.now().isoformat()

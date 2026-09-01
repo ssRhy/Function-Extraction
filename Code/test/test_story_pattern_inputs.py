@@ -34,9 +34,9 @@ def _source(functions=None, observations=None, contracts=None, metadata=None):
             {"story_id": "s1", "category": "题材一"},
         ],
         "observations": observations or [
-            _obs("s1_obs_002", "s1"),
-            _obs("s2_obs_001", "s2"),
-            _obs("s1_obs_001", "s1"),
+            _obs("s1_obs_bbbbbbbbbbbb", "s1"),
+            _obs("s2_obs_cccccccccccc", "s2"),
+            _obs("s1_obs_aaaaaaaaaaaa", "s1"),
         ],
         "occurrences": [],
     }
@@ -60,7 +60,7 @@ def test_load_inputs_builds_deterministic_state(monkeypatch):
 
     assert result["story_ids"] == ["s2", "s1"]
     assert [o["obs_id"] for o in result["observations_by_story"]["s1"]] == [
-        "s1_obs_001", "s1_obs_002",
+        "s1_obs_aaaaaaaaaaaa", "s1_obs_bbbbbbbbbbbb",
     ]
     assert result["function_by_name"]["FUNCTION_A"]["function_id"] == "F_1"
     assert result["function_by_id"]["F_2"]["function_name"] == "FUNCTION_B"
@@ -84,19 +84,32 @@ def test_load_inputs_reads_function_contracts(monkeypatch):
 
 
 @pytest.mark.parametrize("observations, message", [
-    ([_obs("s1_obs_001", "s1"), _obs("s1_obs_001", "s1")], "重复 obs_id"),
-    ([_obs("s3_obs_001", "s3")], "不在 manifest"),
+    ([_obs("s1_obs_aaaaaaaaaaaa", "s1"), _obs("s1_obs_aaaaaaaaaaaa", "s1")], "重复 obs_id"),
+    ([_obs("s3_obs_aaaaaaaaaaaa", "s3")], "不在 manifest"),
+    ([_obs("s1_obs_001", "s1")], "非法 obs_id"),
     ([_obs("wrong-id", "s1")], "非法 obs_id"),
-    ([_obs("s1_obs_001", "s1"), _obs("s1_obs_003", "s1")], "编号不连续"),
 ])
 def test_invalid_observations_rejected(monkeypatch, observations, message):
     with pytest.raises(ValueError, match=message):
         _load(monkeypatch, _source(observations=observations))
 
 
+def test_stable_hashed_observation_ids_are_sorted_by_observation_order(monkeypatch):
+    observations = [
+        _obs("s1_obs_bbbbbbbbbbbb", "s1", observation_order=2),
+        _obs("s1_obs_aaaaaaaaaaaa", "s1", observation_order=1),
+    ]
+
+    result = _load(monkeypatch, _source(observations=observations))
+
+    assert [item["obs_id"] for item in result["observations_by_story"]["s1"]] == [
+        "s1_obs_aaaaaaaaaaaa", "s1_obs_bbbbbbbbbbbb",
+    ]
+
+
 @pytest.mark.parametrize("field", ["obs_id", "story_id", "event", "before_state", "after_state"])
 def test_missing_required_observation_field_rejected(monkeypatch, field):
-    observation = _obs("s1_obs_001", "s1")
+    observation = _obs("s1_obs_aaaaaaaaaaaa", "s1")
     observation.pop(field)
     with pytest.raises(ValueError, match="缺少必要字段"):
         _load(monkeypatch, _source(observations=[observation]))

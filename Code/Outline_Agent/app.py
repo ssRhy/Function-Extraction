@@ -67,9 +67,7 @@ def load_cards(snapshot_id):
 def load_contracts(snapshot_id, knowledge_db=DEFAULT_DB_PATH):
     return {
         item["function_id"]: item
-        for item in StoryKnowledgeStore(knowledge_db).load_contracts(
-            snapshot_id, latest_by_function=True,
-        )
+        for item in StoryKnowledgeStore(knowledge_db).load_contracts(snapshot_id)
     }
 
 

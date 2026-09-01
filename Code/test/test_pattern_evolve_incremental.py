@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from Contracts.snapshot import publish_snapshot
+from Contracts.versioning import observation_version_id, story_version_id
 from KnowledgeBase import StoryKnowledgeStore
 from StoryPattern_Agent import app
 
@@ -21,7 +22,7 @@ def _functions():
     } for index in range(4)]
 
 
-def _record_snapshot(store, root, stories, workflow, parent=None):
+def _commit_function_snapshot(store, root, stories, workflow, parent=None):
     corpus = root / f"corpus_{len(stories)}"
     corpus.mkdir(exist_ok=True)
     files, metadata, observations, occurrences = [], {}, [], []
@@ -29,23 +30,30 @@ def _record_snapshot(store, root, stories, workflow, parent=None):
         filename = f"{story_id}.txt"
         files.append(filename)
         (corpus / filename).write_text("真实故事", encoding="utf-8")
-        metadata[filename] = {"txt_file": filename, "category": "测试"}
+        metadata[filename] = {"txt_file": filename, "story_id": story_id, "category": "测试"}
+        story_version = story_version_id(story_id, "真实故事")
         for index in range(4):
             obs_id = f"{story_id}_obs_{index + 1:03d}"
-            observations.append({
+            observation = {
                 "obs_id": obs_id, "story_id": story_id, "event": f"事件 {index}",
                 "before_state": "之前", "after_state": "之后",
-            })
+                "story_version_id": story_version, "observation_order": index + 1,
+            }
+            observation["observation_version_id"] = observation_version_id(
+                story_version, observation,
+            )
+            observations.append(observation)
             occurrences.append({
                 "occurrence_id": obs_id, "obs_id": obs_id, "story_id": story_id,
+                "observation_version_id": observation["observation_version_id"],
                 "function_id": f"F_{index}", "function_name": f"FUNCTION_{index}",
                 "status": "MATCHED", "source_sentence_indices": [index],
             })
     snapshot = publish_snapshot(
         _functions(), {"verdict": "PASS"}, workflow, "pattern_test",
-        str(root / "snapshots"), occurrences,
+        str(root / "snapshots"), occurrences, parent_snapshot_id=parent,
     )
-    store.record_function_run(snapshot, corpus, files, metadata, observations, parent)
+    store.record_function_run(snapshot, corpus, files, metadata, observations)
     return Path(snapshot).name
 
 
@@ -83,9 +91,9 @@ def test_bootstrap_then_evolve_inherits_sequences_and_extends_evidence(tmp_path,
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     monkeypatch.setattr(app, "retrieve_variant_pairs", _no_pairs)
     monkeypatch.setattr(app, "summarize_story_patterns", _summary)
-    bootstrap = _record_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
+    bootstrap = _commit_function_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
     first = app.run_pattern_evolve(bootstrap, store.db_path)
-    evolve = _record_snapshot(
+    evolve = _commit_function_snapshot(
         store, tmp_path, ["story_a", "story_b", "story_c"], "evolve", bootstrap,
     )
     second = app.run_pattern_evolve(evolve, store.db_path)
@@ -115,9 +123,9 @@ def test_delta_evolve_snapshot_merges_parent_story_inputs(tmp_path, monkeypatch)
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     monkeypatch.setattr(app, "retrieve_variant_pairs", _no_pairs)
     monkeypatch.setattr(app, "summarize_story_patterns", _summary)
-    bootstrap = _record_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
+    bootstrap = _commit_function_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
     first = app.run_pattern_evolve(bootstrap, store.db_path)
-    delta = _record_snapshot(store, tmp_path, ["story_c"], "evolve", bootstrap)
+    delta = _commit_function_snapshot(store, tmp_path, ["story_c"], "evolve", bootstrap)
     second = app.run_pattern_evolve(delta, store.db_path)
 
     assert second["story_delta"] == {
@@ -143,7 +151,7 @@ def test_same_snapshot_is_idempotent(tmp_path, monkeypatch):
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     monkeypatch.setattr(app, "retrieve_variant_pairs", _no_pairs)
     monkeypatch.setattr(app, "summarize_story_patterns", _summary)
-    snapshot = _record_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
+    snapshot = _commit_function_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
     first = app.run_pattern_evolve(snapshot, store.db_path)
     before = store.status()["counts"]
     second = app.run_pattern_evolve(snapshot, store.db_path)
@@ -155,7 +163,7 @@ def test_rebuild_explicitly_replaces_incomplete_pattern_snapshot(tmp_path, monke
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     monkeypatch.setattr(app, "retrieve_variant_pairs", _no_pairs)
     monkeypatch.setattr(app, "summarize_story_patterns", _summary)
-    snapshot = _record_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
+    snapshot = _commit_function_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
     first = app.run_pattern_evolve(snapshot, store.db_path)
     rebuilt = app.run_pattern_evolve(snapshot, store.db_path, rebuild=True)
 
@@ -166,7 +174,7 @@ def test_rebuild_explicitly_replaces_incomplete_pattern_snapshot(tmp_path, monke
 
 def test_node_failure_marks_run_failed_without_partial_pattern_data(tmp_path, monkeypatch):
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
-    snapshot = _record_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
+    snapshot = _commit_function_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
     monkeypatch.setattr(
         app, "retrieve_variant_pairs",
         lambda _state: (_ for _ in ()).throw(ValueError("LLM 前置失败")),

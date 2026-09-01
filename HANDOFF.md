@@ -1150,3 +1150,73 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Pattern 从父链累计读取 40 个故事、10 个 Function 和 327 个 Observation；delta 正确为 `new=5、unchanged=35、removed=0`，写入 40 条序列。
 - 本批得到 27 个 Motif 候选、28 条证据和 46 条 pair 复核（SAME_PATTERN 6、RELATED 33、DIFFERENT 7），形成 21 个 Cluster（published 2、candidate 18、blocked 1）。
 - 发布新 Pattern `PAT_6f330f5220d72fa0`、`PAT_c59aca22a920024d`；正式 Pattern run 状态为 `SUCCESS`。
+
+## 本轮（2026-09-01）：Function Evolve 增量隔离改造
+
+- Function Evolve 继续使用同一个 SQLite；`pipeline_runs.run_id` 成为暂存可见性边界，运行中版本不进入任何正式 Snapshot。
+- Story 与 Observation 拆为稳定逻辑 ID 和不可变版本 ID；`snapshot_story_versions`、`snapshot_observation_versions` 固化每个 Snapshot 的完整成员，旧 Snapshot 回读不再经过可变主表。
+- Evolve Bank 改为“父 Snapshot + 当前 Run”的内存计算视图；当前 Run 的同一故事覆盖父版本，新故事追加，未处理的父故事保持可见。
+- PASS 时单事务物化完整 Snapshot 并绑定 FunctionOccurrence 的 `observation_version_id`；FAIL 时保留失败 Run/报告，删除该 Run 的暂存 Story/Observation 版本。
+- StoryPattern 删除父链累计拼接，直接读取当前 Snapshot 的完整冻结成员；Snapshot schema 升级为 v4，并显式记录 `run_id`、`parent_snapshot_id` 和 Observation 版本绑定。
+- 临时 SQLite 集成回归验证：同一故事 old→new 后父 Snapshot 仍读 old、子 Snapshot 读 new；失败 Run 清理后计算视图恢复为已发布版本。项目环境未安装 pytest，已完成 `compileall` 与该集成回归。
+
+## 本轮（2026-09-01）：增量旧路径清理
+
+- 删除旧 `record_snapshot`、`sync_current_library`、PatternCatalog 文件导入和“读取后续最新 FunctionContract”的跨 Snapshot 回退；正式写入只保留 Run → Snapshot 提交通道。
+- 逻辑 `stories` / `observations` 表只保留稳定 ID 与归属关系，可变内容仅存在不可变版本表；删除重复 `payload_json`。
+- 删除已被九节点 Pattern Evolve 图取代的 `catalog.py`、`review_queue.py`、`stories.py`，以及对应旧测试和历史串联/大纲冒烟脚本；StoryPattern 包导出同步收窄。
+- 回归测试改为按 v4 Snapshot、版本 ID 和正式提交接口准备数据。`compileall`、`git diff --check` 及 6 项 KnowledgeBase/增量手动回归通过。
+
+## 本轮（2026-09-01）：真实 Bootstrap → Evolve → Pattern 链路
+
+- 清空并重建正式 SQLite `Code/data/knowledge/story_knowledge.db`；Bootstrap 使用 5 个题材各 2 篇真实故事，共 10 篇，最终评估 `PASS 5/6`，写入 81 个 Observation、8 个 Function，发布根 Snapshot `real_e2e_10_5_20260901T070730299592Z_7eed8b073e14`。
+- Evolve 使用同 5 个题材各 1 篇新故事，共 5 篇，显式绑定根 Snapshot；写入 46 个新 Observation，最终评估 `PASS 6/6`，发布子 Snapshot `real_e2e_10_5_20260901T071110445116Z_3490980478d1`，父子关系已入库。
+- Pattern 先为根 Snapshot 建立基线，再处理子 Snapshot；两次 Pattern Run 均为 `SUCCESS`。子批 delta 为 `new=5、unchanged=10、removed=0`，累计 15 条故事序列、5 个 Motif、5 个 candidate Cluster；当前没有达到发布条件的 Pattern，这是合法的 Pattern 结果而非运行失败。
+- 最终正式库包含 2 个 PASS Function Run、2 个成功 Pattern Run、15 个故事、127 个 ObservationVersion、208 个 FunctionOccurrence；`PRAGMA foreign_key_check` 为空。
+- 直接执行 `FunctionExtract_Agent` 不会自动为 Bootstrap 根 Snapshot 运行 Pattern；因此本次在 Evolve 前补建了根 Pattern 基线，这是 Pattern 增量子批的必要前置。
+
+## 本轮（2026-09-01）：继续 Evolve 15 篇并发布 Pattern
+
+- 保留同一 namespace `real_e2e_10_5` 和同一 SQLite，在 15 篇累计故事 Snapshot 基础上再处理 15 篇未使用真实故事；Evolve 新 Run `FR_3d83bd57e9fc40e8` 通过 `PASS 6/6`。
+- 新批产生 112 个 Observation，Curator 新增 3 个 Function，Function 总数由 8 增至 11；发布 Snapshot `real_e2e_10_5_20260901T074152029891Z_39d346dc98b6`，父 Snapshot 为 `real_e2e_10_5_20260901T071110445116Z_3490980478d1`。
+- Pattern Run `PR_d38e11d1cd1d7032` 成功：累计 30 条故事序列，delta 为 `new=15、changed=3、unchanged=12、removed=0`；生成 17 个 Motif、16 个 Cluster，其中 1 个 published、15 个 candidate。
+- 发布 Pattern `PAT_09b039439b865138`（“秘密揭露与冲突升级循环”），支持 2 篇故事；正式库最终 `stories=30`、`observations=239`、`functions=11`、`pattern_runs=3`、`patterns=1`，`PRAGMA foreign_key_check` 为空。
+
+## 本轮（2026-09-01）：Pattern 独立回归验证
+
+- 用正式 Snapshot 结构的临时 SQLite 副本清除 Pattern 派生结果后，实际执行 `StoryPattern_Agent`：2 条故事序列、3 个 Motif、3 条 Pair Review、1 个 Cluster、1 个 published Pattern，状态 `SUCCESS`。
+- 同一 Snapshot 第二次运行保持幂等：`pattern_runs=1`、`pattern_story_sequences=2`、`motif_evidence=6`、`motif_clusters=1`、`patterns=1`、`pattern_versions=1`、`snapshot_patterns=1`，`PRAGMA foreign_key_check` 为空。
+- 本次只验证 Pattern 下游，不代表 Bootstrap → Evolve → Pattern 全流程；真实 Bootstrap 的最终评估为 FAIL，因此按门禁没有发布正式 Snapshot，Evolve 没有合法父 Snapshot。
+
+## 本轮（2026-09-01）：移除旧数字型 Observation ID 兼容
+
+- StoryPattern 输入现在只接受新格式 `story_id_obs_<12 位小写十六进制>`；不再解析或回退旧 Snapshot 的 `_obs_001` 等数字型 ID。
+- Observation 顺序只使用 `observation_order`，缺失时按当前输入顺序排序；StoryPattern 序列不再从 Observation ID 推断顺序。
+- 旧 Snapshot 不做迁移、不做兼容读取；新运行继续使用稳定逻辑 Observation ID 和独立 ObservationVersion ID。
+- 针对性输入排序、严格格式拒绝、`compileall` 和 `git diff --check` 已通过。
+
+## 本轮（2026-09-01）：清理旧版本旁路与一次性工具
+
+- StoryPattern 审查只使用当前 `motif_review_queue`，删除旧 `motif_variant_pairs` 状态回退。
+- Evolve 删除无 `run_id` 的 `--final-only` 终评入口；终评必须属于当前 Run，不能绕过 Run → Snapshot 提交流程。
+- 删除无生产调用的 Function Card 迁移/回填脚本和旧数字 ID 序列脚本：`Code/test/migrate_function_cards.py`、`Code/test/backfill_function_cards.py`、`Code/test/seq_motif.py` 及对应回填测试。
+- Bootstrap 使用中的 `record_function_run` 暂保留；它仍是当前 Bootstrap 写入 KnowledgeBase 的实际调用点，不属于无调用兼容代码。
+
+## 本轮（2026-09-01）：Observation 逻辑身份改为原文锚点
+
+- Observer 不再用抽取序号或 `source_sentence_indices` 生成 `obs_id`；有句子锚点时先拼接对应原文为 `source_text`，再结合参与者类型和受影响维度生成故事内逻辑 ID。
+- 前置插入 Observation、Observer 返回顺序变化、以及同一原文事件的句子合并/拆分，不会让未改变的逻辑 Observation 换 ID；没有原文锚点时才使用规范化语义字段。
+- `observation_version_id` 排除逻辑 ID、抽取顺序和句子下标，只绑定 Story Version 与 Observation 内容；纯重排/重切分不制造内容版本，内容变化仍产生新 ObservationVersion。
+- 不使用模糊相似度跨不同原文事件强行合并；原文锚点改变时按新逻辑 Observation 处理，避免误合并。
+- 当前正式库中的历史 Snapshot 仍含旧的 `_obs_001` 等数字型 ID，且没有 `source_text`；按“不兼容旧 Snapshot”的决定，继续重跑这些旧故事前必须重建正式库/根 Snapshot，本轮未自动改动正式数据库。
+
+## 本轮（2026-09-01）：Occurrence 只使用当前版本
+
+- `align_occurrences` 删除 `prior_occurrences` 参数，不再读取或合并历史 Occurrence。
+- 最终 Occurrence 完全由当前 Bank 中的 Observation 和当前 Function `supporting_obs_ids` 重新生成。
+- Evolve 最终发布不再从旧 `occurrences.jsonl` 补字段，旧事件、状态、标签和 ObservationVersion 不会进入新 Snapshot。
+
+## 本轮（2026-09-01）：强制中断 Run 启动期收口
+
+- `begin_function_run` 现在在同一 SQLite 事务内先收口所有 `RUNNING` 且没有 `snapshot_id` 的遗留 Function Run：删除其暂存成员及版本，标记为 `FAIL`，并写入 `interrupted_before_snapshot_publish` 审计原因。
+- Snapshot 已发布的 Run 不在恢复范围内；新的 Run 随后正常创建。因此强杀、断电或宿主退出不会在下一次 Function Run 后留下可见的悬挂暂存数据。

@@ -193,3 +193,32 @@ class ObservationBank:
         if os.path.exists(self.jsonl_path):
             os.remove(self.jsonl_path)
         self._records_by_id.clear()
+
+
+class ScopedObservationBank:
+    """父 Snapshot + 当前 Run 的内存计算视图。"""
+
+    def __init__(self, observations: list[dict]):
+        self._records_by_id = {item["obs_id"]: item for item in observations}
+        self.embedder = Embedder()
+
+    def replace_story(self, story_id: str, observations: list[dict]) -> list[str]:
+        self._records_by_id = {
+            obs_id: item for obs_id, item in self._records_by_id.items()
+            if item.get("story_id") != story_id
+        }
+        self._records_by_id.update({item["obs_id"]: item for item in observations})
+        return [item["obs_id"] for item in observations]
+
+    def get(self, obs_id: str) -> Optional[dict]:
+        return self._records_by_id.get(obs_id)
+
+    def count(self) -> int:
+        return len(self._records_by_id)
+
+    def get_all(self, limit: Optional[int] = None) -> list[dict]:
+        records = list(self._records_by_id.values())
+        return records[:limit] if limit else records
+
+    def get_by_story(self, story_id: str) -> list[dict]:
+        return [item for item in self._records_by_id.values() if item.get("story_id") == story_id]

@@ -68,6 +68,11 @@ def get_bank() -> ObservationBank:
     return _bank_instance
 
 
+def set_bank(bank) -> None:
+    global _bank_instance
+    _bank_instance = bank
+
+
 def bank_adder_node(state: NarrativePipelineState) -> dict:
     """将新提取的 Observations 存入 Bank"""
     observations = state.get("observations", [])
@@ -132,9 +137,9 @@ def story_loader_node(state: NarrativePipelineState) -> dict:
             "similar_observations": [],
             "errors": errors,
         }
-    story_id = os.path.splitext(os.path.basename(filename))[0]
-    story_config = {"source_file": filename, "story_id": story_id}
     meta = state.get("story_meta") or {}
+    story_id = (meta.get(filename) or {}).get("story_id") or os.path.splitext(os.path.basename(filename))[0]
+    story_config = {"source_file": filename, "story_id": story_id}
     if filename in meta:
         story_config["story_type"] = meta[filename].get("category")
         story_config["title"] = meta[filename].get("question_title")

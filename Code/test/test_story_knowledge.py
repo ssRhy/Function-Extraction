@@ -1,14 +1,32 @@
 """统一知识库的证据链、版本和幂等测试。"""
 
-import json
 import os
 import sys
+import json
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from Contracts.snapshot import publish_snapshot
-from Contracts.function_contract import definition_sha256
+from Contracts.versioning import observation_version_id, story_version_id
 from KnowledgeBase import StoryKnowledgeStore
+
+
+STORY_TEXT = "一个真实故事。"
+
+
+def _observation():
+    version_id = story_version_id("story", STORY_TEXT)
+    item = {
+        "obs_id": "story_obs_001",
+        "story_id": "story",
+        "story_version_id": version_id,
+        "observation_order": 1,
+        "before_state": "之前",
+        "event": "事件",
+        "after_state": "之后",
+    }
+    item["observation_version_id"] = observation_version_id(version_id, item)
+    return item
 
 
 def _function(definition="结构变化", version=1):
@@ -26,11 +44,13 @@ def _function(definition="结构变化", version=1):
     }
 
 
-def _snapshot(tmp_path, function, contracts=None):
+def _snapshot(tmp_path, function, contracts=None, parent=None):
+    observation = _observation()
     occurrence = {
         "occurrence_id": "story_obs_001",
         "obs_id": "story_obs_001",
         "story_id": "story",
+        "observation_version_id": observation["observation_version_id"],
         "function_id": "F_TEST",
         "function_name": "TEST_FUNCTION",
         "status": "MATCHED",
@@ -44,22 +64,41 @@ def _snapshot(tmp_path, function, contracts=None):
         str(tmp_path / "snapshots"),
         [occurrence],
         contracts,
+        parent_snapshot_id=parent,
     )
 
 
 def _corpus(tmp_path):
     corpus = tmp_path / "corpus"
     corpus.mkdir()
-    (corpus / "story.txt").write_text("一个真实故事。", encoding="utf-8")
+    (corpus / "story.txt").write_text(STORY_TEXT, encoding="utf-8")
     meta = {"story.txt": {"txt_file": "story.txt", "category": "测试"}}
-    observation = {
-        "obs_id": "story_obs_001",
-        "story_id": "story",
-        "before_state": "之前",
-        "event": "事件",
-        "after_state": "之后",
-    }
-    return corpus, meta, [observation]
+    return corpus, meta, [_observation()]
+
+
+def _insert_pattern(store, snapshot_id):
+    pattern = {"pattern_id": "PAT_1", "pattern_name": "模式一", "story_ids": ["story"]}
+    payload = json.dumps(pattern, ensure_ascii=False)
+    version_id = f"PV_{snapshot_id}"
+    with store.connect() as conn:
+        conn.execute(
+            """INSERT INTO patterns
+               (snapshot_id, pattern_id, pattern_name, status, latest_version_id, payload_json)
+               VALUES (?, 'PAT_1', '模式一', 'published', ?, ?)""",
+            (snapshot_id, version_id, payload),
+        )
+        conn.execute(
+            """INSERT INTO pattern_versions
+               (pattern_version_id, snapshot_id, pattern_id, status, payload_json)
+               VALUES (?, ?, 'PAT_1', 'published', ?)""",
+            (version_id, snapshot_id, payload),
+        )
+        conn.execute(
+            """INSERT INTO snapshot_patterns
+               (snapshot_id, pattern_id, pattern_version_id, status, is_new)
+               VALUES (?, 'PAT_1', ?, 'published', 1)""",
+            (snapshot_id, version_id),
+        )
 
 
 def test_function_run_records_story_to_occurrence_chain(tmp_path):
@@ -70,30 +109,11 @@ def test_function_run_records_story_to_occurrence_chain(tmp_path):
     store.record_function_run(snapshot, corpus, ["story.txt"], meta, observations)
 
     status = store.status()
-    assert status["counts"] == {
-        "pipeline_runs": 1,
-        "stories": 1,
-        "observations": 1,
-        "observation_versions": 1,
-        "functions": 1,
-        "function_versions": 1,
-        "function_evolution_events": 1,
-        "snapshots": 1,
-        "function_occurrences": 1,
-        "function_contracts": 0,
-        "patterns": 0,
-        "pattern_versions": 0,
-        "pattern_runs": 0,
-        "pattern_story_sequences": 0,
-        "motif_evidence": 0,
-        "motif_pair_reviews": 0,
-        "motif_clusters": 0,
-        "snapshot_patterns": 0,
-        "outlines": 0,
-        "pattern_usage": 0,
-    }
+    assert status["counts"]["story_versions"] == 1
+    assert status["counts"]["snapshot_story_versions"] == 1
+    assert status["counts"]["snapshot_observation_versions"] == 1
     with store.connect() as conn:
-        assert conn.execute("SELECT text_content FROM stories").fetchone()[0] == "一个真实故事。"
+        assert conn.execute("SELECT text_content FROM story_versions").fetchone()[0] == STORY_TEXT
         row = conn.execute(
             """SELECT o.obs_id, f.function_name
                FROM function_occurrences o
@@ -108,7 +128,10 @@ def test_snapshot_versions_accumulate_and_link_parent(tmp_path):
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     store.record_function_run(first, corpus, ["story.txt"], meta, observations)
 
-    second = _snapshot(tmp_path, _function("修订后的结构变化", 2))
+    second = _snapshot(
+        tmp_path, _function("修订后的结构变化", 2),
+        parent=os.path.basename(first),
+    )
     store.record_function_run(second, corpus, ["story.txt"], meta, observations)
     store.record_function_run(second, corpus, ["story.txt"], meta, observations)
     store.record_function_run(first, corpus, ["story.txt"], meta, observations)
@@ -117,7 +140,7 @@ def test_snapshot_versions_accumulate_and_link_parent(tmp_path):
     assert status["counts"]["snapshots"] == 2
     assert status["counts"]["function_versions"] == 2
     assert status["counts"]["function_evolution_events"] == 2
-    assert status["counts"]["observation_versions"] == 2
+    assert status["counts"]["observation_versions"] == 1
     with store.connect() as conn:
         row = conn.execute(
             "SELECT parent_snapshot_id FROM snapshots WHERE snapshot_id=?", (os.path.basename(second),)
@@ -126,56 +149,13 @@ def test_snapshot_versions_accumulate_and_link_parent(tmp_path):
         assert conn.execute("SELECT definition FROM functions").fetchone()[0] == "修订后的结构变化"
 
 
-def test_pattern_versions_keep_changed_publications(tmp_path):
-    snapshot = _snapshot(tmp_path, _function())
-    corpus, meta, observations = _corpus(tmp_path)
-    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
-    store.record_function_run(snapshot, corpus, ["story.txt"], meta, observations)
-    snapshot_id = os.path.basename(snapshot)
-    catalog_path = tmp_path / "pattern_catalog.json"
-
-    def write(name):
-        catalog_path.write_text(json.dumps({
-            "snapshot_id": snapshot_id,
-            "published_patterns": [{
-                "pattern_id": "PAT_1",
-                "snapshot_id": snapshot_id,
-                "pattern_name": name,
-                "story_ids": ["story"],
-            }],
-            "rejected_patterns": [],
-            "manual_review_patterns": [],
-        }, ensure_ascii=False), encoding="utf-8")
-
-    write("模式一")
-    store.record_pattern_catalog(catalog_path)
-    store.record_pattern_catalog(catalog_path)
-    write("模式一修订")
-    store.record_pattern_catalog(catalog_path)
-
-    status = store.status()
-    assert status["counts"]["patterns"] == 1
-    assert status["counts"]["pattern_versions"] == 2
-    with store.connect() as conn:
-        assert conn.execute("SELECT pattern_name FROM patterns").fetchone()[0] == "模式一修订"
-        assert conn.execute("SELECT COUNT(*) FROM pattern_evidence").fetchone()[0] == 2
-
-
 def test_outline_round_trip_is_idempotent(tmp_path):
     snapshot = _snapshot(tmp_path, _function())
     corpus, meta, observations = _corpus(tmp_path)
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     store.record_function_run(snapshot, corpus, ["story.txt"], meta, observations)
     snapshot_id = os.path.basename(snapshot)
-    catalog_path = tmp_path / "pattern_catalog.json"
-    catalog_path.write_text(json.dumps({
-        "snapshot_id": snapshot_id,
-        "published_patterns": [{
-            "pattern_id": "PAT_1", "pattern_name": "模式一", "story_ids": ["story"],
-        }],
-        "rejected_patterns": [], "manual_review_patterns": [],
-    }, ensure_ascii=False), encoding="utf-8")
-    store.record_pattern_catalog(catalog_path)
+    _insert_pattern(store, snapshot_id)
     outline = {
         "snapshot_id": snapshot_id, "pattern_id": "PAT_1", "pattern_name": "模式一",
         "genre": "03_现代情感", "generated_at": "2026-08-30T10:00:00",
@@ -195,13 +175,7 @@ def test_pattern_claim_is_global_and_idempotency_is_rejected(tmp_path):
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     store.record_function_run(snapshot, corpus, ["story.txt"], meta, observations)
     snapshot_id = os.path.basename(snapshot)
-    catalog_path = tmp_path / "pattern_catalog.json"
-    catalog_path.write_text(json.dumps({
-        "snapshot_id": snapshot_id,
-        "published_patterns": [{"pattern_id": "PAT_1", "pattern_name": "模式一"}],
-        "rejected_patterns": [], "manual_review_patterns": [],
-    }, ensure_ascii=False), encoding="utf-8")
-    store.record_pattern_catalog(catalog_path)
+    _insert_pattern(store, snapshot_id)
 
     store.claim_pattern(snapshot_id, "PAT_1")
     assert store.used_pattern_ids() == {"PAT_1"}
@@ -219,13 +193,7 @@ def test_failed_outline_consumes_pattern(tmp_path):
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     store.record_function_run(snapshot, corpus, ["story.txt"], meta, observations)
     snapshot_id = os.path.basename(snapshot)
-    catalog_path = tmp_path / "pattern_catalog.json"
-    catalog_path.write_text(json.dumps({
-        "snapshot_id": snapshot_id,
-        "published_patterns": [{"pattern_id": "PAT_1", "pattern_name": "模式一"}],
-        "rejected_patterns": [], "manual_review_patterns": [],
-    }, ensure_ascii=False), encoding="utf-8")
-    store.record_pattern_catalog(catalog_path)
+    _insert_pattern(store, snapshot_id)
     outline = {
         "snapshot_id": snapshot_id, "pattern_id": "PAT_1", "pattern_name": "模式一",
         "genre": "03_现代情感", "generated_at": "2026-08-30T10:00:00",
@@ -241,33 +209,3 @@ def test_failed_outline_consumes_pattern(tmp_path):
         assert "已使用" in str(exc)
     else:
         raise AssertionError("校验失败的大纲也应消耗 Pattern")
-
-
-def test_old_pattern_snapshot_can_read_latest_contract_by_function(tmp_path):
-    function = _function()
-    pattern_snapshot = _snapshot(tmp_path, function)
-    corpus, meta, observations = _corpus(tmp_path)
-    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
-    store.record_function_run(pattern_snapshot, corpus, ["story.txt"], meta, observations)
-    contract = {
-        "function_id": "F_TEST",
-        "function_name": "TEST_FUNCTION",
-        "definition_sha256": definition_sha256(function),
-        "evidence_refs": ["story_obs_001"],
-        "role_slots": ["行动者"],
-        "preconditions": [{
-            "role_slots": ["行动者"], "aspect": "TASK", "state": "OPEN",
-        }],
-        "effects": [{
-            "role_slots": ["行动者"], "aspect": "TASK",
-            "before": "OPEN", "after": "RESOLVED",
-        }],
-        "obligation_effects": {"opens": [], "advances": [], "resolves": []},
-    }
-    contract_snapshot = _snapshot(tmp_path, function, [contract])
-    store.record_snapshot(contract_snapshot, os.path.basename(pattern_snapshot))
-
-    assert store.load_contracts(os.path.basename(pattern_snapshot)) == []
-    assert store.load_contracts(
-        os.path.basename(pattern_snapshot), latest_by_function=True,
-    )[0]["function_id"] == "F_TEST"

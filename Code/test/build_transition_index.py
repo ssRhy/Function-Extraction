@@ -10,7 +10,6 @@
 
 import json
 import os
-import re
 import sys
 from collections import Counter, defaultdict
 
@@ -26,9 +25,14 @@ _DEFAULT_BANK = os.path.join(
 )
 
 
-def _obs_index(obs_id: str) -> int:
-    match = re.fullmatch(r".+_obs_(\d+)", obs_id)
-    return int(match.group(1)) if match else 0
+def _obs_index(occurrence: dict) -> tuple[int, int]:
+    order = occurrence.get("observation_order")
+    if isinstance(order, int) and order > 0:
+        return order, 0
+    indices = occurrence.get("source_sentence_indices") or []
+    if indices:
+        return min(indices), 1
+    return 0, 2
 
 
 def build_transitions(occurrences: list[dict]) -> list[dict]:
@@ -38,7 +42,7 @@ def build_transitions(occurrences: list[dict]) -> list[dict]:
         if occ.get("status") != "MATCHED":
             continue
         by_story[occ.get("story_id", "")].append(
-            (_obs_index(occ["obs_id"]), occ["function_name"])
+            (_obs_index(occ), occ["function_name"])
         )
 
     count = Counter()

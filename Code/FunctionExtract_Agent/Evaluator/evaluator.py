@@ -68,7 +68,7 @@ def _load_story_category_map(manifest_path: str | None) -> dict | None:
             cat = entry.get("category")
             if not txt or not cat:
                 continue
-            story_id = os.path.splitext(os.path.basename(txt.replace("\\", "/")))[0]
+            story_id = entry.get("story_id") or os.path.splitext(os.path.basename(txt.replace("\\", "/")))[0]
             mapping[story_id] = cat
     return mapping or None
 

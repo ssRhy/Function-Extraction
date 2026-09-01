@@ -279,6 +279,13 @@ def revise_node(state: dict) -> dict:
         base_sup = [oid for oid in func.get("supporting_obs_ids", []) if oid not in weak_fit_by_name.get(name, set())]
         if len(out) == 1:
             revised = out[0]
+            revised["function_id"] = func.get("function_id")
+            revised["version_history"] = list(func.get("version_history", []))
+            revised["version_history"].append({
+                "version": len(revised["version_history"]) + 1,
+                "action": "REVISE",
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            })
             revised["supporting_obs_ids"] = base_sup
             _recalc_confidence(revised, obs_by_id, embedder)
             new_funcs.append(revised)

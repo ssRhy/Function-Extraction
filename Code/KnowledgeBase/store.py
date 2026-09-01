@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from Contracts.snapshot import load_function_contracts, load_occurrences, load_snapshot
+from Contracts.versioning import observation_version_id, story_version_id
 
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "knowledge" / "story_knowledge.db"
@@ -22,49 +23,76 @@ CREATE TABLE IF NOT EXISTS snapshots (
 );
 
 CREATE TABLE IF NOT EXISTS pipeline_runs (
-    run_id       TEXT PRIMARY KEY,
-    workflow     TEXT NOT NULL CHECK (workflow IN ('bootstrap', 'evolve')),
-    namespace    TEXT NOT NULL,
-    snapshot_id  TEXT NOT NULL UNIQUE REFERENCES snapshots(snapshot_id),
-    corpus_dir   TEXT,
-    created_at   TEXT NOT NULL,
-    payload_json TEXT NOT NULL
+    run_id             TEXT PRIMARY KEY,
+    workflow           TEXT NOT NULL CHECK (workflow IN ('bootstrap', 'evolve')),
+    namespace          TEXT NOT NULL,
+    parent_snapshot_id TEXT REFERENCES snapshots(snapshot_id),
+    snapshot_id        TEXT UNIQUE REFERENCES snapshots(snapshot_id),
+    status             TEXT NOT NULL CHECK (status IN ('RUNNING', 'PASS', 'FAIL')),
+    corpus_dir         TEXT,
+    created_at         TEXT NOT NULL,
+    completed_at       TEXT,
+    payload_json       TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS stories (
-    story_id       TEXT PRIMARY KEY,
-    title          TEXT,
-    category       TEXT,
-    source_file    TEXT,
-    content_sha256 TEXT,
-    text_content   TEXT,
-    payload_json   TEXT NOT NULL
+    story_id TEXT PRIMARY KEY
+);
+
+CREATE TABLE IF NOT EXISTS story_versions (
+    story_version_id TEXT PRIMARY KEY,
+    story_id         TEXT NOT NULL REFERENCES stories(story_id),
+    content_sha256   TEXT NOT NULL,
+    title            TEXT,
+    category         TEXT,
+    source_file      TEXT,
+    text_content     TEXT NOT NULL,
+    created_by_run_id TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+    payload_json     TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS run_stories (
-    run_id   TEXT NOT NULL REFERENCES pipeline_runs(run_id),
-    story_id TEXT NOT NULL REFERENCES stories(story_id),
-    position INTEGER NOT NULL,
+    run_id           TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+    story_id         TEXT NOT NULL REFERENCES stories(story_id),
+    story_version_id TEXT NOT NULL REFERENCES story_versions(story_version_id),
+    position         INTEGER NOT NULL,
     PRIMARY KEY (run_id, story_id)
 );
 
 CREATE TABLE IF NOT EXISTS observations (
-    obs_id       TEXT PRIMARY KEY,
-    story_id     TEXT NOT NULL REFERENCES stories(story_id),
-    payload_json TEXT NOT NULL
+    obs_id   TEXT PRIMARY KEY,
+    story_id TEXT NOT NULL REFERENCES stories(story_id)
 );
 
 CREATE TABLE IF NOT EXISTS observation_versions (
     observation_version_id TEXT PRIMARY KEY,
-    obs_id       TEXT NOT NULL REFERENCES observations(obs_id),
-    run_id       TEXT NOT NULL REFERENCES pipeline_runs(run_id),
-    payload_json TEXT NOT NULL
+    obs_id                 TEXT NOT NULL REFERENCES observations(obs_id),
+    story_version_id       TEXT NOT NULL REFERENCES story_versions(story_version_id),
+    created_by_run_id      TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+    observation_order      INTEGER NOT NULL,
+    payload_json           TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS run_observations (
-    run_id TEXT NOT NULL REFERENCES pipeline_runs(run_id),
-    obs_id TEXT NOT NULL REFERENCES observations(obs_id),
+    run_id                 TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+    obs_id                 TEXT NOT NULL REFERENCES observations(obs_id),
+    observation_version_id TEXT NOT NULL REFERENCES observation_versions(observation_version_id),
     PRIMARY KEY (run_id, obs_id)
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_story_versions (
+    snapshot_id      TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    story_id         TEXT NOT NULL REFERENCES stories(story_id),
+    story_version_id TEXT NOT NULL REFERENCES story_versions(story_version_id),
+    position         INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, story_id)
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_observation_versions (
+    snapshot_id            TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    obs_id                 TEXT NOT NULL REFERENCES observations(obs_id),
+    observation_version_id TEXT NOT NULL REFERENCES observation_versions(observation_version_id),
+    PRIMARY KEY (snapshot_id, obs_id)
 );
 
 CREATE TABLE IF NOT EXISTS functions (
@@ -109,13 +137,14 @@ CREATE TABLE IF NOT EXISTS function_contracts (
 );
 
 CREATE TABLE IF NOT EXISTS function_occurrences (
-    snapshot_id   TEXT NOT NULL REFERENCES snapshots(snapshot_id),
-    occurrence_id TEXT NOT NULL,
-    obs_id         TEXT NOT NULL REFERENCES observations(obs_id),
-    story_id       TEXT NOT NULL REFERENCES stories(story_id),
-    function_id    TEXT REFERENCES functions(function_id),
-    status         TEXT NOT NULL,
-    payload_json   TEXT NOT NULL,
+    snapshot_id            TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    occurrence_id          TEXT NOT NULL,
+    obs_id                 TEXT NOT NULL REFERENCES observations(obs_id),
+    observation_version_id TEXT NOT NULL REFERENCES observation_versions(observation_version_id),
+    story_id                TEXT NOT NULL REFERENCES stories(story_id),
+    function_id             TEXT REFERENCES functions(function_id),
+    status                  TEXT NOT NULL,
+    payload_json            TEXT NOT NULL,
     PRIMARY KEY (snapshot_id, occurrence_id)
 );
 
@@ -242,20 +271,6 @@ def _digest(*values: str) -> str:
     return hashlib.sha256("|".join(values).encode("utf-8")).hexdigest()
 
 
-def _read_json(path: Path):
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"无法读取 JSON: {path}") from exc
-
-
-def _read_jsonl(path: Path) -> list[dict]:
-    try:
-        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
-    except (OSError, json.JSONDecodeError) as exc:
-        raise ValueError(f"无法读取 JSONL: {path}") from exc
-
-
 class StoryKnowledgeStore:
     def __init__(self, db_path=DEFAULT_DB_PATH):
         self.db_path = Path(db_path)
@@ -273,57 +288,244 @@ class StoryKnowledgeStore:
 
     @staticmethod
     def _story_stub(conn: sqlite3.Connection, story_id: str) -> None:
-        conn.execute(
-            """INSERT OR IGNORE INTO stories
-               (story_id, title, category, source_file, content_sha256, text_content, payload_json)
-               VALUES (?, NULL, NULL, NULL, NULL, NULL, ?)""",
-            (story_id, _json({"story_id": story_id})),
-        )
+        conn.execute("INSERT OR IGNORE INTO stories (story_id) VALUES (?)", (story_id,))
 
     @staticmethod
     def _observation_stub(conn: sqlite3.Connection, obs_id: str, story_id: str) -> None:
         StoryKnowledgeStore._story_stub(conn, story_id)
         conn.execute(
-            "INSERT OR IGNORE INTO observations (obs_id, story_id, payload_json) VALUES (?, ?, ?)",
-            (obs_id, story_id, _json({"obs_id": obs_id, "story_id": story_id})),
+            "INSERT OR IGNORE INTO observations (obs_id, story_id) VALUES (?, ?)",
+            (obs_id, story_id),
         )
 
-    def _record_snapshot(
+    def begin_function_run(
+        self,
+        run_id: str,
+        workflow: str,
+        namespace: str,
+        parent_snapshot_id: str | None,
+        corpus_dir: str | None = None,
+    ) -> None:
+        self.initialize()
+        with self.connect() as conn:
+            self._recover_interrupted_function_runs(conn)
+            conn.execute(
+                """INSERT INTO pipeline_runs
+                   (run_id, workflow, namespace, parent_snapshot_id, snapshot_id, status,
+                    corpus_dir, created_at, completed_at, payload_json)
+                   VALUES (?, ?, ?, ?, NULL, 'RUNNING', ?,
+                           strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL, '{}')
+                   ON CONFLICT(run_id) DO NOTHING""",
+                (run_id, workflow, namespace, parent_snapshot_id, corpus_dir),
+            )
+
+    @staticmethod
+    def _remove_function_run_staging(conn: sqlite3.Connection, run_id: str) -> None:
+        conn.execute("DELETE FROM run_observations WHERE run_id=?", (run_id,))
+        conn.execute("DELETE FROM run_stories WHERE run_id=?", (run_id,))
+        conn.execute("DELETE FROM observation_versions WHERE created_by_run_id=?", (run_id,))
+        conn.execute("DELETE FROM story_versions WHERE created_by_run_id=?", (run_id,))
+
+    def _recover_interrupted_function_runs(self, conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            """SELECT run_id FROM pipeline_runs
+               WHERE status='RUNNING' AND snapshot_id IS NULL"""
+        ).fetchall()
+        for row in rows:
+            run_id = row["run_id"]
+            self._remove_function_run_staging(conn, run_id)
+            conn.execute(
+                """UPDATE pipeline_runs
+                   SET status='FAIL', completed_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                       payload_json='{"reason":"interrupted_before_snapshot_publish"}'
+                   WHERE run_id=?""",
+                (run_id,),
+            )
+
+    def stage_story_observations(
+        self,
+        run_id: str,
+        normalized_story: dict,
+        story_config: dict,
+        observations: list[dict],
+        position: int,
+    ) -> list[dict]:
+        """写入当前 Run 的不可见版本；返回带版本 ID 的 Observation。"""
+        metadata = normalized_story["metadata"]
+        text = normalized_story["raw_text"]
+        story_id = metadata["story_id"]
+        version_id = metadata.get("story_version_id") or story_version_id(story_id, text)
+        content_sha = metadata.get("content_sha256") or hashlib.sha256(text.encode("utf-8")).hexdigest()
+        story_payload = {
+            **metadata,
+            "story_id": story_id,
+            "story_version_id": version_id,
+            "source_file": story_config.get("source_file"),
+        }
+        staged = []
+        with self.connect() as conn:
+            self._story_stub(conn, story_id)
+            conn.execute(
+                """INSERT OR IGNORE INTO story_versions
+                   (story_version_id, story_id, content_sha256, title, category, source_file,
+                    text_content, created_by_run_id, payload_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    version_id, story_id, content_sha, metadata.get("title"),
+                    metadata.get("story_type"), story_config.get("source_file"), text,
+                    run_id, _json(story_payload),
+                ),
+            )
+            conn.execute(
+                """INSERT OR REPLACE INTO run_stories
+                   (run_id, story_id, story_version_id, position) VALUES (?, ?, ?, ?)""",
+                (run_id, story_id, version_id, position),
+            )
+            conn.execute(
+                """DELETE FROM run_observations WHERE run_id=?
+                   AND obs_id IN (SELECT obs_id FROM observations WHERE story_id=?)""",
+                (run_id, story_id),
+            )
+            for order, item in enumerate(observations, 1):
+                observation = dict(item, story_version_id=version_id, observation_order=order)
+                observation["observation_version_id"] = (
+                    item.get("observation_version_id")
+                    or observation_version_id(version_id, observation)
+                )
+                obs_id = observation["obs_id"]
+                self._observation_stub(conn, obs_id, story_id)
+                conn.execute(
+                    """INSERT OR IGNORE INTO observation_versions
+                       (observation_version_id, obs_id, story_version_id, created_by_run_id,
+                        observation_order, payload_json) VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        observation["observation_version_id"], obs_id, version_id,
+                        run_id, order, _json(observation),
+                    ),
+                )
+                conn.execute(
+                    """INSERT OR REPLACE INTO run_observations
+                       (run_id, obs_id, observation_version_id) VALUES (?, ?, ?)""",
+                    (run_id, obs_id, observation["observation_version_id"]),
+                )
+                staged.append(observation)
+        return staged
+
+    def load_run_observation_view(self, parent_snapshot_id: str | None, run_id: str) -> list[dict]:
+        """Bank 计算视图：父 Snapshot，按当前 Run 中的 story 覆盖。"""
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT payload_json FROM (
+                     SELECT ov.payload_json, ssv.position, ov.observation_order
+                     FROM snapshot_observation_versions sov
+                     JOIN observation_versions ov
+                       ON ov.observation_version_id=sov.observation_version_id
+                     JOIN observations o ON o.obs_id=sov.obs_id
+                     JOIN snapshot_story_versions ssv
+                       ON ssv.snapshot_id=sov.snapshot_id AND ssv.story_id=o.story_id
+                     WHERE sov.snapshot_id=?
+                       AND o.story_id NOT IN (SELECT story_id FROM run_stories WHERE run_id=?)
+                     UNION ALL
+                     SELECT ov.payload_json, rs.position, ov.observation_order
+                     FROM run_observations ro
+                     JOIN observation_versions ov
+                       ON ov.observation_version_id=ro.observation_version_id
+                     JOIN observations o ON o.obs_id=ro.obs_id
+                     JOIN run_stories rs ON rs.run_id=ro.run_id AND rs.story_id=o.story_id
+                     WHERE ro.run_id=?
+                   ) ORDER BY position, observation_order""",
+                (parent_snapshot_id, run_id, run_id),
+            ).fetchall() if parent_snapshot_id else conn.execute(
+                """SELECT ov.payload_json FROM run_observations ro
+                   JOIN observation_versions ov
+                     ON ov.observation_version_id=ro.observation_version_id
+                   WHERE ro.run_id=? ORDER BY ov.observation_order""",
+                (run_id,),
+            ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def fail_function_run(self, run_id: str, report: dict) -> None:
+        """失败 Run 保留报告，移除其暂存成员。"""
+        with self.connect() as conn:
+            row = conn.execute("SELECT status FROM pipeline_runs WHERE run_id=?", (run_id,)).fetchone()
+            if not row or row["status"] != "RUNNING":
+                return
+            self._remove_function_run_staging(conn, run_id)
+            conn.execute(
+                """UPDATE pipeline_runs SET status='FAIL', completed_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                   payload_json=? WHERE run_id=?""",
+                (_json(report), run_id),
+            )
+
+    def _commit_snapshot(
         self,
         conn: sqlite3.Connection,
         snapshot_path,
-        parent_snapshot_id: str | None = None,
+        run_id: str,
     ) -> dict:
         snapshot_path = Path(snapshot_path)
         manifest, functions, _evaluation = load_snapshot(str(snapshot_path))
         snapshot_id = manifest["snapshot_id"]
-        if manifest["source_workflow"] == "bootstrap":
-            parent_snapshot_id = None
-        elif parent_snapshot_id is None:
-            previous = conn.execute(
-                """SELECT snapshot_id FROM snapshots
-                   WHERE namespace=? AND snapshot_id<>?
-                   ORDER BY created_at DESC LIMIT 1""",
-                (manifest["namespace"], snapshot_id),
+        parent_snapshot_id = manifest.get("parent_snapshot_id")
+        if parent_snapshot_id is None:
+            row = conn.execute(
+                "SELECT parent_snapshot_id FROM pipeline_runs WHERE run_id=?", (run_id,)
             ).fetchone()
-            parent_snapshot_id = previous["snapshot_id"] if previous else None
+            parent_snapshot_id = row["parent_snapshot_id"] if row else None
         if parent_snapshot_id and not conn.execute(
             "SELECT 1 FROM snapshots WHERE snapshot_id=?", (parent_snapshot_id,)
         ).fetchone():
             raise ValueError(f"父 Snapshot 尚未入库: {parent_snapshot_id}")
         conn.execute(
-            """INSERT INTO snapshots
+            """INSERT OR IGNORE INTO snapshots
                (snapshot_id, parent_snapshot_id, schema_version, source_workflow,
                 namespace, created_at, payload_json)
-               VALUES (?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(snapshot_id) DO UPDATE SET
-               parent_snapshot_id=COALESCE(snapshots.parent_snapshot_id, excluded.parent_snapshot_id),
-               payload_json=excluded.payload_json""",
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 snapshot_id, parent_snapshot_id, manifest["schema_version"],
                 manifest["source_workflow"], manifest["namespace"],
                 manifest["created_at"], _json(manifest),
             ),
+        )
+        if parent_snapshot_id:
+            conn.execute(
+                """INSERT OR IGNORE INTO snapshot_story_versions
+                   SELECT ?, story_id, story_version_id, position
+                   FROM snapshot_story_versions WHERE snapshot_id=?
+                     AND story_id NOT IN (SELECT story_id FROM run_stories WHERE run_id=?)""",
+                (snapshot_id, parent_snapshot_id, run_id),
+            )
+            conn.execute(
+                """INSERT OR IGNORE INTO snapshot_observation_versions
+                   SELECT ?, sov.obs_id, sov.observation_version_id
+                   FROM snapshot_observation_versions sov
+                   JOIN observations o ON o.obs_id=sov.obs_id
+                   WHERE sov.snapshot_id=?
+                     AND o.story_id NOT IN (SELECT story_id FROM run_stories WHERE run_id=?)""",
+                (snapshot_id, parent_snapshot_id, run_id),
+            )
+            conn.execute(
+                """INSERT OR REPLACE INTO snapshot_story_versions
+                   SELECT ?, rs.story_id, rs.story_version_id,
+                          COALESCE(
+                            (SELECT position FROM snapshot_story_versions
+                             WHERE snapshot_id=? AND story_id=rs.story_id),
+                            (SELECT COALESCE(MAX(position), 0) FROM snapshot_story_versions
+                             WHERE snapshot_id=?) + rs.position
+                          )
+                   FROM run_stories rs WHERE rs.run_id=?""",
+                (snapshot_id, parent_snapshot_id, parent_snapshot_id, run_id),
+            )
+        else:
+            conn.execute(
+                """INSERT OR REPLACE INTO snapshot_story_versions
+                   SELECT ?, story_id, story_version_id, position FROM run_stories WHERE run_id=?""",
+                (snapshot_id, run_id),
+            )
+        conn.execute(
+            """INSERT OR REPLACE INTO snapshot_observation_versions
+               SELECT ?, obs_id, observation_version_id FROM run_observations WHERE run_id=?""",
+            (snapshot_id, run_id),
         )
         for position, function in enumerate(functions, 1):
             conn.execute(
@@ -371,42 +573,38 @@ class StoryKnowledgeStore:
                         event.get("ts"), event_json,
                     ),
                 )
-        occurrences = load_occurrences(str(snapshot_path)) if manifest["schema_version"] >= 2 else []
+        occurrences = load_occurrences(str(snapshot_path))
         for occurrence in occurrences:
             obs_id, story_id = occurrence["obs_id"], occurrence["story_id"]
-            self._observation_stub(conn, obs_id, story_id)
             conn.execute(
                 """INSERT OR REPLACE INTO function_occurrences
-                   (snapshot_id, occurrence_id, obs_id, story_id, function_id, status, payload_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                   (snapshot_id, occurrence_id, obs_id, observation_version_id,
+                    story_id, function_id, status, payload_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    snapshot_id, occurrence["occurrence_id"], obs_id, story_id,
+                    snapshot_id, occurrence["occurrence_id"], obs_id,
+                    occurrence["observation_version_id"], story_id,
                     occurrence.get("function_id"), occurrence["status"], _json(occurrence),
                 ),
             )
-        if manifest["schema_version"] >= 3:
-            for contract in load_function_contracts(str(snapshot_path)):
-                conn.execute(
-                    """INSERT OR REPLACE INTO function_contracts
-                       (snapshot_id, function_id, payload_json) VALUES (?, ?, ?)""",
-                    (snapshot_id, contract["function_id"], _json(contract)),
-                )
+        for contract in load_function_contracts(str(snapshot_path)):
+            conn.execute(
+                """INSERT OR REPLACE INTO function_contracts
+                   (snapshot_id, function_id, payload_json) VALUES (?, ?, ?)""",
+                (snapshot_id, contract["function_id"], _json(contract)),
+            )
         conn.execute(
-            """INSERT INTO pipeline_runs
-               (run_id, workflow, namespace, snapshot_id, corpus_dir, created_at, payload_json)
-               VALUES (?, ?, ?, ?, NULL, ?, ?)
-               ON CONFLICT(run_id) DO UPDATE SET payload_json=excluded.payload_json""",
-            (
-                snapshot_id, manifest["source_workflow"], manifest["namespace"], snapshot_id,
-                manifest["created_at"], _json({"snapshot_path": str(snapshot_path.resolve())}),
-            ),
+            """UPDATE pipeline_runs SET snapshot_id=?, status='PASS',
+               completed_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), payload_json=?
+               WHERE run_id=?""",
+            (snapshot_id, _json({"snapshot_path": str(snapshot_path.resolve())}), run_id),
         )
         return manifest
 
-    def record_snapshot(self, snapshot_path, parent_snapshot_id: str | None = None) -> dict:
+    def commit_function_run(self, snapshot_path, run_id: str) -> dict:
         self.initialize()
         with self.connect() as conn:
-            manifest = self._record_snapshot(conn, snapshot_path, parent_snapshot_id)
+            manifest = self._commit_snapshot(conn, snapshot_path, run_id)
             self._check(conn)
         return manifest
 
@@ -417,73 +615,47 @@ class StoryKnowledgeStore:
         story_files: list[str],
         story_meta: dict[str, dict],
         observations: list[dict],
-        parent_snapshot_id: str | None = None,
     ) -> dict:
-        self.initialize()
         corpus_dir = Path(corpus_dir)
+        manifest, _functions, _evaluation = load_snapshot(str(snapshot_path))
+        self.initialize()
         with self.connect() as conn:
-            manifest = self._record_snapshot(conn, snapshot_path, parent_snapshot_id)
-            run_id = manifest["snapshot_id"]
-            conn.execute(
-                "UPDATE pipeline_runs SET corpus_dir=?, payload_json=? WHERE run_id=?",
-                (
-                    str(corpus_dir.resolve()),
-                    _json({"snapshot_path": str(Path(snapshot_path).resolve()), "story_count": len(story_files)}),
-                    run_id,
-                ),
+            if conn.execute("SELECT 1 FROM snapshots WHERE snapshot_id=?", (manifest["snapshot_id"],)).fetchone():
+                return manifest
+        run_id = manifest.get("run_id") or manifest["snapshot_id"]
+        self.begin_function_run(
+            run_id, manifest["source_workflow"], manifest["namespace"],
+            manifest.get("parent_snapshot_id"),
+            str(corpus_dir.resolve()),
+        )
+        by_story: dict[str, list[dict]] = {}
+        for item in observations:
+            by_story.setdefault(item["story_id"], []).append(item)
+        for position, relative in enumerate(story_files, 1):
+            relative = relative.replace("\\", "/")
+            meta = dict(story_meta.get(relative) or {})
+            story_id = meta.get("story_id") or Path(relative).stem
+            path = corpus_dir / relative
+            try:
+                text = path.read_text(encoding="utf-8")
+            except OSError as exc:
+                raise ValueError(f"无法读取故事原文: {path}") from exc
+            version_id = story_version_id(story_id, text)
+            normalized = {
+                "raw_text": text,
+                "metadata": {
+                    "story_id": story_id,
+                    "story_version_id": version_id,
+                    "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                    "title": meta.get("question_title") or meta.get("title"),
+                    "story_type": meta.get("category"),
+                },
+            }
+            self.stage_story_observations(
+                run_id, normalized, {**meta, "source_file": relative},
+                by_story.get(story_id, []), position,
             )
-            run_story_ids = set()
-            for position, relative in enumerate(story_files, 1):
-                relative = relative.replace("\\", "/")
-                story_id = Path(relative).stem
-                path = corpus_dir / relative
-                try:
-                    text = path.read_text(encoding="utf-8")
-                except OSError as exc:
-                    raise ValueError(f"无法读取故事原文: {path}") from exc
-                meta = dict(story_meta.get(relative) or {})
-                payload = {**meta, "story_id": story_id, "source_file": relative}
-                conn.execute(
-                    """INSERT INTO stories
-                       (story_id, title, category, source_file, content_sha256, text_content, payload_json)
-                       VALUES (?, ?, ?, ?, ?, ?, ?)
-                       ON CONFLICT(story_id) DO UPDATE SET
-                       title=excluded.title, category=excluded.category,
-                       source_file=excluded.source_file, content_sha256=excluded.content_sha256,
-                       text_content=excluded.text_content, payload_json=excluded.payload_json""",
-                    (
-                        story_id, meta.get("question_title") or meta.get("title"), meta.get("category"),
-                        relative, hashlib.sha256(text.encode("utf-8")).hexdigest(), text, _json(payload),
-                    ),
-                )
-                conn.execute(
-                    "INSERT OR REPLACE INTO run_stories (run_id, story_id, position) VALUES (?, ?, ?)",
-                    (run_id, story_id, position),
-                )
-                run_story_ids.add(story_id)
-            for observation in observations:
-                obs_id, story_id = observation["obs_id"], observation["story_id"]
-                self._story_stub(conn, story_id)
-                payload = _json(observation)
-                conn.execute(
-                    """INSERT INTO observations (obs_id, story_id, payload_json) VALUES (?, ?, ?)
-                       ON CONFLICT(obs_id) DO UPDATE SET
-                       story_id=excluded.story_id, payload_json=excluded.payload_json""",
-                    (obs_id, story_id, payload),
-                )
-                version_id = _digest(run_id, obs_id, payload)
-                conn.execute(
-                    """INSERT OR IGNORE INTO observation_versions
-                       (observation_version_id, obs_id, run_id, payload_json) VALUES (?, ?, ?, ?)""",
-                    (version_id, obs_id, run_id, payload),
-                )
-                if story_id in run_story_ids:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO run_observations (run_id, obs_id) VALUES (?, ?)",
-                        (run_id, obs_id),
-                    )
-            self._check(conn)
-        return manifest
+        return self.commit_function_run(snapshot_path, run_id)
 
     def load_pattern_run(self, snapshot_id: str) -> dict | None:
         self.initialize()
@@ -792,63 +964,6 @@ class StoryKnowledgeStore:
             self._check(conn)
         return result
 
-    def record_pattern_catalog(self, catalog_path) -> dict:
-        catalog = _read_json(Path(catalog_path))
-        snapshot_id = str(catalog.get("snapshot_id") or "").strip()
-        if not snapshot_id:
-            raise ValueError("PatternCatalog 缺少 snapshot_id")
-        groups = (
-            ("published", catalog.get("published_patterns") or []),
-            ("rejected", catalog.get("rejected_patterns") or []),
-            ("manual_review", catalog.get("manual_review_patterns") or []),
-        )
-        self.initialize()
-        with self.connect() as conn:
-            if not conn.execute("SELECT 1 FROM snapshots WHERE snapshot_id=?", (snapshot_id,)).fetchone():
-                raise ValueError(f"Pattern 来源 Snapshot 尚未入库: {snapshot_id}")
-            for status, items in groups:
-                for item in items:
-                    body = item.get("pattern") if status == "rejected" and item.get("pattern") else item
-                    pattern_id = body.get("pattern_id") or item.get("cluster_id") or body.get("cluster_id")
-                    if not pattern_id:
-                        raise ValueError(f"Pattern 缺少稳定标识: {status}")
-                    payload = _json(item)
-                    version_id = _digest(snapshot_id, pattern_id, status, payload)
-                    conn.execute(
-                        """INSERT INTO patterns
-                           (snapshot_id, pattern_id, pattern_name, status, latest_version_id, payload_json)
-                           VALUES (?, ?, ?, ?, ?, ?)
-                           ON CONFLICT(snapshot_id, pattern_id) DO UPDATE SET
-                           pattern_name=excluded.pattern_name, status=excluded.status,
-                           latest_version_id=excluded.latest_version_id, payload_json=excluded.payload_json""",
-                        (
-                            snapshot_id, pattern_id, body.get("pattern_name"), status,
-                            version_id, payload,
-                        ),
-                    )
-                    conn.execute(
-                        """INSERT OR IGNORE INTO pattern_versions
-                           (pattern_version_id, snapshot_id, pattern_id, status, payload_json)
-                           VALUES (?, ?, ?, ?, ?)""",
-                        (version_id, snapshot_id, pattern_id, status, payload),
-                    )
-                    if status == "published":
-                        conn.execute(
-                            """INSERT OR REPLACE INTO snapshot_patterns
-                               (snapshot_id, pattern_id, pattern_version_id, status, is_new)
-                               VALUES (?, ?, ?, 'published', 1)""",
-                            (snapshot_id, pattern_id, version_id),
-                        )
-                    for story_id in sorted(set(body.get("story_ids") or item.get("story_ids") or [])):
-                        self._story_stub(conn, story_id)
-                        conn.execute(
-                            """INSERT OR IGNORE INTO pattern_evidence
-                               (pattern_version_id, story_id) VALUES (?, ?)""",
-                            (version_id, story_id),
-                        )
-            self._check(conn)
-        return self.status()
-
     def record_outline(self, document: dict, markdown_text: str) -> str:
         body = dict(document)
         body.pop("outline_id", None)
@@ -961,7 +1076,9 @@ class StoryKnowledgeStore:
         if not self.db_path.is_file():
             raise ValueError(f"知识库不存在: {self.db_path}")
         tables = (
-            "pipeline_runs", "stories", "observations", "observation_versions",
+            "pipeline_runs", "stories", "story_versions", "run_stories",
+            "observations", "observation_versions", "run_observations",
+            "snapshot_story_versions", "snapshot_observation_versions",
             "functions", "function_versions", "function_evolution_events", "snapshots",
             "function_occurrences", "function_contracts", "patterns", "pattern_versions",
             "pattern_runs", "pattern_story_sequences", "motif_evidence",
@@ -1026,28 +1143,12 @@ class StoryKnowledgeStore:
             raise ValueError(f"Snapshot 没有 Function: {snapshot_id}")
         return [json.loads(row["payload_json"]) for row in rows]
 
-    def load_contracts(self, snapshot_id: str, latest_by_function: bool = False) -> list[dict]:
+    def load_contracts(self, snapshot_id: str) -> list[dict]:
         with self.connect() as conn:
             rows = conn.execute(
                 "SELECT payload_json FROM function_contracts WHERE snapshot_id=? ORDER BY function_id",
                 (snapshot_id,),
             ).fetchall()
-            if not rows and latest_by_function:
-                rows = conn.execute(
-                    """SELECT fc.payload_json
-                       FROM snapshot_functions target
-                       JOIN function_contracts fc ON fc.function_id=target.function_id
-                       JOIN snapshots source ON source.snapshot_id=fc.snapshot_id
-                       WHERE target.snapshot_id=?
-                         AND source.created_at=(
-                           SELECT MAX(s2.created_at)
-                           FROM function_contracts fc2
-                           JOIN snapshots s2 ON s2.snapshot_id=fc2.snapshot_id
-                           WHERE fc2.function_id=target.function_id
-                         )
-                       ORDER BY target.position""",
-                    (snapshot_id,),
-                ).fetchall()
         return [json.loads(row["payload_json"]) for row in rows]
 
     def load_occurrences(self, snapshot_id: str) -> list[dict]:
@@ -1068,25 +1169,23 @@ class StoryKnowledgeStore:
             observations = [
                 json.loads(row["payload_json"])
                 for row in conn.execute(
-                    """SELECT DISTINCT o.obs_id, o.payload_json
-                       FROM function_occurrences fo
-                       JOIN observations o ON o.obs_id=fo.obs_id
-                       WHERE fo.snapshot_id=? ORDER BY o.story_id, o.obs_id""",
+                    """SELECT ov.payload_json
+                       FROM snapshot_observation_versions sov
+                       JOIN observation_versions ov
+                         ON ov.observation_version_id=sov.observation_version_id
+                       JOIN observations o ON o.obs_id=sov.obs_id
+                       WHERE sov.snapshot_id=? ORDER BY o.story_id, ov.observation_order""",
                     (snapshot_id,),
                 )
             ]
             metadata = [
                 json.loads(row["payload_json"])
                 for row in conn.execute(
-                    """SELECT DISTINCT s.story_id, s.payload_json,
-                              COALESCE(rs.position, 2147483647) AS story_position
-                       FROM function_occurrences fo
-                       JOIN stories s ON s.story_id=fo.story_id
-                       LEFT JOIN run_stories rs
-                         ON rs.run_id=? AND rs.story_id=s.story_id
-                       WHERE fo.snapshot_id=?
-                       ORDER BY story_position, s.story_id""",
-                    (snapshot_id, snapshot_id),
+                    """SELECT sv.payload_json
+                       FROM snapshot_story_versions ssv
+                       JOIN story_versions sv ON sv.story_version_id=ssv.story_version_id
+                       WHERE ssv.snapshot_id=? ORDER BY ssv.position, ssv.story_id""",
+                    (snapshot_id,),
                 )
             ]
         return {
@@ -1095,89 +1194,6 @@ class StoryKnowledgeStore:
             "contracts": self.load_contracts(snapshot_id),
             "observations": observations,
             "story_metadata": metadata,
-            "occurrences": occurrences,
-        }
-
-    def load_story_pattern_inputs_cumulative(self, snapshot_id: str) -> dict:
-        """读取 Snapshot 及其父链的累计 Pattern 输入。
-
-        Evolve 的 Function Snapshot 可能只包含本批故事；Pattern 仍需从同一
-        DB 继承父 Snapshot 中未变化的故事、Function 和证据。
-        """
-        current = self.load_story_pattern_inputs(snapshot_id)
-        parent_snapshot_id = current["manifest"].get("parent_snapshot_id")
-        if not parent_snapshot_id:
-            with self.connect() as conn:
-                row = conn.execute(
-                    "SELECT parent_snapshot_id FROM snapshots WHERE snapshot_id=?",
-                    (snapshot_id,),
-                ).fetchone()
-            parent_snapshot_id = row["parent_snapshot_id"] if row else None
-        if not parent_snapshot_id:
-            return current
-
-        parent = self.load_story_pattern_inputs_cumulative(parent_snapshot_id)
-        current_story_ids = {item["story_id"] for item in current["story_metadata"]}
-
-        parent_function_ids = {item["function_id"] for item in parent["functions"]}
-        functions_by_id = {
-            item["function_id"]: item for item in parent["functions"]
-        }
-        functions_by_id.update({
-            item["function_id"]: item for item in current["functions"]
-        })
-        function_order = [item["function_id"] for item in parent["functions"]]
-        function_order.extend(
-            item["function_id"] for item in current["functions"]
-            if item["function_id"] not in parent_function_ids
-        )
-        occurrences = [
-            dict(item, snapshot_id=snapshot_id)
-            for item in parent["occurrences"]
-            if item["story_id"] not in current_story_ids
-        ] + [dict(item, snapshot_id=snapshot_id) for item in current["occurrences"]]
-        used_function_ids = {
-            item["function_id"] for item in occurrences if item.get("function_id")
-        }
-        functions = [
-            functions_by_id[item] for item in function_order
-            if item in used_function_ids
-        ]
-
-        contracts_by_id = {
-            item["function_id"]: item for item in parent["contracts"]
-        }
-        contracts_by_id.update({
-            item["function_id"]: item for item in current["contracts"]
-        })
-        contracts = [
-            contracts_by_id[item] for item in function_order
-            if item in used_function_ids and item in contracts_by_id
-        ]
-
-        metadata_by_id = {}
-        metadata_order = []
-        for item in parent["story_metadata"] + current["story_metadata"]:
-            story_id = item["story_id"]
-            if story_id not in metadata_by_id:
-                metadata_order.append(story_id)
-            metadata_by_id[story_id] = item
-        story_metadata = [metadata_by_id[item] for item in metadata_order]
-
-        observations = [
-            item for item in parent["observations"]
-            if item["story_id"] not in current_story_ids
-        ] + list(current["observations"])
-        manifest = dict(current["manifest"])
-        manifest["parent_snapshot_id"] = parent_snapshot_id
-        manifest["function_count"] = len(functions)
-        manifest["function_contract_count"] = len(contracts)
-        return {
-            "manifest": manifest,
-            "functions": functions,
-            "contracts": contracts,
-            "observations": observations,
-            "story_metadata": story_metadata,
             "occurrences": occurrences,
         }
 
@@ -1203,44 +1219,3 @@ class StoryKnowledgeStore:
             "rejected_patterns": groups["rejected"],
             "manual_review_patterns": groups["manual_review"],
         }
-
-
-def sync_current_library(
-    db_path,
-    bootstrap_corpus_dir,
-    bootstrap_observations_path,
-    bootstrap_snapshot_path,
-    corpus_dir,
-    observations_path,
-    pattern_snapshot_path,
-    current_snapshot_path,
-    catalog_path,
-) -> dict:
-    """把当前正式 Function→Pattern 主线幂等写入统一知识库。"""
-    bootstrap_corpus_dir = Path(bootstrap_corpus_dir)
-    bootstrap_manifest = _read_json(bootstrap_corpus_dir / "manifest.json")
-    bootstrap_meta = {
-        item["txt_file"].replace("\\", "/"): item for item in bootstrap_manifest
-    }
-    store = StoryKnowledgeStore(db_path)
-    store.record_function_run(
-        bootstrap_snapshot_path,
-        bootstrap_corpus_dir,
-        list(bootstrap_meta),
-        bootstrap_meta,
-        _read_jsonl(Path(bootstrap_observations_path)),
-    )
-    corpus_dir = Path(corpus_dir)
-    manifest = _read_json(corpus_dir / "manifest.json")
-    story_meta = {item["txt_file"].replace("\\", "/"): item for item in manifest}
-    story_files = list(story_meta)
-    pattern_manifest = store.record_function_run(
-        pattern_snapshot_path,
-        corpus_dir,
-        story_files,
-        story_meta,
-        _read_jsonl(Path(observations_path)),
-    )
-    store.record_snapshot(current_snapshot_path, pattern_manifest["snapshot_id"])
-    store.record_pattern_catalog(catalog_path)
-    return store.status()

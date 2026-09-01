@@ -34,6 +34,7 @@ def _occurrences() -> list[dict]:
     return [{
         "occurrence_id": "story_1_obs_001",
         "obs_id": "story_1_obs_001",
+        "observation_version_id": "OV_story_1_obs_001",
         "story_id": "story_1",
         "status": "MATCHED",
         "function_id": "F_TEST001",
@@ -68,7 +69,7 @@ def test_publish_load_and_validate(tmp_path):
 
     manifest, functions, evaluation = load_snapshot(path)
     assert manifest == validate_snapshot(path)
-    assert manifest["schema_version"] == 2
+    assert manifest["schema_version"] == 4
     assert manifest["function_count"] == 1
     assert manifest["occurrence_count"] == 1
     assert manifest["parent_snapshot_id"] is None
@@ -85,13 +86,13 @@ def test_fail_does_not_publish(tmp_path):
     assert not root.exists()
 
 
-def test_publish_v3_with_function_contracts(tmp_path):
+def test_publish_v4_with_function_contracts(tmp_path):
     path = publish_snapshot(
         _functions(), _evaluation(), "bootstrap", "test", str(tmp_path),
         _occurrences(), _contracts(),
     )
     manifest = validate_snapshot(path)
-    assert manifest["schema_version"] == 3
+    assert manifest["schema_version"] == 4
     assert manifest["function_contract_count"] == 1
     assert load_function_contracts(path) == _contracts()
     assert "function_contracts.jsonl" in os.listdir(path)

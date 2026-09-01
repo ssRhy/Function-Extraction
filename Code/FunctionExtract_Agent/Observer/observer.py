@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 
 from Agent.llm import chat_structured
 from Prompt.Observer_prompt import OBSERVATION_SYSTEM_PROMPT
+from Contracts.versioning import observation_id, observation_version_id
 
 
 # ========== Pydantic Schema ==========
@@ -32,6 +33,9 @@ class ObservationResponse(BaseModel):
 
 class NarrativeObservation(TypedDict):
     obs_id: str
+    observation_version_id: str
+    observation_order: int
+    story_version_id: str
     before_state: str
     event: str
     participants: list[str]
@@ -40,6 +44,7 @@ class NarrativeObservation(TypedDict):
     narrative_effect: str
     surface_form: str
     source_sentence_indices: list[int]
+    source_text: str
     story_id: str
 
 
@@ -69,6 +74,7 @@ def observer_node(state: NarrativePipelineState) -> NarrativePipelineState:
         }
 
     story_id = normalized["metadata"]["story_id"]
+    story_version = normalized["metadata"]["story_version_id"]
     sentences = normalized["sentences"]
 
     # 构建发送给 LLM 的句子列表
@@ -84,8 +90,13 @@ def observer_node(state: NarrativePipelineState) -> NarrativePipelineState:
 
     observations = []
     for i, obs in enumerate(result.observations):
+        indices = tuple(sorted({
+            int(index) for index in (obs.source_sentence_indices or [])
+            if isinstance(index, int) and 0 <= index < len(sentences)
+        }))
         observation = {
-            "obs_id": f"{story_id}_obs_{i+1:03d}",
+            "story_version_id": story_version,
+            "observation_order": i + 1,
             "before_state": obs.before_state,
             "event": obs.event,
             "participants": obs.participants,
@@ -93,9 +104,12 @@ def observer_node(state: NarrativePipelineState) -> NarrativePipelineState:
             "affected_aspect": obs.affected_aspect,
             "narrative_effect": obs.narrative_effect,
             "surface_form": obs.surface_form,
-            "source_sentence_indices": obs.source_sentence_indices,
+            "source_sentence_indices": list(indices),
+            "source_text": "".join(sentences[index] for index in indices),
             "story_id": story_id,
         }
+        observation["obs_id"] = observation_id(story_id, observation)
+        observation["observation_version_id"] = observation_version_id(story_version, observation)
         observations.append(observation)
 
     return {

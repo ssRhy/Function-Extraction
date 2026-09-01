@@ -57,6 +57,7 @@ class NarrativePipelineState(TypedDict):
     ontology_snapshot: str | None    # PASS 后发布的不可变快照目录
     knowledge_db: str | None         # PASS 发布后写入统一故事知识库
     base_snapshot_id: str | None     # Evolve 从统一库读取的正式起点
+    run_id: str | None               # 当前 Evolve 暂存可见性边界
 
     # ---- 流程控制 ----
     current_story_index: int

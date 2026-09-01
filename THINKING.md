@@ -799,3 +799,91 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 
 - `patterns` 只保存达到发布条件的逻辑 Pattern，不是文章索引；新文章应在 `stories`、`run_stories`、`function_occurrences`、`pattern_story_sequences` 和 `motif_evidence` 中检查。
 - 因此本批没有 published Pattern 时，`patterns` 不新增行并不表示 5 篇文章未入库。
+
+## 114. 远程累计修复只闭合了 Pattern 输入边界（2026-09-01）
+
+- 远程提交 `273b7a7` 通过 `load_story_pattern_inputs_cumulative` 沿父链继承故事、Observation、Function、Contract 和 FunctionOccurrence，并增加 `--rebuild`，解决了 Pattern 把只含当前批次的 Function Snapshot 误判为父故事全部删除的问题。
+- 该修复没有改变 Function Evolve 仍向全局持久 Bank 直接追加、失败批次无提交状态、终评仍可能取活体 Bank，以及 `story_id/obs_id` 由文件名和序号决定的事实；因此“Pattern 能累计”不等于“Function 增量数据流可审计、可回滚”。
+- 累计读取仍通过可变的 `stories` / `observations` 主表回读父 Snapshot；若同一 ID 后续被原地更新，旧 Pattern 输入仍可能漂移。另一个待验证边界是 occurrence signature 未包含 Function/Contract 版本，定义或合同变化不一定触发故事局部重算。
+- 远程代码已拉取到本地，但 `Code/data/` 被 `.gitignore` 排除，正式 `story_knowledge.db` 和运行产物不随代码同步；最新代码、最新知识数据和 HANDOFF 中的实验状态仍是三个独立版本源。
+
+## 115. Function Evolve 的隔离单位应是 Run，可发布边界应是 Snapshot（2026-09-01）
+
+- 用户明确反问为何不能始终在同一个 Evolve DB 增量，并确认不需要按批次拆数据库；真正需要隔离的是未发布 `run_id` 的可见性。
+- Bank 不应再承担正式知识边界。它只需要计算“父 Snapshot 的冻结 Observation + 当前 Run 暂存 Observation”，同一逻辑故事由当前 Run 版本覆盖。
+- Snapshot 必须保存完整成员关系并绑定不可变 Story/Observation 版本；这样 Pattern 和后续读者只读一个 Snapshot，不再沿父链拼接，也不会因新批次更新逻辑 ID 而让旧 Snapshot 漂移。
+- 失败不是删除运行历史：保留 FAIL Run 和报告用于审计，但清理其暂存版本；只有 PASS 提交才能把版本变成正式可见知识。
+
+## 116. 严格 Snapshot 边界要求删除旁路，而不只是停止调用（2026-09-01）
+
+- 用户要求删除旧的无用和冗余代码，避免后续维护者误走旧路径。仅让新入口“不调用”旧接口仍会留下两套合法写法，边界并未真正收敛。
+- `record_snapshot`、PatternCatalog 文件导入和 `latest_by_function` 合同回退都会绕过当前 Snapshot 的完整版本成员，因此应删除，而不是保留为 fallback。
+- Bootstrap 持久 Bank 与 Evolve 计算 Bank 职责不同，前者仍有生产调用，不属于冗余；清理依据应是调用关系和边界语义，而不是名称相似。
+
+## 117. Bootstrap 的 FAIL 不能被描述为已产出 Snapshot（2026-09-01）
+
+- 本次真实两篇故事运行中，Bootstrap 的中间 Registry/Bank 文件已生成，但最终评估为 FAIL，`publish_snapshot` 返回空，因此统一知识库没有可供 Evolve 使用的父 Snapshot。
+- Pattern 独立回归可以使用已有 Snapshot 验证下游，但不能补足 Bootstrap 门禁；后续全流程必须先得到 Bootstrap PASS 和正式 Snapshot，再启动 Evolve。
+
+## 118. Pattern 增量需要父 Snapshot 先有 Pattern 基线（2026-09-01）
+
+- 真实 Evolve 子 Snapshot 直接运行 Pattern 时被正确拒绝，因为父 Function Snapshot 尚无成功的 Pattern Run；这不是 Function 数据缺失，而是 Pattern 增量无法从未初始化的父派生状态继承。
+- 因此完整链路实际需要：Bootstrap 发布根 Snapshot → 根 Snapshot 建立 Pattern 基线 → Evolve 发布子 Snapshot → 子 Snapshot 运行 Pattern 增量。直接执行 `FunctionExtract_Agent` 时，根 Pattern 不会自动运行；`StoryCLI function bootstrap` 才会在发布后触发它。
+
+## 119. Pattern Run 成功不等于产生 published Pattern（2026-09-01）
+
+- 真实 10+5 故事链路中，根 Snapshot 生成 3 个 candidate Cluster，子 Snapshot 生成 5 个 candidate Cluster；所有 Cluster 的 `story_support=1`、Motif 最大长度为 3，虽然 `review_status=CLEAN` 且 FunctionContract 齐全，仍未通过发布门槛。
+- 当前发布条件要求 `story_support>=2` 且 Motif 长度至少 4；因此本批的主要问题是跨故事同序结构不足，而不是 Pattern 节点失败或数据库写入失败。增加故事数量只有在形成可重复的 4 步以上 Function 链时才会产生 published Pattern。
+
+## 120. 增量数据达到 30 篇后出现可发布 Pattern（2026-09-01）
+
+- 在前两轮 15 篇基础上继续 Evolve 15 篇后，Pattern 仍保持直接读取完整子 Snapshot；delta 中有 15 条新故事、12 条未变化故事、3 条因 Function 本体扩展而重新对齐的故事，没有误删历史故事。
+- 本批出现一个满足“至少两篇故事、至少四步结构、Pair Review CLEAN、Contract 完整”的 Cluster，发布 Pattern“秘密揭露与冲突升级循环”。这说明前一批 `published_patterns=0` 主要是结构支持不足，并非发布链路失效。
+
+## 121. 增量主流程已闭合，但严格数据一致性仍有缺口（2026-09-01）
+
+- 当前同一 SQLite 已实际跑通 Bootstrap 10 篇 → Evolve 5 篇 → Evolve 15 篇 → Pattern：3 个 PASS Function Run、3 个 SUCCESS Pattern Run、30 篇累计故事，最新 Pattern delta 为 `new=15、changed=3、unchanged=12、removed=0`。
+- 因此 `run_id` 可见性、父 Snapshot + 当前 Run 的计算 Bank、PASS 才发布子 Snapshot、Pattern 按完整 Snapshot 读取这条主流程已成立；但还不能把四项增量要求称为完全闭合。
+- 后续应优先修正稳定 Function ID、Observation/Occurrence 版本覆盖、Occurrence 与 Snapshot 成员的强绑定，以及异常中断后遗留 `RUNNING` Run；这些问题会影响旧新版本的严格追溯，不能先用 Best-of-N 或更多语料掩盖。
+- 初始目标中的完整 Story Profile、独立 Instance Card、Propp 31 项/轮次/辅助标签、StateVocabulary、生成阶段 Best-of-N/局部优化和论文级人工/跨批次基准仍未完成。
+
+## 122. 合并 Registry DB 与 Knowledge DB 不等于解决 Function 身份（2026-09-01）
+
+- 物理上合并 SQLite 只能减少文件同步和备份边界，不能修复当前由 `function_name + definition` 生成 Function ID 的问题；定义变化仍会改变 ID，且 Story/Observation ID 和 Occurrence 覆盖问题也不会因此消失。
+- 如果合并，必须在同一文件内保留“`run_id` 作用域的可变工作 Registry”和“Snapshot 作用域的正式版本表”两层；直接让 Registry 的 `replace_all` 写正式 `functions` 表会破坏失败回滚和旧 Snapshot 读取。
+- 当前更小的正确方案是先让新 Function 一次分配 ID、REVISE 保留原 ID、MERGE/SPLIT 记录 lineage，再决定是否把 Registry 工作表迁入 Knowledge DB；数据库文件数量不是身份模型。
+
+## 122. 合并 RegistryDB 与 KnowledgeDB 不等于 Function 身份稳定（2026-09-01）
+
+- 用户提出将 RegistryDB 与 KnowledgeDB 合并。合并物理存储可以消除 Evolve 工作区到正式知识库的跨库复制，并让 Run 暂存与 Snapshot 提交共享事务；但如果仍按 `function_name + definition` 生成 ID，定义修订仍会改变 Function ID。
+- 正确方向是“同库、分表、分语义”：逻辑 Function 身份只在首次创建时生成，REVISE 保留 ID，MERGE/SPLIT 通过演化事件记录新旧关系；当前 Run 只写工作表，PASS 才提交 `function_versions` 和 `snapshot_functions`。
+- 数据库合并不能自动解决 Story/Observation ID 漂移、Occurrence 版本覆盖、Snapshot 强绑定、StateVocabulary 或论文级评测，这些仍需分别处理。
+
+## 123. 旧 Snapshot 数字型 Observation ID 不进入新架构兼容层（2026-09-01）
+
+- 用户明确不要求兼容旧 Snapshot 中的 `_obs_001` 数字型 ID，因此新 Pattern 输入边界应直接拒绝旧格式，而不是继续保留数字后缀解析和排序回退。
+- 新架构只承认由原文句子锚点生成的稳定 Observation ID；旧数据库若要继续使用，应先显式重建或迁移，不在运行时隐式混用两套 ID 规则。
+
+## 124. 清理应以调用关系为准，而不是按名称盲删（2026-09-01）
+
+- 用户要求保持最新版本、删除冗余兼容代码后，确认了旧 Pattern 状态回退、Evolve `--final-only` 和无生产调用的一次性迁移/回填脚本可以直接删除。
+- Bootstrap 的 `record_function_run` 虽然是旧式接口形态，但当前 Bootstrap 仍实际调用它；在 Bootstrap 尚未改为“创建 Run → 暂存 → 提交 Snapshot”前，删除它会直接破坏正式根 Snapshot 写入，因此暂不误删。
+
+## 125. Observation 逻辑身份不能依赖抽取位置（2026-09-01）
+
+- 用户指出，旧故事重新切分、插入或删除一个 Observation 后，顺序编号会使后续 Observation 看起来全部变成新记录；`observation_version_id` 的不可变性不能解决逻辑身份漂移。
+- 当前最小稳定边界是：`obs_id` 绑定故事内原文锚点，而不是句子下标或 Observer 返回序号；同一原文事件的描述改写只产生新的 ObservationVersion。
+- `observation_version_id` 不再包含 `obs_id`、`observation_order` 和 `source_sentence_indices`，所以重新排序或仅改变分句边界不会伪造内容版本。
+- 若原文锚点本身被改写，系统不使用模糊相似度擅自认定为同一事件；这保留了新增事件与旧事件的可区分性。
+- 当前正式库抽查仍是旧数字型 Observation ID，不能被新 ID 规则隐式接管；既然不做旧 Snapshot 兼容，后续真实增量前要显式重建根 Snapshot，而不是在运行时混用两套身份规则。
+
+## 126. Occurrence 不继承旧版本字段（2026-09-01）
+
+- 用户明确要求统一使用新版本，不需要旧版本，因此不再采用“新 Observation 覆盖旧 Occurrence、旧 Occurrence 补充派生字段”的合并策略。
+- Occurrence 是当前 Observation 与当前 Function 对齐后的派生输出；历史版本由旧 Snapshot 保留，但不参与新 Snapshot 的 Occurrence 构造。
+
+## 127. 强制中断的未完成 Run 应在下一次启动时收口（2026-09-01）
+
+- 用户指出，进程被强杀、断电或宿主退出会绕过 Python 异常处理，留下 `RUNNING` 的 Function Run 及其暂存 Story/ObservationVersion；它们虽不进入正式 Snapshot，却会污染审计状态并占用暂存数据。
+- 在当前单写入流程中，最小策略是在下一次 Bootstrap/Evolve 创建新 Run 前，把所有遗留 `RUNNING` Run 复用既有失败清理语义：删除其 `run_*` 成员和该 Run 创建的暂存版本，状态改为 `FAIL`，报告标明“启动时发现上次强制中断、未发布 Snapshot”。不引入超时、第二数据库或恢复执行。
+- Snapshot 提交与 `pipeline_runs.status='PASS'` 已处于同一 SQLite 事务；因此恢复只处理没有 Snapshot 的 `RUNNING` Run，不会回滚已发布知识。

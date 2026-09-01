@@ -11,8 +11,6 @@ class StoryPatternState(TypedDict, total=False):
     knowledge_db: str
     snapshot_id: str
     out_dir: str
-    cumulative: bool
-
     snapshot_manifest: dict | None
     functions: list[dict]
     function_by_name: dict[str, dict]
@@ -45,7 +43,6 @@ class StoryPatternState(TypedDict, total=False):
     motif_clusters: list[dict]
     pattern_summaries: list[dict]
     skipped_clusters: list[str]
-    pattern_catalog: dict | None
     story_traces: list[dict]
     errors: list[str]
 

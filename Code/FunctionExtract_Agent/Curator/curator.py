@@ -248,6 +248,8 @@ def _revise_from_report(report: dict, store, bank, plan: list[dict]) -> bool:
             continue
         if len(out) == 1:
             revised = out[0]
+            revised["function_id"] = f.get("function_id")
+            revised["version_history"] = list(f.get("version_history", []))
             revised["supporting_obs_ids"] = f.get("supporting_obs_ids", [])
             rev._recalc_confidence(revised, obs_by_id, embedder)
             _bump_version(revised, "REVISE")

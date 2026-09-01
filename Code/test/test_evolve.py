@@ -274,7 +274,8 @@ def test_evolve_flow():
         # 证据进待应用区（不直写 Registry）
         loaded = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="evolve_test").load_all()
         fa = loaded[0]
-        assert set(fa["supporting_obs_ids"]) == {"s1_obs_001", "s2_obs_001"}, fa["supporting_obs_ids"]
+        occurrence_ids = {item["obs_id"] for item in result["occurrences"]}
+        assert set(fa["supporting_obs_ids"]) == occurrence_ids, fa["supporting_obs_ids"]
         assert fa.get("function_id") and fa.get("version_history")
         assert result["pending_evidence"] == [], result["pending_evidence"]  # curator 已应用并清空
         assert os.path.exists(os.path.join(tmp, "pending_evidence.jsonl"))
@@ -541,6 +542,7 @@ def test_evaluator_final_snapshot_gate(tmp_path, monkeypatch, verdict, published
     try:
         result = ev.evaluator_final_node({
             "namespace": "evolve_test",
+            "run_id": "FR_TEST",
             "out_dir": str(tmp_path),
             "snapshot_root": str(tmp_path / "snapshots"),
             "evaluation_context": {"manifest_path": str(tmp_path / "manifest.json")},
@@ -564,7 +566,7 @@ def test_evaluator_final_snapshot_gate(tmp_path, monkeypatch, verdict, published
     if published:
         from Contracts.snapshot import load_function_contracts
         manifest, functions, _evaluation = load_snapshot(result["ontology_snapshot"])
-        assert manifest["schema_version"] == 3
+        assert manifest["schema_version"] == 4
         assert functions == store.load_all()
         occurrences = load_occurrences(result["ontology_snapshot"])
         assert occurrences[0]["function_id"] == functions[0]["function_id"]

@@ -41,7 +41,7 @@ def _occurrence_signature(items: list[dict]) -> str:
 def load_pattern_delta(state: StoryPatternState) -> dict:
     """固定父子 Snapshot，并只从 DB 计算故事级变化。"""
     store = StoryKnowledgeStore(state["knowledge_db"])
-    source = load_inputs({**state, "cumulative": True})
+    source = load_inputs(state)
     loaded = {**state, **source}
     occurrences = load_occurrences_node(loaded)
     loaded.update(occurrences)
@@ -395,7 +395,7 @@ def rebuild_clusters(state: StoryPatternState) -> dict:
             children_by_parent[parent_id].append(cluster)
 
     contract_by_id = state["function_contract_by_id"]
-    requires_contracts = state["snapshot_manifest"].get("schema_version", 1) >= 3
+    requires_contracts = bool(state["snapshot_manifest"].get("function_contracts_file"))
     for cluster in clusters:
         candidates = [
             item for item in state["motif_candidates"]

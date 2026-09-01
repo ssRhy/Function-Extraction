@@ -53,10 +53,11 @@ def _validate_occurrences(
     for index, occurrence in enumerate(occurrences):
         occurrence_id = str(occurrence.get("occurrence_id") or "").strip()
         obs_id = str(occurrence.get("obs_id") or "").strip()
+        observation_version_id = str(occurrence.get("observation_version_id") or "").strip()
         story_id = str(occurrence.get("story_id") or "").strip()
         status = occurrence.get("status")
-        if not occurrence_id or occurrence_id != obs_id or not story_id:
-            raise ValueError(f"FunctionOccurrence[{index}] 缺少一致的 occurrence_id/obs_id 或 story_id")
+        if not occurrence_id or occurrence_id != obs_id or not story_id or not observation_version_id:
+            raise ValueError(f"FunctionOccurrence[{index}] 缺少一致的 occurrence_id/obs_id、observation_version_id 或 story_id")
         if occurrence_id in seen:
             raise ValueError(f"重复 occurrence_id: {occurrence_id}")
         if status not in {"MATCHED", "OTHER", "UNCERTAIN"}:
@@ -94,7 +95,7 @@ def validate_snapshot(snapshot_path: str) -> dict:
         raise ValueError(f"缺少 manifest.json: {snapshot_path}")
     manifest = _read_json(manifest_path)
     schema_version = manifest.get("schema_version")
-    if schema_version not in {1, 2, 3}:
+    if schema_version != 4:
         raise ValueError(f"不支持的 snapshot schema_version: {manifest.get('schema_version')}")
     if manifest.get("verdict") != "PASS":
         raise ValueError("OntologySnapshot verdict 必须为 PASS")
@@ -104,14 +105,14 @@ def validate_snapshot(snapshot_path: str) -> dict:
         raise ValueError("functions_file 必须为 functions.jsonl")
     if manifest.get("evaluation_file") != "evaluation.json":
         raise ValueError("evaluation_file 必须为 evaluation.json")
-    if schema_version >= 2 and manifest.get("occurrences_file") != "occurrences.jsonl":
+    if manifest.get("occurrences_file") != "occurrences.jsonl":
         raise ValueError("occurrences_file 必须为 occurrences.jsonl")
-    if schema_version >= 3 and manifest.get("function_contracts_file") != "function_contracts.jsonl":
+    if manifest.get("function_contracts_file") and manifest.get("function_contracts_file") != "function_contracts.jsonl":
         raise ValueError("function_contracts_file 必须为 function_contracts.jsonl")
     if manifest.get("source_workflow") not in {"bootstrap", "evolve"}:
         raise ValueError("source_workflow 必须为 bootstrap 或 evolve")
-    if manifest.get("parent_snapshot_id") is not None:
-        raise ValueError("schema v1 parent_snapshot_id 必须为 null")
+    if not str(manifest.get("run_id") or "").strip():
+        raise ValueError("OntologySnapshot 缺少 run_id")
 
     functions_path = os.path.join(snapshot_path, "functions.jsonl")
     evaluation_path = os.path.join(snapshot_path, "evaluation.json")
@@ -133,19 +134,18 @@ def validate_snapshot(snapshot_path: str) -> dict:
         raise ValueError("manifest function_count 与 functions.jsonl 不一致")
     if evaluation.get("verdict") != "PASS":
         raise ValueError("evaluation.json verdict 必须为 PASS")
-    if schema_version >= 2:
-        occurrences_path = os.path.join(snapshot_path, "occurrences.jsonl")
-        if not os.path.isfile(occurrences_path):
-            raise ValueError("OntologySnapshot 缺少 occurrences 文件")
-        with open(occurrences_path, "rb") as f:
-            occurrences_bytes = f.read()
-        if _sha256(occurrences_bytes) != manifest.get("occurrences_sha256"):
-            raise ValueError("occurrences.jsonl SHA-256 校验失败")
-        occurrences = _read_jsonl(occurrences_path)
-        if len(occurrences) != manifest.get("occurrence_count"):
-            raise ValueError("manifest occurrence_count 与 occurrences.jsonl 不一致")
-        _validate_occurrences(occurrences, functions, manifest.get("snapshot_id"))
-    if schema_version >= 3:
+    occurrences_path = os.path.join(snapshot_path, "occurrences.jsonl")
+    if not os.path.isfile(occurrences_path):
+        raise ValueError("OntologySnapshot 缺少 occurrences 文件")
+    with open(occurrences_path, "rb") as f:
+        occurrences_bytes = f.read()
+    if _sha256(occurrences_bytes) != manifest.get("occurrences_sha256"):
+        raise ValueError("occurrences.jsonl SHA-256 校验失败")
+    occurrences = _read_jsonl(occurrences_path)
+    if len(occurrences) != manifest.get("occurrence_count"):
+        raise ValueError("manifest occurrence_count 与 occurrences.jsonl 不一致")
+    _validate_occurrences(occurrences, functions, manifest.get("snapshot_id"))
+    if manifest.get("function_contracts_file"):
         contracts_path = os.path.join(snapshot_path, "function_contracts.jsonl")
         if not os.path.isfile(contracts_path):
             raise ValueError("OntologySnapshot 缺少 FunctionContract 文件")
@@ -171,18 +171,16 @@ def load_snapshot(snapshot_path: str) -> tuple[dict, list[dict], dict]:
 
 
 def load_occurrences(snapshot_path: str) -> list[dict]:
-    """校验并读取 schema v2 快照中的 FunctionOccurrence。"""
+    """校验并读取快照中的 FunctionOccurrence。"""
     manifest = validate_snapshot(snapshot_path)
-    if manifest["schema_version"] < 2:
-        raise ValueError("schema v1 OntologySnapshot 不包含 FunctionOccurrence")
     return _read_jsonl(os.path.join(snapshot_path, manifest["occurrences_file"]))
 
 
 def load_function_contracts(snapshot_path: str) -> list[dict]:
-    """校验并读取 schema v3 快照中的 FunctionContract。"""
+    """校验并读取快照中的 FunctionContract。"""
     manifest = validate_snapshot(snapshot_path)
-    if manifest["schema_version"] < 3:
-        raise ValueError("schema v1/v2 OntologySnapshot 不包含 FunctionContract")
+    if not manifest.get("function_contracts_file"):
+        return []
     return _read_jsonl(os.path.join(snapshot_path, manifest["function_contracts_file"]))
 
 
@@ -194,6 +192,8 @@ def publish_snapshot(
     snapshots_root: str | None = None,
     occurrences: list[dict] | None = None,
     function_contracts: list[dict] | None = None,
+    parent_snapshot_id: str | None = None,
+    run_id: str | None = None,
 ) -> str | None:
     """PASS 时原子发布不可变快照；相同内容重复发布返回已有目录。"""
     if evaluation.get("verdict") != "PASS":
@@ -205,9 +205,9 @@ def publish_snapshot(
     for item in occurrences:
         item.pop("snapshot_id", None)
     _validate_occurrences(occurrences, functions)
-    schema_version = 3 if function_contracts is not None else 2
+    schema_version = 4
     contracts = [dict(item) for item in (function_contracts or [])]
-    if schema_version == 3:
+    if function_contracts is not None:
         validate_function_contracts(functions, contracts)
 
     root = os.path.abspath(snapshots_root or DEFAULT_SNAPSHOT_ROOT)
@@ -218,6 +218,8 @@ def publish_snapshot(
     functions_sha = _sha256(functions_bytes)
     evaluation_sha = _sha256(evaluation_bytes)
     contracts_sha = _sha256(contracts_bytes)
+    content_sha = _sha256(functions_bytes + contracts_bytes)
+    effective_run_id = run_id or f"FR_{_sha256((namespace + content_sha).encode('utf-8'))[:16]}"
 
     for entry in os.scandir(root):
         if not entry.is_dir():
@@ -232,6 +234,9 @@ def publish_snapshot(
             and manifest.get("functions_sha256") == functions_sha
             and manifest.get("evaluation_sha256") == evaluation_sha
             and manifest.get("schema_version") == schema_version
+            and manifest.get("parent_snapshot_id") == parent_snapshot_id
+            and manifest.get("run_id") == effective_run_id
+            and bool(manifest.get("function_contracts_file")) == (function_contracts is not None)
         ):
             validate_snapshot(entry.path)
             existing = _read_jsonl(os.path.join(entry.path, "occurrences.jsonl"))
@@ -239,7 +244,7 @@ def publish_snapshot(
                 item.pop("snapshot_id", None)
             if existing != occurrences:
                 continue
-            if schema_version == 3:
+            if function_contracts is not None:
                 existing_contracts = _read_jsonl(os.path.join(entry.path, "function_contracts.jsonl"))
                 if existing_contracts != contracts:
                     continue
@@ -249,7 +254,6 @@ def publish_snapshot(
     created_at = now.isoformat().replace("+00:00", "Z")
     safe_namespace = re.sub(r"[^A-Za-z0-9._-]+", "_", namespace).strip("_") or "ontology"
     timestamp = now.strftime("%Y%m%dT%H%M%S%fZ")
-    content_sha = _sha256(functions_bytes + contracts_bytes) if schema_version == 3 else functions_sha
     snapshot_id = f"{safe_namespace}_{timestamp}_{content_sha[:12]}"
     snapshot_path = os.path.join(root, snapshot_id)
     if os.path.exists(snapshot_path):
@@ -260,7 +264,8 @@ def publish_snapshot(
     manifest = {
         "schema_version": schema_version,
         "snapshot_id": snapshot_id,
-        "parent_snapshot_id": None,
+        "parent_snapshot_id": parent_snapshot_id,
+        "run_id": effective_run_id,
         "source_workflow": source_workflow,
         "namespace": namespace,
         "created_at": created_at,
@@ -275,7 +280,7 @@ def publish_snapshot(
         "evaluation_sha256": evaluation_sha,
         "occurrences_sha256": _sha256(occurrences_bytes),
     }
-    if schema_version == 3:
+    if function_contracts is not None:
         manifest.update({
             "function_contract_count": len(contracts),
             "function_contracts_file": "function_contracts.jsonl",
@@ -289,7 +294,7 @@ def publish_snapshot(
             f.write(evaluation_bytes)
         with open(os.path.join(tmp, "occurrences.jsonl"), "wb") as f:
             f.write(occurrences_bytes)
-        if schema_version == 3:
+        if function_contracts is not None:
             with open(os.path.join(tmp, "function_contracts.jsonl"), "wb") as f:
                 f.write(contracts_bytes)
         with open(os.path.join(tmp, "manifest.json"), "wb") as f:

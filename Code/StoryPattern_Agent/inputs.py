@@ -65,30 +65,26 @@ def _group_observations(
             raise ValueError(f"重复 obs_id: {obs_id}")
         if story_id not in story_metadata:
             raise ValueError(f"Observation 的 story_id 不在 manifest 中: {story_id}")
-        match = re.fullmatch(rf"{re.escape(story_id)}_obs_(\d+)", obs_id)
+        match = re.fullmatch(rf"{re.escape(story_id)}_obs_[0-9a-f]{{12}}", obs_id)
         if not match:
             raise ValueError(f"非法 obs_id: {obs_id}")
         seen.add(obs_id)
-        grouped.setdefault(story_id, []).append((int(match.group(1)), obs))
+        order = obs.get("observation_order")
+        if not isinstance(order, int) or order < 1:
+            order = index + 1
+        grouped.setdefault(story_id, []).append((order, obs_id, obs))
 
     result = {}
     for story_id, items in grouped.items():
-        items.sort(key=lambda item: item[0])
-        numbers = [number for number, _obs in items]
-        if numbers != list(range(1, len(items) + 1)):
-            raise ValueError(f"故事 {story_id} 的 Observation 编号不连续: {numbers}")
-        result[story_id] = [obs for _number, obs in items]
+        items.sort(key=lambda item: (item[0], item[1]))
+        result[story_id] = [obs for _order, _obs_id, obs in items]
     return result
 
 
 def load_inputs(state: StoryPatternState) -> dict:
     """从统一知识库读取冻结本体、Observation 与 Story 元数据。"""
     store = StoryKnowledgeStore(state["knowledge_db"])
-    source = (
-        store.load_story_pattern_inputs_cumulative(state["snapshot_id"])
-        if state.get("cumulative")
-        else store.load_story_pattern_inputs(state["snapshot_id"])
-    )
+    source = store.load_story_pattern_inputs(state["snapshot_id"])
     manifest = source["manifest"]
     functions = source["functions"]
     contracts = source["contracts"]
@@ -133,7 +129,6 @@ def load_inputs(state: StoryPatternState) -> dict:
         "motif_clusters": [],
         "pattern_summaries": [],
         "skipped_clusters": [],
-        "pattern_catalog": None,
         "story_traces": [],
         "errors": [],
         "messages": [{

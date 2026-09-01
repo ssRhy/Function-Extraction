@@ -21,12 +21,38 @@ def _occurrence(obs_id, source_indices, status="MATCHED"):
     return {
         "occurrence_id": obs_id,
         "obs_id": obs_id,
+        "observation_version_id": f"OV_{obs_id}",
         "story_id": "s1",
         "status": status,
         "function_id": "F_1" if status == "MATCHED" else None,
         "function_name": "FUNCTION_A" if status == "MATCHED" else None,
         "source_sentence_indices": source_indices,
     }
+
+
+def _commit_snapshot(tmp_path, occurrences):
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    store.begin_function_run("R_TEST", "bootstrap", "test", None)
+    observations = [{
+        "obs_id": item["obs_id"],
+        "story_id": "s1",
+        "before_state": "before",
+        "event": item["obs_id"],
+        "after_state": "after",
+    } for item in occurrences]
+    staged = store.stage_story_observations(
+        "R_TEST",
+        {"raw_text": "story", "metadata": {"story_id": "s1", "title": "s1", "story_type": "test"}},
+        {"source_file": "s1.txt"}, observations, 1,
+    )
+    versions = {item["obs_id"]: item["observation_version_id"] for item in staged}
+    published = [dict(item, observation_version_id=versions[item["obs_id"]]) for item in occurrences]
+    path = publish_snapshot(
+        _function(), {"verdict": "PASS"}, "bootstrap", "test", str(tmp_path / "snapshots"),
+        published, run_id="R_TEST",
+    )
+    manifest = store.commit_function_run(path, "R_TEST")
+    return store.db_path, manifest
 
 
 def _state(db_path, snapshot_id, occurrences):
@@ -43,14 +69,7 @@ def _state(db_path, snapshot_id, occurrences):
 
 
 def test_load_occurrences_groups_published_records(tmp_path):
-    path = publish_snapshot(
-        _function(), {"verdict": "PASS"}, "evolve", "test", str(tmp_path),
-        [_occurrence("s1_obs_001", [1])],
-    )
-    from Contracts.snapshot import validate_snapshot
-    manifest = validate_snapshot(path)
-    db = tmp_path / "knowledge.db"
-    StoryKnowledgeStore(db).record_snapshot(path)
+    db, manifest = _commit_snapshot(tmp_path, [_occurrence("s1_obs_001", [1])])
     result = sequences.load_occurrences_node(_state(db, manifest["snapshot_id"], []))
 
     assert len(result["all_occurrences"]) == 1
@@ -76,14 +95,7 @@ def test_build_story_sequences_orders_source_positions(tmp_path):
 
 
 def test_load_occurrences_rejects_story_without_records(tmp_path):
-    path = publish_snapshot(
-        _function(), {"verdict": "PASS"}, "evolve", "test", str(tmp_path),
-        [_occurrence("s1_obs_001", [1])],
-    )
-    from Contracts.snapshot import validate_snapshot
-    manifest = validate_snapshot(path)
-    db = tmp_path / "knowledge.db"
-    StoryKnowledgeStore(db).record_snapshot(path)
+    db, manifest = _commit_snapshot(tmp_path, [_occurrence("s1_obs_001", [1])])
     state = _state(db, manifest["snapshot_id"], [])
     state["story_ids"] = ["s1", "s2"]
     with pytest.raises(ValueError, match="缺少 FunctionOccurrence"):

@@ -13,9 +13,9 @@ NOVEL→novelty_pool、CONFLICT/UNCERTAIN→challenge_pool → FunctionOccurrenc
 import argparse
 import json
 import os
-import shutil
 import sys
 import time
+import uuid
 from collections import Counter
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,7 +28,8 @@ if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
 from langgraph.graph import StateGraph, START, END
 
 from Agent.state import NarrativePipelineState
-from Agent.app import story_loader_node, bank_adder_node, natural_key, get_bank
+from Agent.app import story_loader_node, natural_key, get_bank, set_bank
+from Bank.bank import ScopedObservationBank
 from Agent.Pre_pro.pre_processor import preprocessor_node
 from Agent.Observer.observer import observer_node
 from Agent.Matcher import matcher as matcher_module
@@ -78,6 +79,35 @@ def continue_evolve(state: NarrativePipelineState) -> str:
     if state.get("raw_text"):
         return "preprocessor"
     return "skip"
+
+
+def evolve_bank_adder_node(state: NarrativePipelineState) -> dict:
+    """暂存当前故事，并刷新“父 Snapshot + 当前 Run”Bank 视图。"""
+    observations = state.get("observations", [])
+    normalized = state.get("normalized_story")
+    if not normalized:
+        return {"added_obs_ids": []}
+    staged = StoryKnowledgeStore(state["knowledge_db"]).stage_story_observations(
+        state["run_id"], normalized, state.get("story_config") or {}, observations,
+        state.get("current_story_index", 0) + 1,
+    )
+    story_id = normalized["metadata"]["story_id"]
+    bank = get_bank()
+    bank.replace_story(story_id, staged)
+    # 旧版本 Observation 已不在本轮 Bank 视图中，不能继续作为 Function 证据。
+    store = get_active_store()
+    current_functions = store.load_all()
+    changed = False
+    for function in current_functions:
+        support = function.get("supporting_obs_ids", [])
+        filtered = [obs_id for obs_id in support if bank.get(obs_id) is not None]
+        if filtered != support:
+            function["supporting_obs_ids"] = filtered
+            changed = True
+    if changed:
+        store.replace_all(current_functions)
+    added_ids = [item["obs_id"] for item in staged]
+    return {"observations": staged, "added_obs_ids": added_ids}
 
 
 def collector_node(state: NarrativePipelineState) -> dict:
@@ -220,11 +250,14 @@ def _load_jsonl(path: str) -> list[dict]:
 
 def _compare_ontologies(baseline: list[dict], final: list[dict]) -> dict:
     """演化前后对比：函数增删改、supporting/confidence 分布。"""
-    base_by_name = {f.get("function_name"): f for f in baseline}
-    final_by_name = {f.get("function_name"): f for f in final}
-    kept = sorted(set(base_by_name) & set(final_by_name))
-    added = sorted(set(final_by_name) - set(base_by_name))
-    removed = sorted(set(base_by_name) - set(final_by_name))
+    def identity(function: dict) -> str:
+        return str(function.get("function_id") or f"name:{function.get('function_name')}")
+
+    base_by_id = {identity(f): f for f in baseline}
+    final_by_id = {identity(f): f for f in final}
+    kept = sorted(final_by_id[key].get("function_name") for key in set(base_by_id) & set(final_by_id))
+    added = sorted(final_by_id[key].get("function_name") for key in set(final_by_id) - set(base_by_id))
+    removed = sorted(base_by_id[key].get("function_name") for key in set(base_by_id) - set(final_by_id))
 
     def _dist(funcs, key, transform=lambda v: v):
         vals = [transform(f.get(key)) for f in funcs if f.get(key) is not None]
@@ -258,9 +291,6 @@ def evaluator_final_node(state: dict) -> dict:
     st = dict(state)
     ctx = dict(state.get("evaluation_context") or {})
     ctx["report_path"] = report_path
-    bank_snap = os.path.join(out_dir, f"bank_{ns}.jsonl")
-    if os.path.exists(bank_snap):
-        ctx["bank_file"] = bank_snap  # --final-only 历史结果优先用 Bank 快照（活体 Bank 可能被清空）
     st["evaluation_context"] = ctx
     st["force_full_review"] = True
     result = evaluator_node(st)
@@ -284,8 +314,7 @@ def evaluator_final_node(state: dict) -> dict:
 
     get_active_store().export_jsonl(os.path.join(out_dir, f"functions_{ns}.jsonl"))
     bank = get_bank()
-    if os.path.exists(bank.jsonl_path):
-        shutil.copyfile(bank.jsonl_path, os.path.join(out_dir, f"bank_{ns}.jsonl"))
+    _write_jsonl(os.path.join(out_dir, f"bank_{ns}.jsonl"), bank.get_all())
     print(f"[Evaluator_final] 判定: {final_report['verdict']}（达标 {len(final_report['passed_dimensions'])}/6）")
     c = comparison
     print(f"  comparison: 基线 {c['baseline_count']} → 最终 {c['final_count']} "
@@ -305,18 +334,16 @@ def evaluator_final_node(state: dict) -> dict:
         with open(mr_path, "w", encoding="utf-8") as f:
             json.dump(mr, f, ensure_ascii=False, indent=2)
 
-    prior_occurrences = list(state.get("occurrences", []))
-    if not prior_occurrences:
-        prior_occurrences = _load_jsonl(os.path.join(out_dir, "occurrences.jsonl"))
     observations = bank.get_all()
-    if not observations and os.path.exists(bank_snap):
-        observations = _load_jsonl(bank_snap)
-    final_occurrences = align_occurrences(final_funcs, observations, prior_occurrences)
+    final_occurrences = align_occurrences(final_funcs, observations)
     _write_jsonl(os.path.join(out_dir, "occurrences_final.jsonl"), final_occurrences)
     function_contracts = []
     if final_report.get("verdict") == "PASS":
         function_contracts = build_function_contracts(final_funcs, observations, out_dir)
 
+    run_id = state.get("run_id")
+    if not run_id:
+        raise ValueError("evaluator_final_node 需要 run_id")
     snapshot_path = publish_snapshot(
         final_funcs,
         final_report,
@@ -325,21 +352,20 @@ def evaluator_final_node(state: dict) -> dict:
         snapshots_root=state.get("snapshot_root") or DEFAULT_SNAPSHOT_ROOT,
         occurrences=final_occurrences,
         function_contracts=function_contracts,
+        parent_snapshot_id=state.get("base_snapshot_id"),
+        run_id=run_id,
     )
     if snapshot_path:
         print(f"  OntologySnapshot → {snapshot_path}")
         knowledge_db = state.get("knowledge_db")
         if knowledge_db:
-            StoryKnowledgeStore(knowledge_db).record_function_run(
-                snapshot_path,
-                state["corpus_dir"],
-                state["story_files"],
-                state.get("story_meta") or {},
-                observations,
-                state.get("base_snapshot_id"),
-            )
+            StoryKnowledgeStore(knowledge_db).commit_function_run(snapshot_path, run_id)
             print(f"  KnowledgeBase → {knowledge_db}")
     else:
+        if state.get("knowledge_db"):
+            StoryKnowledgeStore(state["knowledge_db"]).fail_function_run(
+                run_id, final_report,
+            )
         print("  最终终评未通过，不发布 OntologySnapshot")
 
     return {
@@ -357,7 +383,7 @@ def _build_evolve_graph() -> StateGraph:
     graph.add_node("story_loader", story_loader_node)
     graph.add_node("preprocessor", preprocessor_node)
     graph.add_node("observer", observer_node)
-    graph.add_node("bank_adder", bank_adder_node)
+    graph.add_node("bank_adder", evolve_bank_adder_node)
     graph.add_node("matcher", matcher_node)
     graph.add_node("critic", critic_node)
     graph.add_node("collector", collector_node)
@@ -391,7 +417,7 @@ def _build_evolve_graph() -> StateGraph:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evolve 单图：新文本 → 提取 obs → Matcher 五分类 → 直写/Pools/报告")
-    parser.add_argument("--corpus", type=str, default=None, help="新文本语料目录（含 .txt，递归收集；--final-only 不需要）")
+    parser.add_argument("--corpus", type=str, required=True, help="新文本语料目录（含 .txt，递归收集）")
     parser.add_argument("--namespace", type=str, default="evolve_work",
                         help="本次 Evolve 的可变工作命名空间")
     parser.add_argument("--base-snapshot", type=str, default=None,
@@ -402,7 +428,6 @@ def main() -> None:
     parser.add_argument("--stories", type=str, default=None, help="仅处理指定文件（逗号分隔，优先于 --limit）")
     parser.add_argument("--batch-size", type=int, default=matcher_module.MATCH_BATCH_SIZE, help="Matcher 每批 obs 数")
     parser.add_argument("--top-k", type=int, default=matcher_module.TOP_K, help="每 obs 召回候选函数数")
-    parser.add_argument("--final-only", action="store_true", help="仅终评：对已有命名空间跑 Evaluator_final（跳过提取/匹配/维护）")
     args = parser.parse_args()
 
     matcher_module.MATCH_BATCH_SIZE = args.batch_size
@@ -411,15 +436,6 @@ def main() -> None:
     set_active_store(store)
     out_dir = os.path.abspath(args.out_dir) if args.out_dir else DEFAULT_OUT_DIR
     os.makedirs(out_dir, exist_ok=True)
-    if args.final_only:
-        result = evaluator_final_node({"namespace": args.namespace, "out_dir": out_dir})
-        fr = result.get("final_report") or {}
-        print(f"=== Evaluator_final（--final-only）: {fr.get('verdict')} "
-              f"（达标 {len(fr.get('passed_dimensions', []))}/6）===")
-        return
-    if not args.corpus:
-        print("请提供 --corpus（新文本语料目录）或使用 --final-only")
-        sys.exit(1)
     base_snapshot_id = initialize_registry_from_knowledge(
         store, args.knowledge_db, args.base_snapshot,
     )
@@ -466,6 +482,12 @@ def main() -> None:
           f"语料 {len(story_files)} 篇 ===")
 
     total = len(story_files)
+    run_id = "FR_" + uuid.uuid4().hex[:16]
+    knowledge = StoryKnowledgeStore(args.knowledge_db)
+    knowledge.begin_function_run(
+        run_id, "evolve", args.namespace, base_snapshot_id, stories_dir,
+    )
+    set_bank(ScopedObservationBank(knowledge.load_run_observation_view(base_snapshot_id, run_id)))
     initial: NarrativePipelineState = {
         "messages": [],
         "raw_text": None,
@@ -487,6 +509,7 @@ def main() -> None:
         "function_contracts": [],
         "ontology_snapshot": None,
         "knowledge_db": args.knowledge_db,
+        "run_id": run_id,
         "base_snapshot_id": base_snapshot_id,
         "evaluation_context": {
             "manifest_path": os.path.abspath(manifest_path),
@@ -502,7 +525,11 @@ def main() -> None:
     }
     app = _build_evolve_graph().compile()
     start_time = time.time()
-    result = app.invoke(initial)
+    try:
+        result = app.invoke(initial)
+    except Exception as exc:
+        knowledge.fail_function_run(run_id, {"error": str(exc)})
+        raise
     elapsed = time.time() - start_time
     report = result.get("match_report") or {}
     print(f"\n=== Evolve 完成: {elapsed:.1f}s ({elapsed / max(total, 1):.1f}s/篇) ===")

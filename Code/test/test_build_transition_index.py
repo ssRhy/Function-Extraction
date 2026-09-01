@@ -9,14 +9,17 @@ import build_transition_index as bi
 
 
 def _occ(story, n, fn):
-    return {"obs_id": f"{story}_obs_{n}", "story_id": story, "status": "MATCHED", "function_name": fn}
+    return {
+        "obs_id": f"{story}_obs_{n:012x}", "story_id": story,
+        "status": "MATCHED", "function_name": fn, "observation_order": n,
+    }
 
 
 def test_transitions_collapse_and_count():
     occ = [
         _occ("s1", 1, "A"), _occ("s1", 2, "A"), _occ("s1", 3, "B"),
         _occ("s2", 1, "A"), _occ("s2", 2, "B"),
-        {"obs_id": "s3_obs_1", "story_id": "s3", "status": "UNCERTAIN", "function_name": None},
+        {"obs_id": "s3_obs_000000000001", "story_id": "s3", "status": "UNCERTAIN", "function_name": None},
     ]
     t = bi.build_transitions(occ)
     ab = next(x for x in t if x["from"] == "A" and x["to"] == "B")
@@ -24,7 +27,7 @@ def test_transitions_collapse_and_count():
     assert len(t) == 1
 
 
-def test_transitions_ordered_by_obs_index():
+def test_transitions_ordered_by_observation_order():
     occ = [_occ("s1", 2, "B"), _occ("s1", 1, "A")]
     t = bi.build_transitions(occ)
     assert t == [{"from": "A", "to": "B", "count": 1, "support_stories": 1}]

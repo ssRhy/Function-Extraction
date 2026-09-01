@@ -92,7 +92,7 @@ def test_replace_all_enriches_card_fields(tmp_path):
 
 
 def test_enrich_idempotent_and_deterministic(tmp_path):
-    """已有字段不覆盖；同一定义重复写入得到相同 function_id。"""
+    """已有字段不覆盖；同名 Function 改定义仍保留相同 function_id。"""
     db = str(tmp_path / "f.db")
     store = RegistryStore(db_path=db, namespace="ns1")
     store.replace_all([_func("F_A")])
@@ -105,3 +105,15 @@ def test_enrich_idempotent_and_deterministic(tmp_path):
     kept = store.load_all()[0]
     assert kept["function_id"] == "CUSTOM" and kept["status"] == "stable"  # 不覆盖已有字段
     assert len(kept["version_history"]) == 1  # 已有 v1 不重复追加
+
+
+def test_same_function_name_keeps_id_when_definition_changes(tmp_path):
+    store = RegistryStore(db_path=str(tmp_path / "f.db"), namespace="ns1")
+    store.replace_all([_func("F_A", definition="旧定义")])
+    old_id = store.load_all()[0]["function_id"]
+
+    store.replace_all([_func("F_A", definition="修订后的定义")])
+
+    current = store.load_all()[0]
+    assert current["function_id"] == old_id
+    assert current["version_history"][0]["action"] == "CREATE"

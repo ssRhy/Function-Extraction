@@ -58,6 +58,8 @@ def _make_occurrence(obs: dict, decision: MatchDecision, candidates: list[dict],
     """组装 FunctionOccurrence（NOVEL → function_name=OTHER，不强行分类）。"""
     return {
         "occurrence_id": obs.get("obs_id"),
+        "obs_id": obs.get("obs_id"),
+        "observation_version_id": obs.get("observation_version_id"),
         "function_name": "OTHER" if decision.label == "NOVEL" else (decision.matched_function or ""),
         "label": decision.label,
         "story_id": obs.get("story_id"),

@@ -1,7 +1,6 @@
 """Story Pattern Agent 的 occurrence 加载与故事序列节点。"""
 
 import hashlib
-import re
 from collections import Counter, defaultdict
 
 from KnowledgeBase import StoryKnowledgeStore
@@ -45,11 +44,13 @@ def load_occurrences_node(state: StoryPatternState) -> dict:
 
 
 def _sequence_key(occurrence: dict) -> tuple[int, int, str]:
+    observation_order = occurrence.get("observation_order")
+    if isinstance(observation_order, int) and observation_order > 0:
+        return observation_order, 0, occurrence["occurrence_id"]
     indices = occurrence.get("source_sentence_indices") or []
     if indices:
         return min(indices), 0, occurrence["occurrence_id"]
-    match = re.search(r"_obs_(\d+)$", occurrence["occurrence_id"])
-    return (int(match.group(1)) if match else 0), 1, occurrence["occurrence_id"]
+    return 0, 1, occurrence["occurrence_id"]
 
 
 def build_story_sequences(state: StoryPatternState) -> dict:

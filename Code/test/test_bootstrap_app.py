@@ -2,6 +2,7 @@
 
 import os
 import json
+import re
 import sys
 import tempfile
 from contextlib import contextmanager
@@ -180,6 +181,7 @@ def _patched_llm(calls):
 
     def fake_ind(messages, schema, **kw):
         calls["ind"] += 1
+        obs_ids = re.findall(r"Obs ID:\s*([^\s]+)", messages[1]["content"])
         return InducerResponse(candidate_functions=[
             CandidateFunction(
                 function_name="INFO_REVELATION",
@@ -187,7 +189,7 @@ def _patched_llm(calls):
                 realization_patterns=["发现线索"],
                 hard_negatives=["无关日常"],
                 confusable_functions=["角色隐瞒信息"],
-                supporting_obs_ids=["s1_obs_001", "s2_obs_001"],
+                supporting_obs_ids=sorted(set(obs_ids)),
             )
         ])
 
@@ -417,7 +419,7 @@ def test_export_rechecks_abstract_merged_registry(monkeypatch, tmp_path):
     assert result["ontology_snapshot"]
     from Contracts.snapshot import load_function_contracts
     manifest, functions, _evaluation = load_snapshot(result["ontology_snapshot"])
-    assert manifest["schema_version"] == 3
+    assert manifest["schema_version"] == 4
     assert [f["function_name"] for f in functions] == ["MERGED"]
     occurrences = load_occurrences(result["ontology_snapshot"])
     assert occurrences[0]["function_id"] == functions[0]["function_id"]

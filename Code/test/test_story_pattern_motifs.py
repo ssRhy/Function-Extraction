@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from story_pattern_loader import inputs, sequences, stories
+from story_pattern_loader import inputs, sequences
 
 
 def _functions(count=6):
@@ -180,7 +180,12 @@ def test_real_data_candidate_distribution():
     state.update(sequences.load_occurrences_node(state))
     for index in range(len(state["story_ids"])):
         state["current_story_index"] = index
-        state.update(stories.select_story(state))
+        story_id = state["story_ids"][index]
+        state["current_story_id"] = story_id
+        state["current_metadata"] = state["story_metadata"][story_id]
+        state["current_observations"] = state["observations_by_story"][story_id]
+        state["current_occurrences"] = []
+        state["current_structural_sequence"] = []
         state.update(sequences.build_story_sequences(state))
         state.update(sequences.annotate_repetitions(state))
     state.update(sequences.index_function_contexts(state))

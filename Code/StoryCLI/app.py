@@ -1,6 +1,7 @@
 """统一 CLI：Function 提取、模板生成和正文生成。"""
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -99,6 +100,9 @@ def _prepare_corpus(inputs, target: Path):
         entry.update({
             "txt_file": name,
             "source_path": str(source),
+            "story_id": entry.get("story_id") or "ST_" + hashlib.sha256(
+                str(source).encode("utf-8")
+            ).hexdigest()[:16],
             "category": entry.get("category") or root.name or "uncategorized",
         })
         entries.append(entry)

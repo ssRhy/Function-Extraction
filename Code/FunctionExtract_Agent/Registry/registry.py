@@ -34,6 +34,18 @@ class RegistryStore:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def _load_namespace(self, namespace: str) -> dict[str, dict]:
+        with closing(self._connect()) as conn:
+            rows = conn.execute(
+                "SELECT payload FROM functions WHERE namespace=? ORDER BY rowid",
+                (namespace,),
+            ).fetchall()
+        return {
+            item["function_name"]: item
+            for item in (json.loads(row["payload"]) for row in rows)
+            if item.get("function_name")
+        }
+
     def _init_schema(self) -> None:
         with closing(self._connect()) as conn, conn:
             conn.execute(
@@ -53,6 +65,8 @@ class RegistryStore:
             )
 
     def _insert_rows(self, namespace: str, funcs: list[dict]) -> None:
+        previous = self._load_namespace(namespace)
+        funcs = [_with_card_fields(f, previous.get(f.get("function_name"))) for f in funcs]
         with closing(self._connect()) as conn, conn:
             conn.execute("DELETE FROM functions WHERE namespace=?", (namespace,))
             conn.executemany(
@@ -72,12 +86,7 @@ class RegistryStore:
 
     def load_all(self) -> list[dict]:
         """返回当前 namespace 全部函数（保持写入序）。"""
-        with closing(self._connect()) as conn:
-            rows = conn.execute(
-                "SELECT payload FROM functions WHERE namespace=? ORDER BY rowid",
-                (self.namespace,),
-            ).fetchall()
-        return [json.loads(r["payload"]) for r in rows]
+        return list(self._load_namespace(self.namespace).values())
 
     def replace_all(self, funcs: list[dict]) -> None:
         """事务：清空当前 namespace 后全量写入；写入时幂等补齐 Card 字段。"""
@@ -142,25 +151,30 @@ def set_active_store(store: RegistryStore | None) -> None:
     _active_store = store
 
 
-def _with_card_fields(func: dict) -> dict:
+def _with_card_fields(func: dict, previous: dict | None = None) -> dict:
     """幂等补齐 Function Card 字段：function_id / status / version_history。
 
-    已有字段不覆盖；function_id 由 (function_name, definition) 确定性生成，
-    保证同一定义重跑得到相同 ID；status 缺省 provisional（文档 §6.4 初始本体非最终答案）；
+    已有字段不覆盖；同名 Function 沿用已有 ID，新 Function 的 ID 只由名称确定，
+    不因定义修订而改变；status 缺省 provisional（文档 §6.4 初始本体非最终答案）；
     version_history 缺省 v1=CREATE。
     """
     f = dict(func)
     if not f.get("function_id"):
-        digest = hashlib.sha256(
-            f"{f.get('function_name', '')}|{f.get('definition', '')}".encode("utf-8")
-        ).hexdigest()[:8]
-        f["function_id"] = f"F_{digest.upper()}"
+        if previous and previous.get("function_id"):
+            f["function_id"] = previous["function_id"]
+        else:
+            digest = hashlib.sha256(
+                str(f.get("function_name", "")).encode("utf-8")
+            ).hexdigest()[:8]
+            f["function_id"] = f"F_{digest.upper()}"
     if not f.get("status"):
-        f["status"] = "provisional"
+        f["status"] = (previous or {}).get("status", "provisional")
     if f.get("version_history") is None:
-        f["version_history"] = [{
-            "version": 1,
-            "action": "CREATE",
-            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        }]
+        f["version_history"] = list((previous or {}).get("version_history") or [])
+        if not f["version_history"]:
+            f["version_history"] = [{
+                "version": 1,
+                "action": "CREATE",
+                "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            }]
     return f

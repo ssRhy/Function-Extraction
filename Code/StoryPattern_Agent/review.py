@@ -12,7 +12,7 @@ def has_next_motif_pair(state: StoryPatternState) -> bool:
     index = state["current_motif_pair_index"]
     if index < 0:
         raise IndexError(f"current_motif_pair_index 不能为负数: {index}")
-    pairs = state["motif_review_queue"] if "motif_review_queue" in state else state.get("motif_variant_pairs", [])
+    pairs = state["motif_review_queue"]
     return index < len(pairs)
 
 
@@ -85,7 +85,7 @@ def review_motif_pairs(state: StoryPatternState) -> dict:
     if len(candidate_by_id) != len(candidates) or None in candidate_by_id:
         raise ValueError("motif_candidates 包含缺失或重复 motif_id")
 
-    pairs = state["motif_review_queue"] if "motif_review_queue" in state else state.get("motif_variant_pairs", [])
+    pairs = state["motif_review_queue"]
     pair = pairs[index]
     pair_id = str(pair.get("variant_pair_id") or "").strip()
     member_ids = pair.get("member_motif_ids")
