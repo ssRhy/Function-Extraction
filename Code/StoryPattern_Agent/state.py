@@ -11,6 +11,7 @@ class StoryPatternState(TypedDict, total=False):
     knowledge_db: str
     snapshot_id: str
     out_dir: str
+    cumulative: bool
 
     snapshot_manifest: dict | None
     functions: list[dict]
@@ -29,6 +30,7 @@ class StoryPatternState(TypedDict, total=False):
     current_observations: list[dict]
     current_occurrences: list[dict]
     all_occurrences: list[dict]
+    preloaded_occurrences: list[dict]
     occurrences_by_story: dict[str, list[dict]]
     story_sequences: dict[str, list[dict]]
     current_sequence: list[dict]

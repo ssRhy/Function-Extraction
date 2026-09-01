@@ -542,6 +542,48 @@ class StoryKnowledgeStore:
             )
         return payload
 
+    def clear_pattern_snapshot(self, snapshot_id: str) -> None:
+        """清除指定 Snapshot 的 Pattern 派生状态，以便显式重建。"""
+        self.initialize()
+        with self.connect() as conn:
+            version_ids = [
+                row["pattern_version_id"]
+                for row in conn.execute(
+                    "SELECT pattern_version_id FROM pattern_versions WHERE snapshot_id=?",
+                    (snapshot_id,),
+                )
+            ]
+            if version_ids:
+                placeholders = ",".join("?" for _ in version_ids)
+                descendant = conn.execute(
+                    f"SELECT 1 FROM pattern_versions WHERE parent_version_id IN ({placeholders}) LIMIT 1",
+                    version_ids,
+                ).fetchone()
+                if descendant:
+                    raise ValueError(f"Pattern Snapshot 存在后续版本，不能重建: {snapshot_id}")
+                used = conn.execute(
+                    f"SELECT 1 FROM pattern_usage WHERE snapshot_id=? LIMIT 1",
+                    (snapshot_id,),
+                ).fetchone()
+                if used:
+                    raise ValueError(f"Pattern Snapshot 已被使用，不能重建: {snapshot_id}")
+                outlines = conn.execute(
+                    "SELECT 1 FROM outlines WHERE snapshot_id=? LIMIT 1", (snapshot_id,)
+                ).fetchone()
+                if outlines:
+                    raise ValueError(f"Pattern Snapshot 已生成大纲，不能重建: {snapshot_id}")
+                conn.execute(
+                    f"DELETE FROM pattern_evidence WHERE pattern_version_id IN ({placeholders})",
+                    version_ids,
+                )
+            conn.execute("DELETE FROM snapshot_patterns WHERE snapshot_id=?", (snapshot_id,))
+            conn.execute("DELETE FROM pattern_versions WHERE snapshot_id=?", (snapshot_id,))
+            conn.execute("DELETE FROM patterns WHERE snapshot_id=?", (snapshot_id,))
+            conn.execute("DELETE FROM motif_clusters WHERE snapshot_id=?", (snapshot_id,))
+            conn.execute("DELETE FROM motif_evidence WHERE snapshot_id=?", (snapshot_id,))
+            conn.execute("DELETE FROM pattern_story_sequences WHERE snapshot_id=?", (snapshot_id,))
+            conn.execute("DELETE FROM pattern_runs WHERE snapshot_id=?", (snapshot_id,))
+
     def fail_pattern_run(self, snapshot_id: str, error: str) -> None:
         with self.connect() as conn:
             row = conn.execute(
@@ -1053,6 +1095,89 @@ class StoryKnowledgeStore:
             "contracts": self.load_contracts(snapshot_id),
             "observations": observations,
             "story_metadata": metadata,
+            "occurrences": occurrences,
+        }
+
+    def load_story_pattern_inputs_cumulative(self, snapshot_id: str) -> dict:
+        """读取 Snapshot 及其父链的累计 Pattern 输入。
+
+        Evolve 的 Function Snapshot 可能只包含本批故事；Pattern 仍需从同一
+        DB 继承父 Snapshot 中未变化的故事、Function 和证据。
+        """
+        current = self.load_story_pattern_inputs(snapshot_id)
+        parent_snapshot_id = current["manifest"].get("parent_snapshot_id")
+        if not parent_snapshot_id:
+            with self.connect() as conn:
+                row = conn.execute(
+                    "SELECT parent_snapshot_id FROM snapshots WHERE snapshot_id=?",
+                    (snapshot_id,),
+                ).fetchone()
+            parent_snapshot_id = row["parent_snapshot_id"] if row else None
+        if not parent_snapshot_id:
+            return current
+
+        parent = self.load_story_pattern_inputs_cumulative(parent_snapshot_id)
+        current_story_ids = {item["story_id"] for item in current["story_metadata"]}
+
+        parent_function_ids = {item["function_id"] for item in parent["functions"]}
+        functions_by_id = {
+            item["function_id"]: item for item in parent["functions"]
+        }
+        functions_by_id.update({
+            item["function_id"]: item for item in current["functions"]
+        })
+        function_order = [item["function_id"] for item in parent["functions"]]
+        function_order.extend(
+            item["function_id"] for item in current["functions"]
+            if item["function_id"] not in parent_function_ids
+        )
+        occurrences = [
+            dict(item, snapshot_id=snapshot_id)
+            for item in parent["occurrences"]
+            if item["story_id"] not in current_story_ids
+        ] + [dict(item, snapshot_id=snapshot_id) for item in current["occurrences"]]
+        used_function_ids = {
+            item["function_id"] for item in occurrences if item.get("function_id")
+        }
+        functions = [
+            functions_by_id[item] for item in function_order
+            if item in used_function_ids
+        ]
+
+        contracts_by_id = {
+            item["function_id"]: item for item in parent["contracts"]
+        }
+        contracts_by_id.update({
+            item["function_id"]: item for item in current["contracts"]
+        })
+        contracts = [
+            contracts_by_id[item] for item in function_order
+            if item in used_function_ids and item in contracts_by_id
+        ]
+
+        metadata_by_id = {}
+        metadata_order = []
+        for item in parent["story_metadata"] + current["story_metadata"]:
+            story_id = item["story_id"]
+            if story_id not in metadata_by_id:
+                metadata_order.append(story_id)
+            metadata_by_id[story_id] = item
+        story_metadata = [metadata_by_id[item] for item in metadata_order]
+
+        observations = [
+            item for item in parent["observations"]
+            if item["story_id"] not in current_story_ids
+        ] + list(current["observations"])
+        manifest = dict(current["manifest"])
+        manifest["parent_snapshot_id"] = parent_snapshot_id
+        manifest["function_count"] = len(functions)
+        manifest["function_contract_count"] = len(contracts)
+        return {
+            "manifest": manifest,
+            "functions": functions,
+            "contracts": contracts,
+            "observations": observations,
+            "story_metadata": story_metadata,
             "occurrences": occurrences,
         }
 

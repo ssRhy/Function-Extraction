@@ -83,8 +83,11 @@ def _group_observations(
 
 def load_inputs(state: StoryPatternState) -> dict:
     """从统一知识库读取冻结本体、Observation 与 Story 元数据。"""
-    source = StoryKnowledgeStore(state["knowledge_db"]).load_story_pattern_inputs(
-        state["snapshot_id"]
+    store = StoryKnowledgeStore(state["knowledge_db"])
+    source = (
+        store.load_story_pattern_inputs_cumulative(state["snapshot_id"])
+        if state.get("cumulative")
+        else store.load_story_pattern_inputs(state["snapshot_id"])
     )
     manifest = source["manifest"]
     functions = source["functions"]
@@ -108,6 +111,7 @@ def load_inputs(state: StoryPatternState) -> dict:
         "function_contract_by_id": function_contract_by_id,
         "story_metadata": story_metadata,
         "observations_by_story": observations_by_story,
+        "preloaded_occurrences": source["occurrences"],
         "story_ids": story_ids,
         "current_story_index": 0,
         "current_story_id": None,

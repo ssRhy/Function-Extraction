@@ -773,3 +773,29 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - Snapshot 是全量冻结视图，不等于 Pattern 每轮全量计算。子 Snapshot 与父 Snapshot 的 occurrence 签名差决定真正 delta；Function 库变化导致旧故事重新对齐时，该故事应标为 changed 并局部重建。
 - Cluster 是 Snapshot 间识别结构变化的中间实体，稳定 `pattern_id` 才代表逻辑 Pattern。证据增加、结构扩展、合并、分裂和退役通过父子 Cluster overlap 与 anchor motif 决定版本动作。
 - 生成的大纲和正文不是 Pattern 证据。Pattern 只从真实故事的 Function sequence 学习；只有首次发布的 `new_pattern_ids` 才进入后续创作候选。
+
+## 109. Motif 提取必须使用累计故事视图（2026-09-01）
+
+- 新批次没有产生长度 3–6 的连续 Function，不能解释为 Motif 提取失败；只要父故事序列仍在累计视图中，旧 Motif 应继续保留并参与 Cluster 演化。
+- Pattern 的累计边界是父子 Snapshot 的故事序列集合：子 Snapshot 中出现的故事覆盖父版本，未出现的父故事继承；Motif 只对新增或签名变化故事重算。
+- Function 名称或 JSON 文件的拼接不足以恢复 Motif，必须在 DB 中保留有序 FunctionOccurrence、稳定 Function ID 和故事证据，才能避免旧 Pattern 被误判退役。
+
+## 110. 首个累计输入运行需要建立完整 Pattern 基线（2026-09-01）
+
+- 累计输入修复后的首个真实批次从 DB 恢复 35 个故事序列，并生成 26 个 Motif 候选，证明 Motif 不再只看当前 5 篇文本。
+- 因直接父 Pattern Snapshot 是修复前仅保存 5 条序列的结果，本次 Pattern delta 显示 30 条 new、5 条 unchanged；这属于一次性补齐基线，下一批才会表现为纯新增 5 条与其余故事继承。
+
+## 112. 历史 Pattern Snapshot 必须显式重建（2026-09-01）
+
+- 代码修复不会自动改写已经成功提交的 Pattern run；若父 Snapshot 由旧流程产生了不完整序列，必须显式重建该 Snapshot，再重建其子 Snapshot。
+- 重建后 batch07 的 delta 恢复为 5 条新增、30 条继承，证明历史文章已进入父 Pattern Snapshot；当前 Pattern 被 blocked 的原因来自新增 Motif 的真实顺序冲突。
+
+## 113. 正式库后续批次验证纯增量（2026-09-01）
+
+- 修复父 Snapshot 后，正式库下一批 Pattern delta 为 5 条新增、35 条继承、0 条删除，累计故事达到 40 篇。
+- 新增文本与历史 Motif 共同形成 2 个 published Pattern，说明累计输入不仅能恢复历史证据，也能在新批次满足发布条件时产生新 Pattern。
+
+## 111. Pattern 表与文章证据是不同实体（2026-09-01）
+
+- `patterns` 只保存达到发布条件的逻辑 Pattern，不是文章索引；新文章应在 `stories`、`run_stories`、`function_occurrences`、`pattern_story_sequences` 和 `motif_evidence` 中检查。
+- 因此本批没有 published Pattern 时，`patterns` 不新增行并不表示 5 篇文章未入库。

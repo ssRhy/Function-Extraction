@@ -110,6 +110,35 @@ def test_bootstrap_then_evolve_inherits_sequences_and_extends_evidence(tmp_path,
     assert inherited == 2
 
 
+def test_delta_evolve_snapshot_merges_parent_story_inputs(tmp_path, monkeypatch):
+    """子 Function Snapshot 只含本批故事时，Pattern 仍从 DB 继承父故事与 Motif。"""
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    monkeypatch.setattr(app, "retrieve_variant_pairs", _no_pairs)
+    monkeypatch.setattr(app, "summarize_story_patterns", _summary)
+    bootstrap = _record_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
+    first = app.run_pattern_evolve(bootstrap, store.db_path)
+    delta = _record_snapshot(store, tmp_path, ["story_c"], "evolve", bootstrap)
+    second = app.run_pattern_evolve(delta, store.db_path)
+
+    assert second["story_delta"] == {
+        "new": ["story_c"], "changed": [],
+        "unchanged": ["story_a", "story_b"], "removed": [],
+    }
+    assert second["new_pattern_ids"] == []
+    assert second["updated_pattern_ids"] == first["new_pattern_ids"]
+    with store.connect() as conn:
+        inherited = conn.execute(
+            """SELECT COUNT(*) FROM pattern_story_sequences
+               WHERE snapshot_id=? AND inherited_from_snapshot_id=?""",
+            (delta, bootstrap),
+        ).fetchone()[0]
+        motif_rows = conn.execute(
+            "SELECT COUNT(*) FROM motif_evidence WHERE snapshot_id=?", (delta,)
+        ).fetchone()[0]
+    assert inherited == 2
+    assert motif_rows > 0
+
+
 def test_same_snapshot_is_idempotent(tmp_path, monkeypatch):
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     monkeypatch.setattr(app, "retrieve_variant_pairs", _no_pairs)
@@ -120,6 +149,19 @@ def test_same_snapshot_is_idempotent(tmp_path, monkeypatch):
     second = app.run_pattern_evolve(snapshot, store.db_path)
     assert second == first
     assert store.status()["counts"] == before
+
+
+def test_rebuild_explicitly_replaces_incomplete_pattern_snapshot(tmp_path, monkeypatch):
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    monkeypatch.setattr(app, "retrieve_variant_pairs", _no_pairs)
+    monkeypatch.setattr(app, "summarize_story_patterns", _summary)
+    snapshot = _record_snapshot(store, tmp_path, ["story_a", "story_b"], "bootstrap")
+    first = app.run_pattern_evolve(snapshot, store.db_path)
+    rebuilt = app.run_pattern_evolve(snapshot, store.db_path, rebuild=True)
+
+    assert rebuilt["run_id"] == first["run_id"]
+    assert rebuilt["counts"] == first["counts"]
+    assert store.load_pattern_run(snapshot)["status"] == "SUCCESS"
 
 
 def test_node_failure_marks_run_failed_without_partial_pattern_data(tmp_path, monkeypatch):

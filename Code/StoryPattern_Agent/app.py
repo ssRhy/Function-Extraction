@@ -41,7 +41,7 @@ def _occurrence_signature(items: list[dict]) -> str:
 def load_pattern_delta(state: StoryPatternState) -> dict:
     """固定父子 Snapshot，并只从 DB 计算故事级变化。"""
     store = StoryKnowledgeStore(state["knowledge_db"])
-    source = load_inputs(state)
+    source = load_inputs({**state, "cumulative": True})
     loaded = {**state, **source}
     occurrences = load_occurrences_node(loaded)
     loaded.update(occurrences)
@@ -671,11 +671,15 @@ def _build_graph() -> StateGraph:
     return graph
 
 
-def run_pattern_evolve(snapshot_id: str, knowledge_db=DEFAULT_DB_PATH) -> dict:
+def run_pattern_evolve(
+    snapshot_id: str, knowledge_db=DEFAULT_DB_PATH, rebuild: bool = False,
+) -> dict:
     store = StoryKnowledgeStore(knowledge_db)
     existing = store.load_pattern_run(snapshot_id)
-    if existing and existing["status"] == "SUCCESS":
+    if existing and existing["status"] == "SUCCESS" and not rebuild:
         return existing["payload"]
+    if rebuild:
+        store.clear_pattern_snapshot(snapshot_id)
     manifest = store.load_snapshot_manifest(snapshot_id)
     with store.connect() as conn:
         row = conn.execute(
@@ -699,9 +703,10 @@ def main(argv=None) -> int:
     parser = argparse.ArgumentParser(prog="StoryPattern_Agent")
     parser.add_argument("--snapshot", required=True)
     parser.add_argument("--knowledge-db", default=str(DEFAULT_DB_PATH))
+    parser.add_argument("--rebuild", action="store_true")
     args = parser.parse_args(argv)
     try:
-        result = run_pattern_evolve(args.snapshot, args.knowledge_db)
+        result = run_pattern_evolve(args.snapshot, args.knowledge_db, args.rebuild)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return 0
     except (OSError, RuntimeError, ValueError) as exc:

@@ -1120,3 +1120,33 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 精确 Motif 不调用 LLM；HIGH 及会影响 Cluster 的 EXPANDED pair 才审查。相同输入签名从 DB 继承，LLM 失败整次 Pattern run 失败，无 replay、Catalog 或目录 fallback。
 - 清空旧 knowledge/registry/checkpoint DB 后，以固定 namespace `pattern_evolve_cli` 连续运行 5 批、每批 5 个领域各 1 篇。第五批 Snapshot `pattern_evolve_cli_20260831T191956899727Z_cde003907c34` 首次发布 2 个 Pattern；当批为 25 sequences、17 motifs、25 reviews、14 clusters、2 published。
 - 同一 Snapshot 重跑前后 Pattern 相关 9 张表行数完全一致。离线全量回归为 317 passed、1 个依赖已删除历史 Snapshot 的数据分布测试 skipped；新增测试覆盖 evidence extend、幂等、失败原子性、merge、split、retire 和无 fallback。
+
+## 本轮（2026-09-01）：Pattern 输入视图累计修正
+
+- `StoryKnowledgeStore.load_story_pattern_inputs_cumulative` 从同一 SQLite 沿父 Snapshot 链合并故事、Observation、Function、Contract 和 FunctionOccurrence；当前子 Snapshot 出现的故事覆盖父版本，其余故事继承。
+- `StoryPattern_Agent.load_pattern_delta` 使用累计输入，仍按 occurrence signature 只重算新增或变化故事；未变化故事的 sequence 与 Motif evidence 写入子 Snapshot。
+- 对只含本批故事的 Delta Function Snapshot，Pattern 不再把父故事误判为 removed；旧 Motif、Cluster 和 Pattern 可以继续累计演化。
+- 新增 Delta 子 Snapshot 继承 Motif 的回归测试；Pattern 增量、输入和序列测试 `46 passed`，StoryPattern/KnowledgeBase 回归 `130 passed, 1 skipped`。
+
+## 本轮（2026-09-01）：第七批 Function → Pattern 自动运行
+
+- 在同一 SQLite 与 namespace `pattern_evolve_cli` 下，以父 Snapshot `pattern_evolve_cli_20260901T014733927945Z_a2dce8fddc86` 运行 5 个新领域文本，CLI 自动完成 Function Evolve 和 Pattern Evolve。
+- Function Evolve 发布 Snapshot `pattern_evolve_cli_20260901T022145596125Z_b98c12a490a2`：5 篇、43 个 Observation，最终 Function 库 5 个，终评 PASS 5/6。
+- Pattern 使用累计 DB 输入得到 35 条故事序列、26 个 Motif 候选和 27 条 Motif 证据；当前批 pair 复核 60 条（SAME_PATTERN 10、RELATED 46、DIFFERENT 4）。
+- 形成 16 个 Cluster：13 个 candidate、3 个 blocked；没有满足发布条件的 Pattern。
+- 该批是修复累计输入后的首个运行，补齐了修复前父 Pattern Snapshot 缺失的 30 条历史序列；从下一批开始，未变化故事可按正常增量继承。
+
+## 本轮（2026-09-01）：历史 Pattern Snapshot 重建
+
+- 新增显式 `StoryPattern_Agent --rebuild`，仅清除并重建指定 Snapshot 的 Pattern 派生表，普通运行仍保持幂等；存在后续版本、已生成大纲或已使用 Pattern 时拒绝重建。
+- 重建父 Snapshot `pattern_evolve_cli_20260901T014733927945Z_a2dce8fddc86` 后，恢复 30 条序列、17 个 Motif、14 个 Cluster，并发布既有 `PAT_e8b3f6172ff11da8` 的结构扩展版本。
+- 重建子 Snapshot `pattern_evolve_cli_20260901T022145596125Z_b98c12a490a2` 后，Pattern delta 正确为 `new=5、unchanged=30、removed=0`，累计序列 35 条。
+- 子批新增 Motif 与既有 Pattern Cluster 产生顺序冲突，因此该 Pattern 在当前 Snapshot 为 `blocked`；这是关系审查结果，不是历史故事缺失。全量回归 `319 passed, 1 skipped`。
+
+## 本轮（2026-09-01）：正式库第八批 Function → Pattern
+
+- 在正式 SQLite `Code/data/knowledge/story_knowledge.db`、namespace `pattern_evolve_cli` 下，以 Snapshot `pattern_evolve_cli_20260901T022145596125Z_b98c12a490a2` 为父，运行 5 个未使用文本。
+- Function Evolve 发布 Snapshot `pattern_evolve_cli_20260901T025343347463Z_e245f7e8650a`：5 篇、47 个 Observation；当前 Function Snapshot 保留 2 个 Function。
+- Pattern 从父链累计读取 40 个故事、10 个 Function 和 327 个 Observation；delta 正确为 `new=5、unchanged=35、removed=0`，写入 40 条序列。
+- 本批得到 27 个 Motif 候选、28 条证据和 46 条 pair 复核（SAME_PATTERN 6、RELATED 33、DIFFERENT 7），形成 21 个 Cluster（published 2、candidate 18、blocked 1）。
+- 发布新 Pattern `PAT_6f330f5220d72fa0`、`PAT_c59aca22a920024d`；正式 Pattern run 状态为 `SUCCESS`。

@@ -10,9 +10,11 @@ from .state import StoryPatternState
 
 def load_occurrences_node(state: StoryPatternState) -> dict:
     """读取同一 Snapshot 内发布的 FunctionOccurrence，并按故事分组。"""
-    occurrences = StoryKnowledgeStore(state["knowledge_db"]).load_occurrences(
-        state["snapshot_id"]
-    )
+    occurrences = state.get("preloaded_occurrences")
+    if occurrences is None:
+        occurrences = StoryKnowledgeStore(state["knowledge_db"]).load_occurrences(
+            state["snapshot_id"]
+        )
     story_ids = set(state.get("story_ids", []))
     grouped: dict[str, list[dict]] = {story_id: [] for story_id in story_ids}
     seen = set()
