@@ -1,0 +1,1 @@
+"""Story Pattern Agent prompts."""

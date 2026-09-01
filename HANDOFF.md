@@ -2,7 +2,11 @@
 
 ## `HANDOFF.md`｜跨天任务必备
 
-长会话收尾：先写 `HANDOFF.md`，只记任务进度，不堆经验。
+长会话收尾：先写 `HANDOFF.md`，只记任务进度，不堆经验。谨慎记录过程信息
+- 分析、判断、验证方式和方案取舍可以在聊天回复中说明，但不要自动写入最终交付物。
+- 代码注释或说明文档只解释当前结果中确实不易理解的约束、规则、风险或兼容逻辑。
+- 不记录 agent 自己引入又撤回的中间方案，也不解释为什么没有实现一个从未被用户要求的内容。
+- 不要为了证明自己遵守了用户要求，而在交付物中重复用户禁止或删除的内容。
 
 ### 什么时候用？
 
@@ -324,11 +328,795 @@ evise store 写回前导出 .pre_revise.<ns>.jsonl；新增 	est/import_registry
 ## 下一步
 
 
+## 本轮（2026-08-20）：OntologySnapshot 发布契约
+- 新增 `Agent/snapshot.py`：`publish_snapshot` / `load_snapshot` / `validate_snapshot`，快照固定为 `manifest.json + functions.jsonl + evaluation.json`，校验 schema、PASS verdict、Function ID/名称唯一性、数量与 SHA-256。
+- Bootstrap/Evolve 保持两张独立 LangGraph；两者最终终评 PASS 后自动发布到 `data/ontology_snapshots/<snapshot_id>/`，FAIL 仅保留原工作产物。相同内容重复发布幂等，快照目录禁止覆盖。
+- Bootstrap 修正发布边界：逐函数舍弃 → `abstract_merge` → 导出工作产物 → 对最终 Registry 再做全量终评 → PASS 发布，保证评估对象与快照内容一致。
+- v1 不包含 Observation Bank，`parent_snapshot_id=null`；Story Pattern Agent 后续只通过 loader 消费冻结本体。
+- 验证：Snapshot + Bootstrap/Evolve/Registry 定向测试 30 项通过；全量离线回归 119 项通过。
+
+## 本轮（2026-08-20）：Story Pattern Agent v1 - load_inputs + select_story
+- 新增 `Agent/StoryPattern/state.py`：独立 `StoryPatternState`，消息字段使用 LangGraph `add_messages` reducer，与 Function Knowledge Agent State 隔离。
+- 新增 `Agent/StoryPattern/inputs.py`：`load_inputs` 只读加载 OntologySnapshot、Observation JSONL、语料 manifest；建立 `function_by_name/function_by_id`、`observations_by_story/story_metadata/story_ids`，并初始化后续分析字段。
+- 严格校验：Observation 必要字段、全局唯一 `obs_id`、manifest 归属、`{story_id}_obs_NNN` 格式与每篇连续编号；错误直接 `ValueError`，不静默去重或 fallback。
+- 新增 `Agent/StoryPattern/stories.py`：`select_story` 按 `current_story_index` 选择已分组故事，设置 metadata/observations 并清空临时 occurrences；`has_next_story` 提供后续 Graph 条件路由判断。选择节点不读文件、不排序、不推进下标。
+- 复用已有 Observation，不重新读取原文、不运行 Observer，不调用 LLM，不读写 Registry 或 Observation Bank。
+- 验证：Story Pattern 两节点定向测试 25 项；真实 `evolve_official` 数据加载为 23 Functions / 60 Stories / 502 Observations；全量离线回归 144 项通过。
+
+## 本轮（2026-08-20）：FunctionOccurrence 源头发布契约
+- 修正重复映射设计：Story Pattern Agent 不再计划重跑 Matcher；Bootstrap/Evolve 在最终 Function 确定后，以 `supporting_obs_ids` 为权威，将 Bank Observation 与既有 Matcher/Critic 审计结果对齐。
+- 新增 `Agent/occurrence.py`：同一 Observation 唯一绑定最终 Function 时为 `MATCHED`；原判 `NOVEL` 且无最终支持时为 `OTHER`；无绑定或多重绑定时为 `UNCERTAIN`。一个 Function 可产生任意多个 occurrence，并参与多个后续模板。
+- OntologySnapshot 升级为 schema v2，新增不可变 `occurrences.jsonl` 及数量/SHA-256；每条记录带 `snapshot_id`、`function_id`，并校验唯一性和 Function 引用。v1 Functions 仍可读取，但不提供 occurrence loader。
+- Bootstrap/Evolve 始终保留 `occurrences_final.jsonl` 工作产物，仅终评 PASS 时与 Functions 原子发布；FAIL 不发布 Snapshot。
+- 恢复 `Agent.StoryPattern` 标准包入口，保持独立 `StoryPatternState`，不并入 Function Knowledge Agent。
+- 验证：相关定向测试 28 项通过；全量离线回归 149 项通过。
+
+## 本轮（2026-08-20）：Agent 目录边界整理
+- `Code/Contracts/` 成为跨 Agent 契约目录，承载 `snapshot.py` 与 `occurrence.py`。
+- `Code/FunctionExtract-Agent/` 与 `Code/StoryPattern-Agent/` 保持平级；Story Pattern 不再作为 FunctionExtract 的子目录。
+- 删除重复的 `FunctionExtract-Agent/StoryPattern/` 与旧兼容 `Agent/StoryPattern/`；Story Pattern 只保留一份实现。
+- FunctionExtract 的发布入口改从 `Contracts.snapshot` / `Contracts.occurrence` 导入；Story Pattern 的输入节点同样只依赖 Contracts。
+- 验证：Contracts、Snapshot、Occurrence、Story Pattern 定向测试 39 项通过。
+
+## 本轮（2026-08-20）：Story Pattern 最小序列输入
+- 新增 `StoryPattern_Agent/sequences.py`：`load_occurrences_node` 只读加载同一 Snapshot 的 `occurrences.jsonl`，按 `story_id` 分组并校验快照 ID、故事归属、唯一性和每个故事非空。
+- 新增 `build_story_sequences`：优先按 `source_sentence_indices`，缺失时按 `obs_id` 编号稳定排序；保留 `MATCHED`、`OTHER`、`UNCERTAIN`，只生成序列节点，不调用 LLM、不修改源数据。
+- State 新增 `occurrences_by_story`、`story_sequences`、`current_sequence`。
+- 验证：Story Pattern + Contracts 定向测试 43 项通过。全量回归暂受目录重排影响：旧 FunctionExtract 测试仍导入未迁移的 `Agent.*`、`Bank.*`、`Embedding.*` 路径，无法收集，未将该无关迁移问题混入本节点修改。
+
+## 本轮补充（2026-08-20）：修复目录迁移导入路径
+- 新增唯一兼容入口 `Code/Agent/__init__.py`：将旧 `Agent.*` 导入映射到 `Code/FunctionExtract_Agent`，并将 FunctionExtract 源码根加入模块搜索路径；不复制任何业务模块。
+- 兼容了历史顶层 `Bank`、`Embedding`、`Prompt`、`Retrieval` 导入，保持 `FunctionExtract_Agent` 为唯一实现位置。
+- 验证：全量离线回归 `153 passed in 54.13s`。
+
+## 本轮（2026-08-20）：Story Pattern repetition 标注
+- 新增纯规则节点 `annotate_repetitions`：只将连续、`MATCHED`、`function_id` 相同的 occurrence 组成 repetition run；非连续重复、`UNCERTAIN`、`OTHER` 均不合并。
+- 原始 `story_sequences/current_sequence` 保持不变；新增 `structural_sequences/current_structural_sequence`。每个 run 保存 `repeat_count`、`occurrence_ids`、`obs_ids` 和 `raw_orders`，可完整回溯。
+- 真实 60 篇数据验证：502 个原始节点 → 435 个结构 run，标注 67 个连续重复，涉及 36 篇，最大连续次数 5；run 中 occurrence 引用合计仍为 502。
+- 验证：Story Pattern + Contracts 定向测试 50 项通过；全量离线回归 `160 passed in 43.51s`。
+
+## 本轮（2026-08-20）：Function 上下文索引
+- 新增故事循环后的纯规则聚合节点 `index_function_contexts`：将全部 `structural_sequences` 反向索引为 `function_id → contexts`，Function 成为后续模板查询入口，故事序列继续提供顺序证据。
+- `UNCERTAIN/OTHER` 只切断 MATCHED 片段，不进入索引；每个 context 保存故事/题材、结构位置、锚点位置、重复次数、occurrence 证据及完整 MATCHED 片段。
+- 同 Function 在同故事非连续出现时保留多个 context；Snapshot 中无出现的 Function 保留空列表；严格拒绝缺失故事、未知 Function 和 ID/名称不一致。
+- 真实数据验证：60 篇、23 Functions、317 contexts、109 MATCHED 片段，其中 50 个长度 ≥3；Function context 数 3–33，跨故事支持数 3–23。
+- 验证：Story Pattern + Contracts 定向测试 63 项通过；全量离线回归 `173 passed in 46.24s`。
+
+## 本轮（2026-08-20）：精确 motif 候选提取
+- 新增纯规则 LangGraph 节点 `extract_motif_candidates`：仅扫描 `anchor_index == 0` 的 MATCHED 片段，提取长度 3–6 的精确连续 Function 窗口，按有序 Function ID 聚合。
+- motif 身份不包含 repetition；重复次数作为 `repeat_variants` 保留。证据保留故事、题材、结构位置和全部 occurrence，候选 ID 由 Snapshot ID + Function 序列确定性生成。
+- 按不同故事支持分为 `REPEATED` 与 `SINGLE_STORY`；同故事重复只增加 `evidence_count`，不虚增跨故事支持。
+- 真实数据验证：109 个唯一 MATCHED 片段 → 321 个候选；长度分布 3=138、4=91、5=58、6=34；`REPEATED=1`、`SINGLE_STORY=320`。
+- 验证：Story Pattern 定向测试 64 项通过（其中 motif 15 项）；全量离线回归 `188 passed in 44.23s`。
+
+## 本轮（2026-08-20）：motif 语义变体召回
+- 新增并修订 LangGraph 节点 `retrieve_motif_variants`：复用 FunctionExtract 的 `Embedder`，逐位置编码 `Function 名称 + definition`，使用保序动态对齐召回全部 motif 候选间的语义变体。
+- 全部 321 个候选参与，包括 `REPEATED`；允许任意 3–6 长度组合和多个有序缺省步。每个候选保留相似度不低于 0.75 的 Top-5 近邻，再合并为确定性、去重的无向边。
+- 相似度按 `HIGH >= 0.85`、`EXPANDED >= 0.75` 分层；仍只保留故事并集至少为 2 的配对。输出保留长度差、共享/合并故事、步骤对齐及 Top-K 选择来源，但不聚类、不发布套路。
+- 参数验收：真实数据得到 1,126 条边，覆盖 317/321 个候选；`HIGH=156`、`EXPANDED=970`，长度差 0/1/2/3 分别为 140/454/363/169。0.75 保持高召回；0.85 单独作为高置信分层，不截断扩展召回。
+- 验证：变体 + motif + sequence 定向测试 `54 passed`；全量离线回归 `203 passed in 45.06s`。
+
+## 本轮（2026-08-20）：motif 配对 LLM 审查
+- 新增 LangGraph 单步节点 `review_motif_pairs` 与路由函数 `has_next_motif_pair`；每次只审查 `current_motif_pair_index` 指向的一对，成功后追加 `motif_pair_reviews` 并将索引加 1，适合后续接 checkpoint 循环，不在一次调用中吞掉 1,126 对。
+- 复用 `Agent.llm.chat_structured` 与 Pydantic schema，严格输出 `SAME_PATTERN / RELATED / DIFFERENT`、置信度、核心对齐、可选步骤、顺序冲突和理由；pair ID 由节点从 State 绑定，避免 LLM 誊写主键失败。
+- 审查输入包含两侧 Function 名称/定义、Embedding 对齐，以及由 motif evidence → FunctionOccurrence → Observation 还原的 `event/before_state/after_state/narrative_effect/surface_form`，不重新读取原文。
+- State 新增 `current_motif_pair_index` 与 `motif_pair_reviews`；重复审查、未知 candidate/occurrence/Observation、故事归属不一致均在 LLM 调用前拒绝。
+- 真实数据链验证：1,126 对中第一条 HIGH pair 成功构造左 4 Functions/5 Observations、右 3 Functions/3 Observations 的审查输入并推进索引 0→1；使用 mock LLM 验证契约，未调用线上 API。
+- 验证：review + variants + motif + sequence 定向测试 `69 passed`；全量离线回归 `218 passed in 56.53s`。
+- 真实 LLM 抽样：使用 `deepseek-v4-flash` 审查 10 对（HIGH 最高 5 对 + EXPANDED 分位抽样 5 对），10/10 结构化成功；`SAME_PATTERN=1`、`RELATED=8`、`DIFFERENT=1`。调用消耗 prompt 24,048 / completion 2,701 / 总计 26,749 tokens，LLM 墙钟 25.9s。
+- 首次真实调用因 prompt 未显式列出完整 JSON 字段，连续 3 次结构校验失败（额外 7,006 tokens）；补充精确 JSON 模板后 10/10 成功。最终全量回归 `218 passed in 45.73s`。
+- Review Prompt 已迁入 `StoryPattern_Agent/Prompt/Review_prompt.py` 并针对真实测评偏差修订：明确 pair reviewer 只判结构同构，禁止用故事数、样本数、支持度或发布充分性影响 verdict；增加长度至少 3 的核心链、可选步骤、抽象层级与方向冲突规则。
+- 同一组最高分 5 条 HIGH 真实复测：修订前 `SAME_PATTERN=1 / RELATED=4`，修订后 `SAME_PATTERN=4 / RELATED=1`，5/5 结构化成功；消耗 14,674 tokens，LLM 墙钟 11.5s。全量回归 `219 passed in 46.56s`。
+- 真实 HIGH 全量审查完成：`deepseek-v4-flash` 审查 156/156 条，结果写入 `Code/data/story_pattern_official/high_pair_reviews_20260820.jsonl` 与 summary。最终 `SAME_PATTERN=31`、`RELATED=109`、`DIFFERENT=16`，无失败记录；首轮 157 次调用使用 443,165 tokens、LLM 墙钟 399.2s。
+- 批量中 1 条因 LLM 反复誊写错误 `variant_pair_id` 失败；修订 Review schema 后由节点从 State 绑定主键，LLM 只返回语义 verdict。该条真实重试成功为 `RELATED (0.8)`，额外使用 3,029 tokens；产物复核为 156 条唯一成功记录，全量回归 `219 passed in 53.66s`。
+
+## 当前交接（2026-08-20）：Story Pattern Agent
+
+### 已完成
+- FunctionExtract Agent 已发布冻结 `OntologySnapshot v2`；Story Pattern Agent 只读消费同一 Snapshot 的 Functions 和 FunctionOccurrence，不重跑 Matcher/Observer。
+- 已完成的节点链：`load_inputs` → `load_occurrences_node` → 故事循环（`select_story` → `build_story_sequences` → `annotate_repetitions`）→ `index_function_contexts` → `extract_motif_candidates` → `retrieve_motif_variants` → `review_motif_pairs`。
+- 真实数据基线：23 Functions、60 篇故事、502 个 occurrence；435 个 structural runs；109 个 MATCHED 片段；321 个精确 motif candidates。
+- 语义召回：1,126 个跨故事候选边，其中 HIGH 156、EXPANDED 970。HIGH 已完成真实 LLM 审查，156 条结果完整落盘：`SAME_PATTERN=31`、`RELATED=109`、`DIFFERENT=16`。
+- 已落盘真实审查结果：`Code/data/story_pattern_official/high_pair_reviews_20260820.jsonl`；汇总：`Code/data/story_pattern_official/high_pair_reviews_20260820_summary.json`。这两份文件是下一节点的唯一输入，不应重新调用 HIGH 审查。
+- Review Prompt 位于 `Code/StoryPattern_Agent/Prompt/Review_prompt.py`。职责边界已固定：LLM 只判断 pair 是否结构同构；跨故事支持度、cluster 稳定性和发布资格由规则节点计算。
+- 最近验证：全量离线回归 `219 passed in 53.66s`。
+
+### 下一步
+- 进入 Phase 2 生成知识补全：优先实现 `StoryProfile`、Function 状态变化字段和 `InstanceCard`。
+- `EXPANDED=970` 暂不批量调用 LLM；它们保留为第二阶段候选池，等待已发布 Pattern 结果和预算决定是否审查。
+
+## 本轮（2026-08-20）：Story Pattern summary
+- 新增 `summarize_story_patterns`：只对 `needs_review=false` 的 cluster 调用 LLM；`needs_review` cluster 不调用，保留在 `skipped_clusters`。
+- LLM 只生成模式名称、抽象定义、核心 Function 名称、可选步骤、适用条件和反例/限制；节点自行将核心 Function 名称绑定回冻结 Snapshot 的 Function ID/definition，并绑定 cluster 的故事、题材和 occurrence evidence。
+- 真实执行产物：`Code/data/story_pattern_official/pattern_summaries_20260820.json`，Snapshot=`evolve_official_20260820T063134335355Z_e2db2e7a06bc`；4 个 clean cluster 生成 4 个候选 summary，8 个 cluster 跳过。
+- 4 个候选 summary 的不同故事支持数均为 2；核心链均为至少 3 个 Snapshot Function；产物状态为 `SUCCESS`。随后已进入 PatternCatalog 发布。
+- 验证：summary 定向测试 6 项；Story Pattern 定向测试 101 项；全量离线回归 `236 passed in 58.01s`。
+
+## 本轮（2026-08-20）：PatternCatalog 发布
+- 新增纯规则节点 `publish_pattern_catalog`：不调用 LLM，按 Snapshot ID 校验 summary/cluster 一致性，将结果分为 `published_patterns`、`rejected_patterns` 和 `manual_review_patterns`；未发布结果不混入只读发布目录。
+- MVP-A 暂定最小不同故事支持阈值为 `2`。唯一修改位置是 `Code/StoryPattern_Agent/catalog.py` 的 `MIN_PATTERN_STORY_SUPPORT`；生成产物同时记录 `publish_rules.minimum_story_support`，以后调整阈值时同步修改该常量即可追溯规则版本。
+- 真实发布产物：`Code/data/story_pattern_official/pattern_catalog_20260820.json`；Snapshot=`evolve_official_20260820T063134335355Z_e2db2e7a06bc`，4 个候选全部发布，0 个 rejected，8 个进入 manual review。
+- 发布目录保留模式名称、核心 Function 链、可选步骤、故事/题材支持、occurrence evidence、来源 cluster 和 review edge；人工复核 cluster 保留冲突原因和完整证据。
+- 验证：catalog 定向测试 6 项；cluster + summary + catalog 定向测试 23 项；发布产物校验通过。
+
+## 本轮（2026-08-20）：Phase 1 完整重跑
+- 完整运行报告：`Code/data/story_pattern_official/phase1_20260820T114432Z.json`。
+- 运行边界：重新执行 Snapshot 输入、故事序列、motif 提取、Embedding 变体召回、cluster、4 个 clean cluster 的真实 summary 和 catalog 分流；156 条 HIGH review 使用已冻结的 `high_pair_reviews_20260820.jsonl` 回放并校验 156/156 个 pair ID，不重复调用 HIGH 审查；970 条 EXPANDED 按当前 Phase 1 预算不调用 LLM。
+- 阶段计数：23 Functions / 60 Stories / 502 occurrences；502 raw sequence nodes → 435 structural runs → 109 MATCHED segments → 321 motif candidates；321 candidates → 1,126 variant pairs（HIGH 156 / EXPANDED 970）。
+- review 回放：156 条，`SAME_PATTERN=31`、`RELATED=109`、`DIFFERENT=16`；31 SAME 边形成 12 clusters，其中 4 clean、8 `needs_review`。复核原因：`CHAIN_PROPAGATION=8`、`INTERNAL_REVIEW_CONFLICT=4`、`ORDER_CONFLICT=4`。
+- summary / catalog：4 个 clean cluster 全部生成 summary 并发布，8 个 cluster 进入 manual review，0 个 rejected。summary LLM 共 4 次，prompt 4,076 / completion 1,130 / total 5,206 tokens，墙钟 13.9s。
+- 本次 4 个模板：`PAT_761289e14481d653`（末世觉醒协作：`VOLITIONAL_PATH_CHANGE → RELATIONSHIP_INTENSIFICATION → ALLIANCE_FORMATION`）；`PAT_768958bd97b41684`（致命事件后的真相递增与威胁升级：`FATAL_INCIDENT → PARTIAL_TRUTH_REVELATION → THREAT_ESCALATION`）；`PAT_f305e9acbc9e8581`（悬疑强制调查与迟缓真相揭露：`EXTERNAL_COMPULSION → ANOMALY_OMEN → THREAT_ESCALATION → PARTIAL_TRUTH_REVELATION`）；`PAT_fcbaff455c237bd5`（破碎关系的真相重建：`RELATIONSHIP_DISINTEGRATION → PARTIAL_TRUTH_REVELATION → RELATIONSHIP_INTENSIFICATION`）。每个支持 2 个不同故事、evidence_count=2；完整模板字段和证据见运行报告。
+
+## 本轮（2026-08-20）：EXPANDED 优先审查与 cluster 状态修正
+- `CHAIN_PROPAGATION` 不再作为冲突：cluster 现在分开输出 `needs_review`（仅已审查到的 RELATED/DIFFERENT、顺序冲突或同 pair 多 verdict）与 `review_incomplete`（cluster 内仍有未审查 variant pair）；状态为 `CLEAN / INCOMPLETE / CONFLICT`。summary 和 catalog 都要求 `review_incomplete=false`。
+- 新增 `build_expanded_review_queue`：未审查的 EXPANDED pair 分为 cluster 内部、cluster 桥接、未连接三档，`review_motif_pairs` 可直接消费该队列。
+- 实测 970 条 EXPANDED 中：内部 3 条、桥接 17 条、未连接 950 条。先审查内部 + 桥接共 20 条，结果 `SAME_PATTERN=1`、`RELATED=18`、`DIFFERENT=1`；真实 LLM 用量 prompt 54,317 / completion 6,012 / total 60,329 tokens，墙钟 64.2s。checkpoint：`Code/data/story_pattern_official/expanded_priority_reviews_20260820.jsonl`。
+- 合并 156 HIGH + 20 EXPANDED review 后：176 review（SAME 32 / RELATED 127 / DIFFERENT 17），12 cluster 变为 11；`review_incomplete=0`，8 个 CLEAN，3 个 CONFLICT（真实内部冲突/顺序冲突），没有将“未审查”误报为冲突。
+- 重新 summary + publish：8 个 summary / 8 个 published Pattern / 0 rejected / 3 manual review；新产物 `phase1_expanded_20260820T124042Z_report.json`、`phase1_expanded_20260820T124042Z_catalog.json`、`phase1_expanded_20260820T124042Z_reviews.jsonl`。新增 summary LLM 用量 prompt 10,612 / completion 2,189 / total 12,801 tokens，墙钟 26.4s。
+- 仍有 950 条 `UNCONNECTED_PAIR` 未审查；它们不影响现有 cluster 的完整性，应在下一阶段按未连接 motif 覆盖、相似度和跨故事支持排序，而不是全部立即调用 LLM。
+- 验证：新增队列测试；全量离线回归 `245 passed in 49.12s`。
+
+## 本轮（2026-08-20）：Story Pattern motif cluster
+- 新增纯规则节点 `build_motif_clusters`：仅用 `SAME_PATTERN` 边构建确定性连通分量，重新合并不同故事支持、题材分布和 occurrence evidence；重复 evidence 去重并保留 `source_motif_ids`，所有内部 review 边完整留存。
+- cluster ID 由 Snapshot ID + 排序后的 member motif IDs 确定性生成；节点不调用 LLM、不改 OntologySnapshot、不发布 Pattern。
+- 风险检查：连通分量未形成两两直接 `SAME_PATTERN` 时标记 `CHAIN_PROPAGATION`；内部 `RELATED/DIFFERENT`、非空 `order_conflicts`、同一 pair 多 verdict 分别记录并使 `needs_review=true`。
+- 真实冻结数据结果：321 candidates + 31 条 `SAME_PATTERN` 边形成 12 个候选 cluster，不是 31 个 Pattern；严格检查后 8 个 `needs_review`、4 个可进入 `summarize_story_patterns`，不同故事支持数分布为 4×2、3×1、2×9。
+- 验证：新增 cluster 测试 11 项；Story Pattern 定向测试 106 项；全量离线回归 `230 passed in 57.77s`。
+
+## 完整路线图（2026-08-20）：从 Function 提取到自动大纲
+
+### 最终目标与边界
+- 最终产品是“基于真实故事知识生成中文短篇网文大纲”，而不是只生成 Function 标签或套路名称；当前范围止于大纲，不生成全文。
+- 系统分为两条严格分离的知识线：`Corpus Knowledge` 只保存真实故事中观察到的 Function、occurrence、motif、实例和证据；`Creative Memory` 只保存系统生成且验证过的新连接/新机制，不能反向当作真实规律。
+- FunctionExtract Agent 负责发现、评估和发布 Function；Story Pattern Agent 负责从冻结 Snapshot 学习组合规律；未来的 Outline Agent 只读取已发布的 Function/Pattern/Instance 知识，不写回 Function Registry。
+
+### Phase 0：Function 知识发布层（已完成）
+- Bootstrap/Evolve 已形成 Function Knowledge 生命周期；PASS 后发布不可变 OntologySnapshot v2（Functions、FunctionOccurrence、评估）。
+- 当前可用真实基线：60 篇故事、23 Functions、502 occurrences；下游不再重跑 Matcher/Observer。
+- 仍待后续增强但不阻塞套路 MVP：Story Profile、稳定角色关系、Function 的显式前置条件/角色位置/状态变化、Instance Card。
+
+### Phase 1：Story Pattern 库 MVP-A（当前阶段）
+目标：把真实故事中的 Function 序列变成一份可查询、可追溯的“候选套路目录”。
+
+1. 已完成序列和候选提取：60 篇故事 → 109 个 MATCHED 片段 → 321 个精确 motif candidates；保留 raw sequence、repetition 和 occurrence 证据。
+2. 已完成变体召回与审查：1,126 个跨故事语义候选边；HIGH 156 已由真实 LLM 审查，得到 31 条 `SAME_PATTERN` 边。
+3. 已完成 `build_motif_clusters`：只用 31 条 SAME_PATTERN 边建立候选 cluster；重算不同故事支持、合并 evidence、保留 review 边；检测链式传播/内部冲突并标 `needs_review`。
+4. 已完成 `summarize_story_patterns`：只对通过 cluster 规则检查的候选调用 LLM，生成 pattern 名称、抽象定义、核心 Function 链、可选步骤、适用条件、反例/限制和引用证据。
+5. 已完成 `publish_pattern_catalog`：按暂定最小支持阈值发布不需人工复核的模式为只读 PatternCatalog；候选、被拒模式和人工复核项分别保留，不混入发布目录。
+
+MVP-A 验收标准：给定 `snapshot_id`，可列出每个发布 Pattern 的核心步骤、可选步骤、不同故事支持数、题材分布和可回溯的 occurrence/Observation 证据；任何 Pattern 都能追溯到冻结 OntologySnapshot。当前 31 条 SAME_PATTERN 边不是 31 个 Pattern，必须经过 cluster 和支持度计算后才知道实际数量。
+
+### Phase 2：生成知识补全（MVP-B 前置）
+目标：让 Pattern 和 Function 从“分析对象”成为“可以安全生成的结构约束”。
+
+1. `StoryProfile`：为故事抽取并校验主人公、主要人物、目标、关系、世界规则、核心冲突和结局状态；人物在同一故事内必须有稳定 ID。
+2. 扩展 Function card：补充结构化自然语言的前置条件、角色位置、状态变化、常见故事阶段和 hard negatives；这是在现有 Function 上增补，不重新提取本体。
+3. `InstanceCard`：基于每个 FunctionOccurrence 记录角色绑定、具体事件、实现机制、题材/冲突/关系标签、前后状态、故事位置和原始证据。
+4. `transition / realization index`：从真实 occurrence 和 PatternCatalog 统计可连接的 Function、常见实例化机制、不同题材中的实现方式；先做精确统计和标签筛选，再用 Embedding 做实例召回。
+
+验收标准：给定一个 Function 或 Pattern，系统能返回适用的角色位置、前置/后置状态、真实实例机制和可连接的下一步；任何检索结果都带真实故事证据。
+
+### Phase 3：端到端大纲 MVP-B
+目标：在用户只给出题材/主题/长度偏好时，生成一份结构成立、可解释、可验证的短篇大纲。
+
+1. `Outline Planner`：从 PatternCatalog、transition index 和用户约束选择一条 Function 序列。Planner 可 `FOLLOW` 成熟模式、`ADAPT` 模式变体、`EXPLORE` 新连接，但新内容必须标为生成内容，不能伪装成语料规律。
+2. `Story Seed`：为每条候选序列生成题材、世界、主人公、人物关系、目标、核心冲突和结局方向；随后回查序列前置条件是否满足。
+3. `Mechanism Plan`：在写大纲前，为每个 Function 预先给出“谁对谁做什么、为何发生、状态如何改变、怎样连接下一步”的一句话方案。
+4. `Outline Realizer`：按序实例化为分段大纲，同时维护状态账本（人物目标/关系、秘密、资源、未解决冲突、世界规则）。
+5. `Outline Validator`：规则检查前置条件、状态连续性、角色一致性和结局闭合；LLM 复抽 Function 检查“计划步骤 → 情节 → 能否恢复目标 Function”。
+
+MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每份都包含采用的 Pattern/Function、角色与状态账本、逐步情节、验证报告和真实语料引用。人工盲评至少比较三组：直接 LLM、只给 Function 序列的 LLM、完整知识增强系统；先要求完整性与因果连贯性，不以“爆款”作为首个门槛。
+
+### Phase 4：质量优化与 Best-of-N
+目标：在“能生成成立大纲”后提升差异化与吸引力，避免为了创新破坏结构。
+
+1. 生成多个 Planner/Seed/Mechanism Plan 候选，按漏斗筛选，避免把所有 token 花在完整大纲上。
+2. 对初稿分别检索完整序列、局部 motif、实例机制和表层情节的相似性；结构相似与抄袭风险必须分层处理。
+3. LLM 诊断只输出 `KEEP / REPAIR / DIFFERENTIATE / REPLAN`；按最小修改原则，先改事件，再改机制，再改局部 motif，最后才重规划全序列。
+4. 通过 validator 后按结构完整性、因果连贯性、人物动机、冲突/兑现、差异化和用户偏好排序，选出 Best-of-N。
+
+验收标准：完整系统相对“直接 LLM”和“只有 Function 序列”的基线，在人工盲评的结构完整性、因果连贯性、人物动机三个核心指标上稳定更高；相似性检查能解释保留或差异化的原因。
+
+### Phase 5：扩库、持续学习与人工治理
+目标：从当前 60/120 篇验证数据扩展到大语料，并控制本体和模式漂移。
+
+1. 新语料只经 Bootstrap/Evolve 进入新的 OntologySnapshot；PatternCatalog 按 snapshot 重新计算并保留版本谱系，旧结果可复现。
+2. `OTHER/UNCERTAIN`、低支持模式、RELATED 边和 `needs_review` cluster 进入人工/LLM 复核队列，不自动提升为 Function 或发布 Pattern。
+3. 周期性评估 Function 边界、Pattern 支持度、题材偏置、实例机制多样性与生成质量；必要时通过新 Snapshot 重新发布，而不是就地改历史结果。
+4. Creative Memory 与 Corpus Knowledge 继续隔离；只有人工确认或真实语料支持的内容才能进入 Corpus Knowledge。
+
+### 推荐执行顺序与停止点
+- 现在先完成 Phase 1 的 `build_motif_clusters`、`summarize_story_patterns`、`publish_pattern_catalog`，得到可审计的 PatternCatalog。
+- PatternCatalog 发布后，先做 Phase 2 的最小字段补全（优先 StoryProfile、Function 前后状态、InstanceCard），不要直接进入生成。
+- Phase 2 达到可检索验收后，实现 Phase 3 的单条端到端大纲 MVP-B；先固定 3 个题材的小样本，验证通过再进入 Phase 4。
+- Phase 4 的比较实验完成且指标稳定后，才投入 Phase 5 的大规模语料、批量生成与长期治理。
+
+
 - **Bootstrap 已收尾（2026-08-16）**：run_bootstrap.py 120 篇全量 → `bootstrap` 命名空间 82 functions / 1027 obs；curate 最终全量复核 PASS 6/6（coverage 0.761 / cohesion 0.884 / separation 0 / abstraction 0.890 / evidence 2.89 / diversity 3）；快照 `data/bootstrap/` + 报告 `data/evaluation/evaluation_report.json`；修订历史 `data/evaluation/revise_rounds.jsonl`。日志 test/logs/run_bootstrap_full.log / run_bootstrap_curate.log。
 - 进入 Evolve 前一次性补齐（清单见 README「Evolve 阶段待补清单」）：`source_sentence_indices` 已采集（2026-08-17，历史 obs 需重跑回填）、`function_id/status/version_history`、卡片成熟内容由 Curator 生成、命名统一、Matcher/Critic/Curator（Matcher 仍是 Evolve 专属，revise_node 只做 bootstrap 内收敛）。
 - 决策项：SPLIT 镜像对近义风险（重跑采样未复现，是否需要豁免名单）；同名 <0.85 函数对唯一化规则；Inducer/闭环 LLM 非确定性（固定候选池 / Run A/B/C）；`data/bootstrap`/`data/evaluation` 被 .gitignore 忽略（仅 DB 为权威源），是否纳入版本控制待定。
+
+## 当前交接更新（2026-08-20）：准备使用 functions.csv 重跑
+
+### 当前已完成
+
+- FunctionExtract 的 Snapshot 发布契约已完成：PASS 后发布不可变 `OntologySnapshot v2`，包含 Functions、FunctionOccurrence、评估结果和 SHA-256；已有 23-Function Snapshot 不覆盖、不原地修改。
+- StoryPattern MVP-A 已完成代码和真实运行：输入为 `evolve_official_20260820T063134335355Z_e2db2e7a06bc`，23 Functions、60 篇故事、502 occurrences；完成序列、repetition、context、motif、variant recall、cluster、summary、catalog。
+- 23-Function 版本最新结果：176 条已审查 pair（SAME 32 / RELATED 127 / DIFFERENT 17），11 个 cluster（8 个 CLEAN、3 个 CONFLICT），8 个 Pattern 已发布，3 个 cluster 保留人工复核；950 条未连接 EXPANDED pair 尚未调用 LLM。
+- StoryPattern 旧产物集中在 `Code/data/story_pattern_official/`，但在新 Snapshot 发布前不应删除；新版本应使用新目录或带 Snapshot 标识的独立产物。
+
+### 当前数据核查结论
+
+- `Code/data/registry/functions.db` 只有 `functions` 表：`bootstrap=30`、`evolve_official=23`，合计 53 条物理记录。
+- 用户提供的 `Code/data/registry/functions.csv` 已核实为该 Registry 的 CSV 导出：53 条数据行、35 个跨命名空间去重名称；其中 18 个 Function 名称在两个 namespace 中重复。文件不是历史 52-Function 导出。
+- 历史 `O_0=52` 属于已删除的 120 篇旧语料运行；原始 52-Function 文件目前无法从工作区、Git 历史或悬挂对象恢复。因此后续应准确称为“基于当前 functions.csv 重跑”，不能再称为“恢复历史 52 重跑”。
+
+### 本轮尚未执行
+
+- 用户要求“用 functions.csv 重跑”；上一轮只完成输入核查，尚未导入、运行 Evolve、发布新 Snapshot，也尚未清空 StoryPattern 产物。没有删除现有数据。
+- 当前 CSV 不能原样作为一个 Snapshot：53 条记录含两个 namespace，且 18 个名称重复；Snapshot 要求 `function_name` 和 `function_id` 唯一。
+
+### 后续执行顺序
+
+1. 从 `functions.csv` 生成独立重跑输入：保留 namespace 信息并确定去重规则；推荐对共享名称优先采用 `evolve_official` 的最终卡片，再加入 `bootstrap` 独有 Function，形成 35 个唯一 Function。该集合需单独使用新 namespace，不写回 `evolve_official`。
+2. 在当前 60 篇语料上运行 Evolve 的匹配、周期评估、Curator 和最终评估；只有最终 PASS 才发布新的 Snapshot。若 FAIL，只保留工作产物并修正本体/阈值后重跑。
+3. 新 Snapshot 发布成功后，清理或归档 `Code/data/story_pattern_official/` 的旧生成产物；保留旧 23-Function Snapshot 及其 Pattern 结果作为历史版本，不删除源码和测试。
+4. 以新 Snapshot 全量运行 StoryPattern：重新生成 occurrence 序列、motif candidates、variant edges、review queue、clusters、summaries 和 PatternCatalog。旧的 156/176 条 review 不能直接复用，因为 Function 序列和 motif identity 已改变。
+5. 校验新目录的 `snapshot_id`、Function/occurrence 引用、Pattern evidence 回溯和发布分流；运行全量离线测试，并将新结果追加到本交接文档。
+
+### 关键约束
+
+- 23-Function Snapshot 是不可变历史版本，不能覆盖；新本体必须拥有新的 `snapshot_id`。
+- 不把 53 条物理记录误报为 53 个 Function，也不把当前 CSV 误报为历史 52；重跑报告必须同时记录物理行数、namespace 数量和去重后的 Function 数量。
+- 若最终采用 35 个去重 Function，本次结果应命名为新的 CSV-derived Snapshot；只有用户提供真正的 52-Function 文件后，才可称为 52-Function 重跑。
+
+## 本轮（2026-08-20）：CSV-derived Snapshot 直接发布 + StoryPattern 全量重跑
+
+### 用户决策
+- 用户明确：CSV 的 53 条就是 Evolve 跑完的最终结果，**不再重跑 Evolve**（中断了全量 Evolve 进程）；直接用 functions.csv 发布新 Snapshot 并跑 StoryPattern。
+
+### 发布（跳过 Evolve 匹配/评估）
+- 去重规则：共享名称优先 `evolve_official` 卡片 + `bootstrap` 独有 Function → **35 个唯一 Function**（name/id 均唯一；来源 evolve_official 23 + bootstrap 12）。
+- 一次性工具：`Code/test/build_csv_rerun_input.py`（CSV → 去重输入 + 导入 `csv_rerun` namespace）、`Code/test/publish_csv_rerun_snapshot.py`（直接发布）。
+- 已发布 **CSV-derived Snapshot**：`csv_rerun_20260820T140927554551Z_1eee0ef6d665`（schema v2，35 Functions / 502 occurrences，`source_workflow=evolve`，evaluation 为 demo 构造 PASS，标注 `source=functions.csv direct publish`）。
+- occurrences 用 `align_occurrences` 从 `bank_evolve_official.jsonl`（60 篇 502 obs）直接对齐生成：MATCHED 384 / UNCERTAIN 118 / OTHER 0。
+- 注意：bootstrap 独有 12 个 Function 在 CSV 中 `supporting_obs_ids` 为空（当前 60 篇语料无证据），发布后无 MATCHED occurrence，属数据现状。
+- Registry：`csv_rerun` namespace 35 条；`bootstrap`（30）/`evolve_official`（23）未改动。
+
+### StoryPattern 全量重跑（新 driver）
+- 新增 `Code/test/run_story_pattern.py`（纯库串联 driver，分 phase：sequences/motifs/variants/clusters/full）。
+- 产物：`Code/data/story_pattern_csv_rerun/`（story_sequences / structural_sequences / motif_candidates / motif_variant_pairs / high_pair_reviews / motif_clusters / pattern_summaries / pattern_catalog / run_report）。
+- 全流程：60 篇 / 502 raw nodes → 435 structural runs → 321 motif candidates（3=138/4=91/5=58/6=34，REPEATED 1）→ 1,128 variant pairs（HIGH 156 / EXPANDED 972）。
+- HIGH 全量真实 LLM 审查 156/156：`SAME_PATTERN=17 / RELATED=127 / DIFFERENT=12`（总耗时 489.2s）。
+- Cluster：11 个（10 CLEAN / 1 needs_review）；summary 生成 10 个、跳过 1 个；catalog 发布 **10 个 Pattern**、manual review 1 个（`MCL_076bc0dfa5322158`）。
+- 对比 23-Function 版（SAME 32/RELATED 127/DIFFERENT 17；11 cluster 8 CLEAN 3 CONFLICT；8 Pattern）：本版 SAME 更少、CLEAN 更多、Pattern 10 个。
+- 验证：全量离线回归 `245 passed in 51.24s`。
+
+### 遗留
+- EXPANDED 972 条未连接 pair 未调 LLM（与 23-Function 版策略一致，留待后续预算）。
+- 旧 `Code/data/story_pattern_official/`（23-Function 产物）保留未删；本次新产物在独立目录 `story_pattern_csv_rerun/`。
+- 中断的 Evolve 临时产物 `data/evolve_csv_rerun/`、`data/evolve_csv_rerun_smoke/` 已清理；Bank 保持空。
+
+## 本轮（2026-08-20 续）：Evolve 发布前自动唯一化/合并 + Bootstrap supporting 采集修复
+
+### 用户决策
+- 发布前合并放 Evolve 图内自动节点（不复用 0.85 余弦 `merge_candidates`，与 2026-08-17 "Separation 删余弦改 LLM" 决策一致）；合并判定走 LLM `merge_groups`。
+- Bootstrap `supporting_obs_ids` 为空：确认是旧运行产物（2026-08-19 那次未采集），非代码缺陷；决策"修复 + 重跑 bootstrap 120 篇"。
+- 全量跑法：新 namespace `evolve_unify`（复制 `evolve_official` 23 个作种子）+ unify 并入全部 bootstrap；不写回 `evolve_official`。
+
+### 代码改动
+- `Code/FunctionExtract_Agent/evolve.py`：新增 `unify_registry_node`（发布前唯一化/合并，插在 `curator → evaluator_final` 之间）：读 `UNIFY_PARENT_NAMESPACES`（默认 `("bootstrap",)`）与当前 namespace 并集，同名当前结果优先、父 namespace 只补缺；调用 `curator._full_merge_scan`（agglomerative 候选 + LLM 确认 `merge_groups` + `_llm_merge` 合并）写回当前 store；报告落盘 `out_dir/unify_report.json`。图拓扑 `curator → unify_registry → evaluator_final`。
+- `Code/FunctionExtract_Agent/state.py`：新增 `unify_report` 字段。
+- 测试：`test/test_evolve.py` 新增 2 项 unify 节点单测（并集去重/同名当前优先/LLM 合并写回；无合并保持）；现有 8 项 evolve 测试加 `monkeypatch.setattr(ev, "UNIFY_PARENT_NAMESPACES", ())` 隔离真实 bootstrap。
+
+### 验证结果
+- **Bootstrap 120 篇重跑**（`zhihu_story_subset_120_20260815_clean`，2026-08-20 16:54 起，64 分钟）：**100 个函数全部带 supporting**（2 条 41 个 / ≥3 条 59 个）；1057 obs；PASS 5/6（仅 separation 未达标，6 组近义）；发布 `bootstrap_20260820T165454075329Z_dc478f413bc9`。根因确认：代码链路本就采集 supporting，旧 bootstrap namespace（30 个全空）是 2026-08-19 未采集的旧产物。
+- **Evolve 60 篇全量（`evolve_unify`）**：种子 23（复制自 evolve_official）+ unify 并入 bootstrap 100 → 唯一 122 → LLM 合并 5 组 → 最终 **115 个函数（全部带 supporting）**；60 篇 / 538 obs / coverage 0.794 / novelty 0.060；终评 **PASS 4/6**（coverage/cohesion/abstraction/diversity 达标；separation 9 组、evidence 3.235 未达）；发布 **`evolve_unify_20260820T181150619637Z_49834cdeac49`**（schema v2，115 Functions / 538 occurrences）。产物 `data/evolve_unify/`、日志 `test/logs/evolve_unify_20260821.log`。
+- StoryPattern 消费验证：新快照 sequences 阶段通过（115 函数 / 60 故事 / 538 occurrence / 485 structural runs）。
+- 全量离线回归：**247 passed in 50.25s**（新增 2 项）。
+
+### 关键约束与遗留
+- `evolve_official`（23 函数）/ `bootstrap`（旧 30 全空，已被重跑 100 覆盖）/ `csv_rerun`（35）均保留；新本体在 `evolve_unify` namespace 与独立快照。
+- 注意：unify 后本体以 bootstrap 100 个为主（+当前演化 15 个新增），函数数从 23 → 115，覆盖度提升但 separation/evidence 未达标（PASS 阈值 4/6）。
+- bootstrap 重跑已覆盖旧 `bootstrap` namespace 与 Bank；旧 2026-08-19 30 函数快照不可恢复（未单独留档），如需回退需从 Git/旧导出找回。
+- StoryPattern 尚未对新 `evolve_unify` 快照跑 motifs/variants/review/clusters/summaries/catalog 全流程（仅 sequences 验证）。
+
+## 本轮（2026-08-20 续 2）：撤销 unify 节点，干净重跑（bootstrap 120 → evolve 60）定稿
+
+### 用户决策（修正）
+- 用户指出：重跑后 100+ 个函数、DB 新旧 namespace 混在一起（evolve_unify 混血：92 bootstrap + 22 旧 evolve_official + 2 新）、"为什么新增节点"。
+- 结论：unify_registry_node 多余——bootstrap 重跑后已是干净唯一化本体，Evolve 直接以它为种子演化即可。
+- 语料确认：bootstrap 用 `zhihu_story_subset_120_20260815_clean/`，evolve 用 `zhihu_story_subset_60_5domains_20260819_clean/`。
+
+### 代码回滚
+- 撤销 `evolve.py` 的 `unify_registry_node` / `UNIFY_PARENT_NAMESPACES` / 图边 `curator→unify_registry→evaluator_final`（恢复 `curator→evaluator_final`）；撤销 `state.py` 的 `unify_report` 字段；撤销 `test_evolve.py` 的 2 个 unify 单测与 monkeypatch 隔离。
+- 验证：`test_evolve.py` 8 passed；全量离线回归 `245 passed in 54.87s`（与基线一致）。
+
+### 干净重跑结果（最终定稿）
+- **种子**：`evolve_clean` = bootstrap(120 篇重跑) 100 个全部复制（均带 supporting），Bank 清空，不碰旧 evolve_official。
+- **Evolve 60 篇**：520 obs；coverage 0.835 / novelty 0.029；**基线 100 → 最终 59**（新增 10 / 移除 51 / 保留 49——51 个 bootstrap 函数在当前 60 篇无证据被 Curator 移除）。
+- **终评 FAIL 3/6**（coverage/cohesion/diversity 过；separation 3 组、abstraction 0.797、evidence 4.93 未达），按契约未自动发布。
+- **用户决策 c：接受 59 个工作产物并手动发布** → 发布 **`evolve_clean_20260820T230149522719Z_62353704ecba`**（59 Functions / 520 occurrences：MATCHED 424 / UNCERTAIN 96；evaluation 标注 demo 直发，FAIL 3/6 接受）。产物 `data/evolve_clean/`、日志 `test/logs/evolve_clean_20260821.log`。
+- StoryPattern 消费验证：sequences 通过（59 函数 / 60 故事 / 520 occurrence / 448 structural runs）。
+
+### 当前数据状态
+- DB namespaces：`bootstrap`(100，120 篇重跑)、`csv_rerun`(35)、`evolve_official`(23)、`evolve_clean`(59)。
+- 已发布快照：`evolve_clean_...62353704ecba`（59，最新）、`bootstrap_...dc478f413bc9`（100）、`csv_rerun_...1eee0ef6d665`（35）、`evolve_official_...e2db2e7a06bc`（23）等。
+- `evolve_unify`/`evolve_smoke_unify` 已清空并删除产物目录（混血废弃）。
+- StoryPattern 尚未对新 59-Function 快照跑 motifs/variants/review/clusters/summaries/catalog 全流程（仅 sequences 验证）。
+
+## 本轮（2026-08-20 续 3）：StoryPattern 全量重跑（evolve_clean 59-Function 快照）
+- 输入：`evolve_clean_20260820T230149522719Z_62353704ecba`（59 Functions / 60 篇 / 520 occurrences）。
+- 产物：`Code/data/story_pattern_evolve_clean/`（story_sequences / structural_sequences / motif_candidates / motif_variant_pairs / high_pair_reviews / motif_clusters / pattern_summaries / pattern_catalog / run_report）；日志 `test/logs/story_pattern_evolve_clean_20260821.log`。
+- 全流程：520 raw nodes → 448 structural runs → **508 motif candidates**（3=193/4=143/5=102/6=70；REPEATED 4 / SINGLE_STORY 504）→ **1,644 variant pairs**（HIGH 141 / EXPANDED 1503）。
+- HIGH 141 条真实 LLM 审查：`SAME_PATTERN=42 / RELATED=92 / DIFFERENT=7`（耗时 398s）。
+- Cluster：8 个（5 CLEAN / 3 needs_review，其中 2 个 review_incomplete）；summary 生成 5 个；catalog 发布 **5 个 Pattern**、manual review 3 个。
+- 发布 Pattern：
+  - `PAT_1a362a8df74e92d2` 末日求生助力与危机应对（EXTERNAL_SUPPORT_ACQUISITION → DANGER_EXPOSURE → CRITICAL_ESCAPE → COPING_WITH_HOSTILE_ENVIRONMENT）
+  - `PAT_7a2d279932ed41a1` Rescue-Escalation Arc（CRITICAL_ESCAPE → DANGER_RESCUE → CRITICAL_ESCAPE）
+  - `PAT_9990084533f63af9` Investigative Truth Unfolding with Clue Recurrence（INVESTIGATION_DEVELOPMENT → MYSTERY_CLUE_INTRODUCTION → TRUTH_REVELATION）
+  - `PAT_c5570ae43e6209ca` goal-driven revenge escalation（GOAL_COMMITMENT → REVENGE_MOTIVATION → REVENGE_EXECUTION）
+  - `PAT_fa4e8053eea58510` 情感揭示同盟（ROMANTIC_OR_INTIMATE_DEVELOPMENT → ALLIANCE_FORMATION → EMOTIONAL_REVELATION）
+- manual review 3 个：`MCL_b3f92c3462db696f` / `MCL_d2869208b0069747` / `MCL_df001f50a6f28541`（均 CLUSTER_NEEDS_REVIEW）。
+- 验证：全量离线回归 `245 passed in 51.96s`。
+
+## 本轮（2026-08-20 续 4）：模板核心链长度下限 3 → 4
+- 用户质疑模板组合 Function 太少；核实：快照 59 函数全部有 MATCHED、片段平均 4.98、62% 候选 ≥4 长度——瓶颈不在函数数，而在 summary 的 `core_function_names min_length=3`（LLM 倾向取最短公共核心）。
+- 改动：`Code/StoryPattern_Agent/Prompt/Summary_prompt.py`（`min_length=3→4` + prompt 文案"至少为 4"）；`summaries.py` 校验 `len(core_names) < 3 → < 4`；`test/test_story_pattern_summaries.py` fixture 补到 4 个函数/4 个 core 名。
+- 重跑 StoryPattern（HIGH 141 条 LLM 重审，SAME_PATTERN 42→50 为 LLM 非确定性；summary 出现 3 次"先给 3 个被 schema 拒后重试成功"）。
+- 效果：核心链长度 **1×5 + 4×4**（全部 ≥4）；发布模板：
+  - `PAT_ab1a4df322aa5132` Trusted Betrayal → Relationship Termination and Escalating Harm（5 步：BETRAYAL_BY_TRUSTED_OTHER → MARRIAGE_TERMINATION → POWER_ABUSE_VICTIMIZATION → RESOURCE_WITHDRAWAL → INITIATE_ASSAULT）
+  - `PAT_c5570ae43e6209ca` 复仇驱动下的目标追寻（GOAL_COMMITMENT → BETRAYAL_BY_TRUSTED_OTHER → HIDDEN_BLOCKER_SETUP → REVENGE_EXECUTION）
+  - `PAT_ef18bc6a43418bb5` Emotional Revelation to Rescue（SELF_AWARENESS_GROWTH → EMOTIONAL_REVELATION → VICTIMIZATION_AND_CONFRONTATION → DANGER_RESCUE）
+  - `PAT_fa4e8053eea58510` 情感升华与关系联盟（ROMANTIC_OR_INTIMATE_DEVELOPMENT → ALLIANCE_FORMATION → RELATIONSHIP_DEVELOPMENT_DEEPENING → EMOTIONAL_REVELATION）
+  - `PAT_fd54a4224babf031` 绝境获援（CRITICAL_ESCAPE → EXTERNAL_SUPPORT_ACQUISITION → DECISION_TO_ACT → DANGER_RESCUE）
+- 验证：summary 定向测试 6 项通过；全量离线回归 `245 passed in 52.61s`。
+
+## 本轮（2026-08-20 续 5）：HIGH review + summary 冻结回放（消除 LLM 非确定性）
+- 问题：同数据重跑 HIGH review 结果漂移（SAME_PATTERN 42→50），模板成员/内容随之变化（Inducer/审查 LLM 非确定性）。
+- 改动：`Code/test/run_story_pattern.py` 新增 `--replay-high <jsonl>`（按 `variant_pair_id` 回放已冻结 review，校验 snapshot_id）与 `--replay-summaries <json>`（按 `cluster_id` 回放已冻结 summary），跳过对应 LLM 调用。
+- 验证：全回放重跑 25.6s（原 440s，无 LLM），产物与原始**完全一致**（published 5 个 ID、核心链、名称全部相同）；HIGH 141 条 verdict=SAME 50/RELATED 87/DIFFERENT 4 稳定。
+- 回放产物：`data/story_pattern_evolve_clean_replay2/`（与 `story_pattern_evolve_clean/` 一致）；日志 `test/logs/story_pattern_evolve_clean_replay2.log`。
+- 注意：summary LLM 仍非确定（同一 cluster 会选不同核心子链/名称），但模板 ID 由 review 决定已稳定；如需全链可复现，用 `--replay-summaries` 冻结 summary。
+- 验证：全量离线回归 `245 passed in 57.82s`。
 
 ## 踩过的坑（不要再踩）
 - 本环境 `apply_patch`/`Remove-Item` 被策略拦截：用 .NET `[System.IO.File]`/`[System.IO.Directory]` API 或精确文本替换。
 - PowerShell 管道给子进程（`python -` 等）传中文会乱码：脚本内用相对路径或直接在当前 shell 执行。
 - `test_bank.py` 的 `persist_dir="Code/data/bank_test"` 会解析到 `Code/Code/data/bank_test`（历史遗留，勿沿用该路径写法）。
+- StoryPattern 纯库无 CLI，节点是单步函数：故事循环必须手动 `current_story_index += 1`（`select_story` 不推进下标，否则死循环）。
+- StoryPattern driver 顶部 import `variants` 会加载 Embedder（~16s）；stdout 经 PowerShell 管道会被缓冲，调试用 `python -X utf8 -u` + 文件重定向。
+- Evolve 的 unify 节点读父 namespace 时必须用 `RegistryStore(db_path=store.db_path, namespace=parent_ns)`（继承当前 store 的 DB 路径），否则会误读真实 `functions.db`。
+- Evolve 重跑前务必：目标 namespace 清空/新建（evolve 本身不清空）、Bank 清空、种子从干净 bootstrap 复制——否则新旧函数混血。
+- FAIL ≠ 无函数：终评 FAIL 只是不自动发布快照，Registry/工作产物（functions_*.jsonl / occurrences / evaluation_final.json）都在，可手动发布（demo 可构造 PASS evaluation 直发）。
+
+## 本轮（2026-08-22）：Evolve 250 篇全量（evolve_250）+ StoryPattern 模板提取
+- 启动命令：`python -X utf8 -m Agent.evolve --corpus zhihu_story_subset_250_5domains_20260821_clean --namespace evolve_250 --out-dir data/evolve_250`。
+- 前置：种子 = evolve_clean 59 函数；250 篇清洗语料；Bank 已有前 93 篇 obs（845 条，obs_id 按 story+序号确定性生成，重跑不重复写入）。
+- 前两次运行均因代理连接错误（WinError 10048）在预处理阶段中断；本次连通性正常，全量跑完（总耗时 28756s，115s/篇）。
+- **Evolve 结果**：250 篇 / 2056 obs（MATCH 1628 / EXTEND 33 / NOVEL 84 / RESOLVED 311），coverage 0.808 / novelty 0.041；84 次 mid 体检；Curator novelty 归纳新增 12 函数 + 修订（curator_plan.jsonl 1688 个动作）。
+- **终评 PASS 5/6**（coverage 0.953 / cohesion 0.846 / abstraction 0.807 / evidence 20.79 故事/函数 / diversity 248；仅 separation=3 未达标）→ **自动发布快照 `evolve_250_20260822T063550401096Z_13b1bbda248f`**（62 Functions / 2193 occurrences；基线 59 → 62：新增 13 / 移除 10 / 保留 49），无需手动发布。
+- 注意：Bank 2193 obs > run 内 2056 obs——前 93 篇旧 Bank obs（845 条）与本次新提取共存（无重复写入），快照 occurrences 以 Bank 全量 2193 对齐为准。
+- **StoryPattern 提取**（snapshot=evolve_250_...13b1bbda248f）：2193 occurrence → 2043 structural runs → 1904 motif 候选（REPEATED 17；长 3=744/4=539/5=371/6=250）→ 7146 variant pairs → HIGH 实审 1758 条（RELATED 1377 / SAME_PATTERN 295 / DIFFERENT 86）→ 96 cluster（75 CLEAN / 21 needs_review / 12 review_incomplete）→ **发布 71 个 Pattern**（核心链 4/5/6 全部 ≥4）、拒绝 4、人工复核 21。
+- 产物：`Code/data/story_pattern_evolve_250/`（pattern_catalog.json / pattern_summaries.json / run_report.json 等）；日志 `test/logs/story_pattern_evolve_250_20260822.log`（首轮，HIGH 实审 80 分钟）与 `..._rerun.log`（`--replay-high` 回放重跑，总 693.8s）。
+- 代码修复：`StoryPattern_Agent/summaries.py`——摘要生成重试耗尽（ValueError）不再整体崩溃，改为跳过该 cluster（catalog 记 SUMMARY_MISSING 拒绝）；新增回归测试 1 项。
+- 验证：全量离线回归 `246 passed in 45.06s`（245 + 1 新增）。
+- 遗留：4 个仅 3 函数的 cluster 无法出模板（结构上不可能满足核心链 ≥4）；21 个 cluster 待人工复核；HIGH 1758 条已冻结可回放；summary 未冻结（LLM 非确定，可复现用 `--replay-summaries`）。
+
+## 踩过的坑（续）
+- StoryPattern summary：cluster 成员去重后不足 4 个不同函数时，核心链 min_length=4 校验必然失败且重试无效（`chat_structured` 抛 ValueError 导致整个管线崩溃）；不要试图让 LLM 硬凑第 4 个函数，正确做法是跳过该 cluster（catalog 记 SUMMARY_MISSING）。
+
+## 本轮（2026-08-27）：Function Card 补全（evolve_250 · 62 张旁挂卡片）
+- 目标：MVP-B（大纲生成）前置——把 62 个 Function 补成"可生成结构约束"（前置条件/角色位置/状态变化），产物绑定冻结快照 `evolve_250_20260822T063550401096Z_13b1bbda248f`，快照/Registry/Bank 只读。
+- 证据口径（已确认）：`evidence(f) = supporting_obs_ids(f) ∩ Bank`；多支持 obs 按函数各自计入；`dangling = declared - resident`；不从旧 Bank 回收。不用 occurrences 的 `candidate_functions` 判多支持——align_occurrences 的 `occurrence.update(prior_by_id...)` 会残留旧 match 的候选字段，实测 350 条 UNCERTAIN 带 candidates，其中真正多支持仅 8 条。
+- 悬空成因确认：Function 本体跨语料继承且 supporting 只增不删（APPLY_EVIDENCE 只追加、MERGE 并集传播），Bank 语料本位重建/累积，两者生命周期不同步。快照 660 条悬空 = 401（evolve_clean Bank）+ 258（bootstrap Bank）+ 1（无出处）；涉及 53/62 函数（49 个保留种子全带 + 4 个 MERGE 新函数）。
+- 实现：`test/backfill_function_cards.py`（确定性聚合纯函数 + 每函数一次 `chat_structured` 抽象；逐函数落盘、重跑跳过已成功卡片）+ `test/test_backfill_function_cards.py`（7 项：dangling 记账/多支持双计/story 去重/频次排序与平局/0 证据边界/LLM 紧凑输入 mock）。
+- 卡片 schema：`function_id/function_name/definition` + `evidence`（declared/bank_resident/dangling/support_story_count/participant_labels/common_affected_aspects top-3/evidence_refs）+ `abstraction`（preconditions/role_slots/state_transition{before,after}）+ `llm.ok`。
+- 产物：`data/function_cards/evolve_250_20260822T063550401096Z_13b1bbda248f/function_cards.jsonl`（62 张）+ `summary.json`；62/62 `llm.ok`；LLM 62 次 / 147,999 tok / 147.4s；证据合计 declared 2347 / resident 1673 / dangling 674（按函数求和、多支持双计）。
+- 验证：62/62、function_id/名称集合与快照一致、evidence 与程序重算逐字段一致；抽查 SECRET_REVELATION / RELATIONSHIP_DEVELOPMENT_DEEPENING 抽象与 Plan.md 示例结构吻合；全量回归 253 项通过。
+- 遗留：① Inducer/Merge/Revise 三处 schema 前置未做（等卡片格式验证后再同步，避免返工）；② story_stage 暂缓；③ participant_labels 含少量具体人名（250 语料个别 obs.participants 出现"邱芸/何强"等），role_slots 已做类型级抽象，如需净化可后续处理；④ **悬空 supporting 根治待解决**——语料/Bank 继承只能消除"换语料"诱因，彻底解决需在发布新快照时做函数侧清理（校验 `supporting_obs_ids ⊆ 当前 Bank`，删除/记录失效引用）；当前快照 functions.jsonl 与 occurrences.jsonl 因 660 条悬空声明引用存在内部不一致，新快照发布时应一并处理。
+- 踩坑（不要再踩）：DeepSeek `json_object` 模式要求 prompt 必须含 "json" 字样，否则整批 400（首跑 62 连败）；chat_structured 的重试救不了这类 API 层错误，提示词必须自带 JSON 字样。
+
+## 本轮（2026-08-27 续）：transition/realization index 构建
+- 新增 `test/build_transition_index.py`（确定性统计，零 LLM）+ `test/test_build_transition_index.py`（3 项）：从 evolve_250 快照 occurrences 恢复 247 个故事序列、折叠连续重复，统计 801 种 Function 邻接对（from/to/count/support_stories）；并统计 62 个 Function 的实例机制（supporting ∩ Bank 的 surface_form 去重 + 计数 + 样本 event）。
+- 产物：`data/transition_index/evolve_250_20260822T063550401096Z_13b1bbda248f/transition_index.json`；供 Phase 3 Planner（选序列）与 Mechanism Plan（实例机制参考）使用。
+- 备注：surface_form 高度离散（多数机制 count=1），机制表主要作检索池而非"常见机制"榜；后续可按需加入题材分布与 event 聚类。
+
+## 本轮（2026-08-27 续 2）：Phase 2 精简决策 + Phase 3 方向确认
+- 边界：MVP-B 生成的是"大纲"而非全文（Plan.md 明确"止于大纲，不生成正文"）。
+- 生成链路只需要四块素材：① core_function_chain（套路骨架，首轮不用 optional_steps）；② Function Card（preconditions / role_slots / state_transition）；③ transition index（连接规律 + 实例机制）；④ Outline Realizer 的运行时角色/状态账本（防角色漂移）。
+- 明确缓做：StoryProfile 全量预生成（只留生成后验证/抽样）、InstanceCard 角色绑定、轮次 + 辅助要素的语料标注、21 个 needs_review 审计、人物姓名级知识图谱、重提取 Observation。
+- 形态学辅助要素（衔接、同化、三重化、倒置、省略）属于 Function 提取结果的逐句标注，应由 `FunctionExtract_Agent` 判定并随 occurrence 发布；生成阶段只消费结构结果，不现场伪造这些标签。当前 MVP 尚未发布这组字段。
+- 已具备产物：Function Card 62 张（`data/function_cards/evolve_250_.../`）、transition index（`data/transition_index/evolve_250_.../`，801 邻接对 + 62 机制）、PatternCatalog 71 个（core_function_chain 干净可用；optional_steps 部分为英文自然语言，首轮忽略）。
+- 下一步：Phase 3 五步生成管线（Planner → Story Seed → Mechanism Plan → Outline Realizer → Validator），先单轮短篇大纲冒烟，再按 3 题材 × 3 份验收 + 人工盲评。
+
+## 本轮（2026-08-27 续 3）：Phase 3 大纲冒烟（单链端到端）
+- 新增 `test/generate_outline.py`（不建 Agent、不铺图）：Planner（确定性 FOLLOW top pattern）→ StorySeed → MechanismPlan → OutlineRealizer → Validator 五个节点串行，用一条 core_function_chain 生成一份单轮短篇大纲。
+- 数据流验证通过：输入 = pattern_catalog 的 core_function_chain + Function Card（preconditions/role_slots/state_transition）+ transition index（实例机制）；输出 = seed + 机制方案（role_bindings）+ 分段大纲 + 状态账本 + 校验报告（逐段 recoverable 复抽 + 规则顺序检查）。
+- 冒烟暴露并修复两处：① LLM 输出字段与 pydantic schema 不符（identity vs label）→ 提示词显式写死 JSON 字段名；② LLM 重排核心链顺序 → 确定性 `_align` 按 chain 顺序重排，核心链顺序不交给 LLM。
+- 产物：`data/outlines/<snapshot_id>/smoke_<题材>.json`。
+
+## 本轮（2026-08-27 续 4）：Outline_Agent 正式化（按题材生成单轮大纲）
+- 新增 `Outline_Agent/`（state.py + Prompt/Outline_prompt.py + app.py + __main__.py）：线性 LangGraph `START → planner → seed → mechanism → realize → validate → export → END`；CLI `python -X utf8 -m Outline_Agent --genre 悬疑惊悚 [--snapshot-id ...] [--out-dir ...]`。
+- planner：按 `category_counts` 匹配题材（接受 `悬疑惊悚` 或 `01_悬疑惊悚`），取该题材 support 最高 pattern（并列按 pattern_name 字典序），无匹配回退全库最高 support；合并 Function Card 的 preconditions/role_slots/state_transition 到 core_function_chain。
+- mechanism/realize 输出后按 chain 顺序确定性 `_align`；validate = LLM 逐段 recoverable 复抽 + `rule_check`（段顺序/覆盖必须等于 chain）+ 前置/状态连续/角色一致/结局闭合。
+- 输出：`data/outlines/<snapshot_id>/<题材>_<时间戳>.json`（机器）+ 同名 `.md`（人读分段大纲）；只读知识，不写 Registry/Snapshot。
+- 测试：`test/test_outline_agent.py` 7 项（题材规范化/planner 匹配+回退+tie-break/_align/rule_check/图端到端 mock）；全量回归 263 项通过。
+- 真实冒烟：`--genre 悬疑惊悚` → FOLLOW「危局援手与连环深渊」核心链，四段大纲、overall_ok=true、rule_issues 空。
+- 同一题材换 pattern：CLI 新增 `--list-patterns`（列题材候选，悬疑惊悚 20 个）与 `--pattern <名称>`（显式指定，覆盖题材自动匹配）；测试补至 10 项。
+- 重复 Function 递进：`annotate_occurrences` 给链标注 occurrence_index/total；Mechanism/Realize 提示词要求重复项递进且不雷同；`rule_check` 增加确定性检查（重复段 beats 完全相同 → 重复 Function 未递进）。这是一条生成质量规则，不等同于形态学“三重化”标签。
+- 边界（已确认）：单份大纲（不做 Best-of-N）；首版忽略 optional_steps/轮次/辅助标签；题材只支持现存 5 键。
+
+## 本轮（2026-08-27 续 5）：MVP-B 批量 + 三组盲评材料
+- 新增 `test/run_outline_eval.py`：3 题材（悬疑/现代/末世）× 3 份全系统大纲（full）+ 两个基线（direct=只给题材；function_only=只给有序函数名）。
+- 结果：9 份 full 中 8 份 `overall_ok=True`；悬疑惊悚 #2（悬念升级式调查推进，核心链含重复函数）被确定性 `rule_check` 标记为“重复 Function 未递进”（重复段 beats 完全相同），属于生成质量阻断，非崩溃。
+- 盲评产物：`data/outline_eval/<snapshot_id>/comparison/<题材>.md`（A/B/C 盲评稿）+ `<题材>.key.json`（A/B/C → direct/function_only/full 揭盲映射）；人工先读 .md 打分，再开 .key.json 揭盲。
+- 全程 2 次 LLM JSON 解析失败被 `chat_structured` 自动重试恢复。
+
+## 本轮（2026-08-27 续 6）：MVP-B 第一轮内容盲评
+- 生成中性评审副本：`data/outline_eval/<snapshot_id>/blind_review_v1/`；移除方案标题和 Function 名称，仅保留题材、A/B/C 和中性段落编号。原始 comparison 与 key 不修改。
+- 统一量表：结构完整性、因果连贯性、人物动机、冲突与转折、新颖性、整体吸引力，均为 1–5 分；前三项为 MVP-B 核心门槛。
+- 第一轮单评审结果：`direct=3.94`、`function_only=3.44`、`full=3.22`；核心三项均值分别为 `4.22`、`3.67`、`3.33`。完整系统暂不能判定 MVP-B 通过。
+- 关键诊断：悬疑惊悚和末世科幻的 full 方案均在暴露/囚禁阶段结束，缺少主线解决和结局闭合；现代情感 full 结构闭合，但机制和辅助人物较模板化。当前 Validator 的 `overall_ok` 未能可靠拦截“故事未完成”。
+- 产物：`blind_review_v1/rubric.md`、`agent_review.json`、`agent_review.md`；验证 `json_ok`，相关测试 `14 passed`。
+- 下一步：先修复 Pattern/Planner 的闭合性约束（选择可结束的核心链，或显式补充解决/结局阶段），用同一三组材料协议重跑，再决定是否进入局部修复和 Best-of-N。单评审结果不能替代多人一致性检验。
+
+## 本轮（2026-08-27 续 7）：Pattern/Planner 可闭合性白名单实验（临时启发式，已撤回）
+- 根因：PatternCatalog 的 `core_function_chain` 是局部 motif，不天然是完整故事；Planner 原来只按题材支持数选第一名，可能以 `DANGEROUS_EXPOSURE` / `FREEDOM_DEPRIVATION` 等过程型 Function 收尾。
+- 实验方法：曾以手工结果型 Function 白名单过滤 Pattern，并要求 Realizer 兑现 `ending_direction`；该方法只用于验证“过程链直接充当完整故事”这一诊断，不是正式系统约束。当前代码已删除 `_CLOSING_FUNCTIONS`、`is_closable_pattern()` 及对应确定性校验。
+- 新首选链：悬疑=`TRUTH_EXPOSURE → DECISION_TO_ACT → EXPLOITATION → ACTIVE_COUNTERATTACK`；现代维持关系深化链；末世=`REVENGE_MOTIVATION → EXTERNAL_SUPPORT_ACQUISITION → SOCIAL_MANIPULATION → REVENGE_EXECUTION`。
+- 重跑产物独立落盘：`data/outline_eval/<snapshot_id>/closure_v2/`。9 个 full 均通过结果型末端硬约束；7/9 通过语义 Validator。悬疑 #3、现代 #3 虽末端可闭合，但具体实例未兑现 `ending_direction`，被 Validator 正确判失败；进入三组 comparison 的 top full 均通过。
+- 第二轮单评审：`direct=4.11`、`function_only=3.67`、`full=3.50`；核心三项 `4.33 / 4.00 / 3.78`。full 相对首轮：结构完整性 `3.33→4.00`、总均分 `3.22→3.50`、核心三项 `3.33→3.78`。
+- 结论：分数变化仅证明闭合约束方向值得继续验证，不能证明 Function 白名单是正确架构。正式方案改为 Function 发布可组合的状态/义务合同，由 StoryPattern 组合链路、Outline 在实例层验证闭合。
+- 评审产物：`closure_v2/blind_review_v2/rubric.md`、`agent_review.json`、`agent_review.md` 均标记为临时启发式实验；不作为 MVP-B 正式重评或论文级统计结论。
+
+## 本轮（2026-08-27 续 8）：FunctionContract 正式发布链路
+- 新增共享契约 `Contracts/function_contract.py`：`FunctionContract` 由角色槽位、状态前置条件、状态效果、义务开启/推进/解除、Function 定义哈希和证据引用组成；它描述 Function 的可组合变换，不判断某个 Function 是否属于结局。
+- 新增 `FunctionExtract_Agent/Contract`：只使用 `supporting_obs_ids ∩ 当前 Observation Bank` 的驻留证据生成类型级合同；无驻留证据直接拒绝发布。缓存仅在定义哈希和完整校验均通过时复用。
+- Bootstrap 在 `abstract_merge` 后的最终 Function 集合通过终评后生成合同；Evolve 在 Curator 稳定 Function 并通过 `Evaluator_final` 后生成合同。合同不会在仍可能被合并、修订或拆分的阶段提前生成。
+- `OntologySnapshot` 升级为 v3：原子发布 `functions.jsonl`、`occurrences.jsonl`、`function_contracts.jsonl`、`evaluation.json` 及各自哈希；严格验证每个 Function 恰有一份合同、定义哈希、证据归属和角色槽位引用。v1/v2 继续只读兼容。
+- 验证：FunctionContract、Snapshot、Bootstrap/Evolve、Revise、Outline 联合回归 `57 passed`。本轮未调用真实 LLM、未重新发布真实 62-Function 快照。
+
+## 本轮（2026-08-27 续 9）：FunctionContract 下游链路验收
+- 最小 v3 Snapshot 探针确认：`FunctionExtract → FunctionContract → Snapshot v3` 可发布、可校验、可加载。
+- 当前消费链尚未闭合：`StoryPatternState` 与 `load_inputs()` 没有携带 `function_contracts`；StoryPattern 的 motif/PatternCatalog 仍只传递 Function ID、名称和定义；`Outline.planner()` 仅接收 catalog 与 Function Card，Mechanism/Validator 也未读取合同。
+- 结论：本轮的 `274 passed` 是模块与发布链回归，不代表合同已经影响 Pattern/Planner/Outline。下一步应先定义合同在 StoryPattern 和 Outline 的最小消费接口，再做同一 Snapshot 的端到端验收；在此之前不重新跑真实盲评。
+
+## 本轮（2026-08-27 续 10）：FunctionContract 消费链接入
+- StoryPattern `load_inputs` 在 v3 Snapshot 读取 `function_contracts` 和按 ID 索引；summary 将核心 Function 的合同带入 Pattern，Catalog 对 v3 核心链逐项校验合同与 Snapshot 一致。
+- Outline 按 `snapshot_id` 加载对应 PatternCatalog 和 v3 合同；Planner 以 Snapshot 合同覆盖旧 Function Card 的角色槽位/前置条件，并拒绝 Pattern 合同与 Snapshot 合同不一致。旧 v2 继续使用 Function Card 兼容路径。
+- 新增确定性 Contract Ledger：Mechanism 的实例角色绑定应用到合同，检查状态前置/效果连续性、角色绑定和状态变化说明，跟踪义务开启/推进/解除；Validator 将合同问题写入 `contract_issues` 并强制 `overall_ok=false`。
+- 端到端最小图已验证：合同从 Snapshot 进入 Pattern/Planner，经 Mechanism 生成状态账本，最终被 Validator/Export 保留；新增定向测试 `59 passed`，全量离线回归 `281 passed in 58.20s`。
+- 当前边界：尚未用真实 62-Function v3 Snapshot 运行 StoryPattern 全流程和三组盲评；需先生成/验证该 Snapshot 的合同词汇与链间状态兼容性。
+
+## 本轮（2026-08-27 续 11）：真实 62-Function v3 Snapshot 与链间兼容性验收
+- 基于已通过终评的 `evolve_250_20260822T063550401096Z_13b1bbda248f` 生成独立 v3 Snapshot `evolve_250_contracts_20260827T100511324434Z_670b7cbb13d1`；原 v2 Snapshot 未覆盖。合同由当前 Function 的驻留证据生成，62/62 发布成功，包含 2193 条 Observation，`validate_snapshot` 返回 schema v3 / PASS。
+- 真实合同词汇：94 个 aspect、398 个 state、139 个 obligation key；义务效果为 opens 78、advances 54、resolves 27。词汇已暴露命名漂移（例如 `EDANGER`）和粒度离散，当前格式校验尚不足以保证语义词汇可组合。
+- 兼容性扫描使用同一 Function 集合的历史 71 个 Pattern，仅作离线诊断，未将旧 Catalog 冒充为 v3 发布物：226 条相邻 Function 边中，严格 `after == precondition` 的 exact compatible edge 为 0，71 个 Pattern 均未得到完整 exact 链。
+- 结论：Snapshot 发布链已闭合，但真实语义链尚未达到可组合标准；0/226 不是“所有 Pattern 都错误”的证明，而是状态命名、初始前置条件与链间前置条件尚未分层/规范化的证据。因此本轮不重跑盲评。
+- 下一步：在 `FunctionExtract_Agent` 的正式发布链上增加证据约束的 `StateVocabulary`/别名归一化与边语义定义，再重新生成 PatternCatalog，随后沿用同一三组材料协议重评。
+
+## MVP 当前交付边界与后续改进项（2026-08-27）
+- MVP 当前状态：Function 提取、不可变 Snapshot v3、Pattern/Planner/Mechanism/Validator 合同消费链和三组盲评材料均已具备；真实 62-Function 合同 Snapshot 已通过发布校验。当前结果可作为工程 MVP，不把严格链兼容性未达标描述为 MVP 阻塞。
+- P1：在 `FunctionExtract_Agent` 正式发布阶段建立证据约束的 `StateVocabulary`，统一 aspect/state/obligation key 的规范 ID、别名、拼写漂移和粒度；保留原始表述作为 evidence，不用手工结局 Function 白名单替代。
+- P1：定义链边语义，区分世界初始条件、Function 的输入条件、上一步 Function 的输出条件、可持续状态和义务清偿；调整兼容性检查，使其能判断可组合性，而不是只做字符串 exact 匹配。
+- P1：基于规范化合同重新生成并发布 PatternCatalog，要求 Pattern 核心链携带同一 Snapshot 的合同，并在发布时报告断链、开放义务和未定义终态。
+- P2：让 Planner 依据目标冲突、终态和未清义务规划故事结束，不把单个 Function 标记为“结局 Function”；让 Realizer/Validator 继续验证实例是否兑现合同效果。
+- P2：补充真实 Snapshot 下 StoryPattern 全流程验收，再用同一三组 A/B/C 材料协议重评；当前单评审结果只用于工程诊断，后续需增加多人评审一致性。
+- P2：修复合同生成的语义质量控制，包括 aspect/state 词汇漂移、证据不足、角色槽位过宽和义务 opens/advances/resolves 不完整，并保留合同生成与 Snapshot 的可追溯报告。
+
+## MVP-B 收尾状态（2026-08-27）
+- MVP-B 已收尾：大纲生成链路可运行，真实 Snapshot、Pattern/Planner、Mechanism、Validator、导出物和三组盲评材料均已具备，结果可追溯。
+- 已知限制不作为当前交付阻塞：真实合同的状态词汇尚未规范化，严格链兼容性为 `0/226`；这属于后续研究性改进，不影响当前 MVP 的完成判定。
+- 后续优化仅保留为 backlog：`StateVocabulary`/别名归一化、链边语义、合同约束下重新发布 PatternCatalog、终态与未清义务验证、多人盲评一致性、Best-of-N 和正文生成。当前不启动这些改造。
+- 下一阶段先做 MVP 使用与问题收集：选定生成目标，使用现有 Pattern/Planner 生成一批实际大纲，整理可复现的质量问题，再按一个具体问题进入小步迭代。
+
+## 本轮（2026-08-27 续 12）：MVP-B 实际使用批次
+- 沿用当前默认 MVP Snapshot、PatternCatalog 和 Function Card 链路，未覆盖既有评审产物；产物目录为 `data/outline_eval/evolve_250_20260822T063550401096Z_13b1bbda248f/usage_batch_20260827/`。
+- 共生成 3 个题材 × 3 份 full 大纲，另保留每个题材的 direct/function_only 对照和 A/B/C 文件；9 份 full 中 `overall_ok=True` 为 5 份，`False` 为 4 份。
+- 可复现问题集中为两类：① 3 份大纲的最终段仍未解决核心冲突，只停在营救、逃避、重建或后续行动；② 1 份大纲的重复 Function 未形成递进，重复段情节完全相同。现代情感 3 份均通过，说明问题不是所有题材普遍崩溃。
+- 本批次用于实际使用反馈，不作为新的论文级盲评结论。下一次小步迭代优先处理“结局段兑现核心冲突”这一单一问题，暂不启动 StateVocabulary 全量改造。
+
+## 本轮（2026-08-27 续 13）：Pattern 级 ending_spec 实现
+- StoryPattern summary 增加可选 `ending_spec`（`resolves` / `must_show` / `final_state`），要求仅依据 cluster 证据生成；局部 motif 或缺少结局证据时返回 `null`。PatternCatalog schema 升为 v2，旧 v1 Catalog 继续只读兼容。
+- Outline Planner 将 Pattern 的 `ending_spec` 写入状态并传给 Seed、Realizer、Validator；`OutlineRealization` 增加结构化 `ending`（解决动作 / 冲突解决 / 稳定终态），导出 JSON、Markdown 和 A/B/C 对照稿均保留该字段。
+- 确定性校验只检查 ending 结构是否存在且字段非空，语义是否逐项兑现仍由 Validator LLM 判断；没有 ending_spec 的历史 Pattern 不增加新的硬失败条件。
+- 验证：新增 ending_spec 传递与缺失结构测试；StoryPattern/Outline 定向测试 `29 passed`，全量离线回归 `283 passed`；真实 MVP Catalog 上单篇 smoke 生成结构化 ending 并 `overall_ok=True`。
+- 边界：`data/story_pattern_evolve_250/` 中的历史 71 个 PatternCatalog 未覆盖，仍是旧 schema；要让真实模板携带 ending_spec，需另行运行 summary/catalog 发布并写入新的版本化目录。
+
+## 本轮（2026-08-27 续 14）：Pattern summary/catalog 重生成
+- 旧的 `data/story_pattern_evolve_250/` 已移入 `data/story_pattern_evolve_250_archived_20260827_before_ending_spec/`，作为可恢复归档；新的 canonical 产物重新写入原目录。
+- 沿用同一 Snapshot、Observation Bank 和 manifest，复用冻结的 `1,758` 条 HIGH 评审，不改变既有 Function、Snapshot 或盲评材料。
+- 新生成 `74` 个 summary，发布 `74` 个 Pattern；`pattern_catalog.json` 的 `catalog_schema_version=2`。其中 `10/74` 个 Pattern 具备证据支持的 `ending_spec`，其余局部或证据不足的 Pattern 保持 `null`。
+- 新 catalog 已被 Outline 默认加载并生成结构化 ending。样例中的 ending 能描述解决动作和终态，但 Validator 仍识别出“最后一个 Function 的效果跳到 ending 才发生”的未闭合问题；这属于实例化兑现质量，不影响 summary/catalog 发布完成。
+- 当前可用产物：`data/story_pattern_evolve_250/pattern_summaries.json`、`data/story_pattern_evolve_250/pattern_catalog.json`；历史产物保留在归档目录。
+
+## 本轮（2026-08-27 续 15）：大纲到正文 MVP
+- 新增独立 `Story_Agent`：读取 `Outline_Agent` JSON，按大纲段生成有序场景计划，再一次调用 LLM 写成 3000–5000 字中文短篇。
+- 输入使用已有 `seed`、`mechanism_plan`、`outline.segments`、`ending_spec` 和 `outline.ending`；不修改 Function、Pattern 或 Outline 生成链。
+- 线性图为 `load_outline → plan_scenes → write_story → export`；场景计划必须覆盖原大纲段且不改变顺序，最后场景承担结局兑现。
+- 输出 `data/stories/<snapshot_id>/` 下的 JSON（源大纲、场景计划、分场正文、字符数）和仅含标题、正文的 Markdown。源大纲校验结果保留但不阻断试跑；字符数超出目标只标记，不自动重写。
+- 离线测试覆盖大纲格式错误、场景覆盖/顺序/结局和端到端导出；真实悬疑样例完成 10 个场景、3,194 个中文字符，字符数通过。正文 Prompt 明确禁止泄露 P1/P2 等内部角色 ID，并要求叙述使用第三人称。
+
+## 本轮（2026-08-27 续 16）：Function 前置约束进入正文生成
+- `Story_Agent` 新增 LLM 前置节点 `function_constraints`，线性图更新为 `load_outline → function_constraints → plan_scenes → write_story → export`；场景计划与正文使用同一份约束，不增加正文后语义校验。
+- 约束按原大纲段发布角色绑定、前置条件、结构效果、义务变化、必需行动、原因、状态变化和到下一段的因果连接；故事级约束发布核心冲突、结局解决对象、必须展示的事实、稳定终态和解决动作。
+- 程序确定性锁定段索引、Function 名称、段数和顺序，拒绝缺段、重复段或 Function 漂移；约束语义由 LLM 综合 seed、mechanism_plan、contract_ledger、outline 和 ending_spec 生成。
+- 离线联合回归 `16 passed`。真实悬疑样例生成 4 段约束、7 个场景和完整正文，正文未暴露角色 ID 或 Function 名；中文字符数为 1,800，按既有 MVP 规则保留并标记 `length_ok=false`。
+
+## 本轮（2026-08-27 续 17）：9 组正文 A/B 盲评
+- 以当前快照下原有 3 个题材 × 3 份大纲为同一材料，生成 18 份正文：A 为 `Function 约束 → 场景计划 → 正文`，B 为 `大纲 → 正文`；原始大纲 JSON 未覆盖。
+- 原有 9 份历史大纲缺少 `outline.ending`，且其中部分 Pattern 名称已不在当前 Catalog。为保持 Function、seed、mechanism 和 beats 不变，正文入口仅在内存中依据最后一段行动与 `final_ledger` 投影 ending，并在评测 manifest 中标记 `legacy-ending adapter`。
+- A 的长度达标数为 `5/9`，B 为 `2/9`。单一 LLM 盲评中，A 获整体优选 `5` 组，B 获 `4` 组；A/B 平均分分别为 `4.111/4.000`。
+- 六项平均分（A / B）：结构完整性 `4.444/4.333`、因果连贯性 `4.222/4.111`、人物动机 `4.222/4.000`、冲突与转折 `4.222/4.111`、新颖性 `3.111/3.111`、整体吸引力 `4.111/4.000`。
+- 产物目录：`data/story_ab_blind/evolve_250_20260822T063550401096Z_13b1bbda248f/`；匿名稿、揭盲 key 和盲评记录位于其 `blind_review/`。结果为工程诊断，不作为多人一致性或论文级统计结论。
+- 当前取舍：暂不修正结局场景的语义兑现检查。`resolves_ending` 仍是场景位置标记，不能保证最后场景已经完成解决动作；该问题记录为后续质量稳定化任务，不阻塞 MVP 使用与本轮 A/B 对比。
+
+## 本轮（2026-08-27 续 18）：10 篇正文生产与自动质量诊断
+- 使用当前 `Story_Agent` 批量生成 10 篇正文：9 份历史大纲加 1 份新版悬疑大纲；历史大纲仍只在内存中补 `outline.ending`，原始输入未覆盖。
+- 10/10 篇均完成 `load_outline → function_constraints → plan_scenes → write_story → export`，每篇均生成 JSON 和 Markdown；Markdown 完整性检查通过，未泄露 Function、场景元数据或内部角色 ID。
+- 生成正文中 4/10 篇达到 3000–5000 中文字符，6/10 篇偏短；长度只作诊断标记，不触发自动重写。
+- 独立 LLM 质量诊断发现的问题集中在：人物动机（4 篇）、冲突解决（3 篇）、因果/衔接（4 篇合并计数）以及结构和结局收束。第 10 篇《末世符号》出现最明显的结局偏离：外部支援后的防御行动未充分呈现，核心对抗突然转为合作，未完整兑现大纲结局。
+- 自动诊断产物：`data/story_batch_10/usage_batch_story10_20260827T232626/quality_report.json` 和 `quality_report.md`。当前诊断用于工程问题发现，不替代人工或多人一致性评审；结局语义约束仍按既定取舍暂缓修正。
+
+## 本轮（2026-08-27 续 19）：重复 Function 对齐与正文入口校验
+- Outline 的 Mechanism、Realization 和 Validator 输出新增唯一 `segment_index`；Planner 在链上按位置写入索引，LLM 输出按索引确定性对齐，并校验索引覆盖和 Function 名一致。
+- 重复 Function 不再以 `function_name` 作为唯一键，因此 `A → B → A` 的每次 occurrence 保持独立，原有 `occurrence_index/occurrence_total` 继续用于要求逐次递进。
+- Story_Agent 正文入口及正式批处理均拒绝显式 `validation.overall_ok=false` 的大纲；批处理将其记录为 skipped，不调用正文生成节点。
+- 验证：相关定向回归 `21 passed`，全量离线回归 `288 passed`；使用实际失败大纲验证入口返回“正式正文批次拒绝生成”。本轮未重新生成远程正文批次。
+
+## 本轮（2026-08-28）：重复 Function 与正文入口真实回归
+- 使用 6 个含重复 Function 的 Pattern 候选重新生成，获得 5 份 `overall_ok=true` 大纲并生成 5 篇正文；另 1 份 `overall_ok=false` 大纲被正式正文入口阻断，未调用正文生成。
+- 5 份通过大纲的重复 occurrence 均保持独立：Mechanism 与 Outline beats 的 `distinct` 检查均为 true，`occurrence_index` 均按 1、2 保留。说明 `segment_index` 对齐修复在真实 LLM 链路中生效。
+- 正文产物为 JSON/Markdown 各 5 份；中文字符数为 3992、3304、1063、2967、2939，长度达标 2/5。篇幅不足仍是正文生成层问题，与本轮两个结构修复无关。
+- 回归产物：`data/story_regression_5/regression_story5_20260827T235915/regression_report.json`；本轮未处理结局语义约束和篇幅自动修复。
+
+## 本轮（2026-08-28 续 1）：短篇正文单次生成约束强化
+- 短篇 MVP 保持 `load_outline → function_constraints → plan_scenes → write_story → export`，`write_story` 一次读取完整场景计划并生成全文，不增加逐场循环、历史正文或连续性状态。
+- 正文输入补充 `mechanism_plan` 和确定性的 `writing_requirements`：总目标为 3800 个中文字符，按场景分配目标篇幅，最后场景不少于约 700 字；实际长度仍在导出时标记，不自动重写。
+- 正文 Prompt 强化行动兑现、动机先行、相邻场景因果承接和结局闭合；解决动作必须实际完成并展示稳定终态，不能以准备、承诺、突然援助或冲突改向代替。
+- 验证：Story_Agent 定向测试 `5 passed`，全量离线回归 `288 passed`。
+
+## 本轮（2026-08-28 续 2）：单次正文 Prompt 五篇真实评估
+- 使用上一轮真实回归中 5 份 `overall_ok=true` 大纲重新生成，保持大纲不变，只观察强化后的单次正文生成；5/5 完成并由独立 LLM 诊断，不自动改写。
+- 新正文中文字符数为 `5361、3016、2955、5273、3035`，达标 `2/5`；旧正文平均 2853 字，新正文平均 3928 字，但两篇超上限、一篇略低于下限，说明分场字数软约束提高了平均篇幅，尚未提高长度稳定性。
+- 六项平均分：结构完整性 `4.4`、因果连贯性 `4.0`、人物动机 `4.0`、冲突解决 `4.6`、结局闭合 `5.0`、可读性 `4.6`。5 篇均被评为核心冲突得到处理并达到终态。
+- 高频内容缺陷仍是动机铺垫不足、相邻情节跳步、关键行动或高潮展开偏快；首次正文调用另出现一次场景 ID 不完整而触发整篇重跑，两次结构化 JSON 解析重试。
+- Markdown 确定性扫描未发现 P1/P2、Function、scene_id 或状态账本泄露。产物：`data/story_batch_5/usage_batch_story5_20260828T100225/quality_report.json` 和 `quality_report.md`。
+
+## 本轮（2026-08-28 续 3）：情节实现 Prompt 同大纲复测
+- 仅修改 `SCENE_PLAN_PROMPT` 与 `STORY_PROMPT`，不改 schema、State 或图结构；场景 beats 被要求按动机/铺垫、尝试、阻碍、应对、转折、结果组织，并提前建立关键线索、工具、援助和角色转变的依据。
+- 使用续 2 完全相同的 5 份大纲重生成。相对上一批，平均分变化为：结构 `4.4→4.6`、因果 `4.0→4.4`、人物动机 `4.0→4.4`、冲突解决 `4.6→4.6`、结局闭合 `5.0→4.6`、可读性 `4.6→4.8`；评估问题数由 `13→7`。
+- 新正文字符数为 `2520、2641、2332、3489、3660`，平均 `2928`，长度达标仍为 `2/5`。两篇正文泄露 P2/P3 内部角色 ID，说明 Prompt 约束不能稳定保证输出洁净。
+- 结论：该 Prompt 对局部因果、动机和可读性呈积极信号，但同时出现篇幅回落、结局分下降和角色 ID 泄露，尚不能判定为整体质量提升；当前修改保留为待决实验状态。产物：`data/story_batch_5/usage_batch_story5_20260828T102002/quality_report.json` 和 `quality_report.md`。
+
+## 本轮（2026-08-28 续 4）：场景因果增强节点接入
+- 在 `plan_scenes` 与 `write_story` 之间新增 `enrich_scenes`，专门补充每场的 `motivation`、`causal_from_previous` 和带后续兑现位置的 `setups`；不修改已有场景行动、Function 顺序或结局。
+- 程序按 `scene_id` 确定性对齐增强结果，并拒绝未知场景、缺场景和指向当前/前置场景的伏笔，避免 LLM 通过增强节点改变故事骨架。
+- 正文节点接收增强计划，将动机、伏笔和前场因果作为独立输入；图更新为 `load_outline → function_constraints → plan_scenes → enrich_scenes → write_story → export`。
+- 验证：Story_Agent `6 passed`，全量离线回归 `289 passed`；真实末世科幻烟测生成 4 场、6 个伏笔、3727 个中文字符，`length_ok=true`。产物：`data/story_smoke_enrich/20260828T/末世科幻_20260828T000300_story_20260828T105158.json` 及对应 Markdown。
+
+## 本轮（2026-08-28 续 5）：取消场景固定字数并进行同大纲对照
+- `write_story` 不再生成或传入 `scene_char_targets`；正文 Prompt 改为按每场铺垫、行动、冲突、转折和结果的完整性自然分配篇幅。
+- 全篇 `3000–5000` 字保留为软性参考和导出统计，不作为场景平均分配规则。
+- 同一份现代情感大纲对照生成：原版本《暗夜之光》为 `3087` 字、9 场；新版本《灯光下的救赎》为 `1766` 字、7 场，`length_ok=false`。
+- 新版本的情感连续性略有改善，但全篇过短，说明取消场景字数后不能单独保证正文展开；后续应使用“全篇最低篇幅 + 场景语义完整性”联合约束，而不是恢复场景平均字数。
+- 验证：Story_Agent 定向测试 `6 passed`，Python 编译通过。产物：`data/story_eval_modern_unbounded_20260828T/现代情感_20260828T000710_story_20260828T112340.json` 及对应 Markdown。
+
+## 本轮（2026-08-28 续 6）：全篇最低篇幅与语义完整性约束
+- 保留无场景平均字数策略；正文 Prompt 将全篇 `min_chinese_chars` 明确为最低要求，要求篇幅不足时优先补足动机、行动、转折和后果。
+- 增加场景级语义完整性要求：本场目标或失败结果必须实际发生，不能用总结替代关键行动；结局必须依次展示解决行动、结果、人物反应和稳定终态。
+- 该版本仍不增加自动重写、正文后校验或逐场历史上下文。
+- 同一现代情感大纲真实生成《暗夜微光》：5 个场景分别为 664、510、605、622、703 字，中文字符数 `2600`，`length_ok=false`；Function 段覆盖、场景顺序、结局位置和正文元数据扫描均通过。
+- 与前一版相比，场景级展开和感情递进改善，但全篇最低篇幅仍未稳定达到，说明 Prompt 下限不能替代生成长度控制。
+- 仅将 `write_story` 的 `reasoning_effort` 设为 `high` 后，用同一现代情感大纲生成《夜色里的灯火》：10 个场景、6374 个中文字符，`length_ok=false`。
+- 相比 `none` 版本，人物过去、危险前因、证据铺垫和结局后果展开更充分；但正文超过上限约 1374 字，说明高推理改善完整性倾向，同时带来篇幅和成本风险。
+- 本轮验证：LLM 与 Story_Agent 定向测试共 `11 passed`，正文无 Function/角色 ID/场景元数据泄漏。产物：`data/story_eval_modern_reasoning_high_20260828T/现代情感_20260828T000710_story_20260828T113744.json` 及对应 Markdown。
+
+## 本轮（2026-08-28 续 7）：纯 LLM 正文对照
+- 使用与《夜色里的灯火》相同的现代情感基础素材，新增纯 LLM 直写对照；输入仅包含世界、人物、核心冲突和结局方向，不注入 Function、约束合同、场景计划或场景增强。
+- 复测版本《在风暴中靠近》生成 `4781` 个中文字符；与结构化链路《夜色里的灯火》的 `6374` 字处于同一量级，但仍短 `1593` 字。产物：`data/story_eval_pure_llm_20260828T/现代情感_纯LLM_story_20260828T120124.json` 及对应 Markdown。
+- 纯 LLM 能自行组织“职场压迫—证据追查—威胁升级—反击—关系确认”的表面主线，但 IP 追踪、警方协助和监控证据等关键转折出现较快；结构化链路在前因、人物过去和结局后果上更完整。
+- 本轮保留短篇 MVP 的长度目标作为对比参考；纯 LLM 即使收到 `6000` 字下限提示，仍只生成 `4781` 字，说明单次提示不能稳定控制篇幅。
+- 两篇均使用 `reasoning_effort=medium` 配置名；按当前 DeepSeek 接口映射，`medium` 实际映射为 `high`，因此这不是有效的中低推理强度对照。
+
+## 本轮（2026-08-28 续 8）：末世科幻结构化与纯 LLM 对照
+- 使用同一份 `末世科幻_20260828T000300.json` 大纲生成两版正文；结构化版《温室坐标》经过 Function 约束、场景计划、动机/伏笔/因果增强和一次性写作，纯 LLM 版《废土之上，温室之光》只接收基础素材。
+- 为控制变量，纯 LLM 目标调整为 `3000–4000` 字；最终结构化版 `3495` 字，纯 LLM 版 `2873` 字，差 `622` 字，作为本组最接近长度的对照。
+- 两版都完成了“寻找温室—遭遇统治者阻挠—识别/处理间谍—进入温室—建立新家园”的主线；结构化版在行动因果、资源迁移和稳定终态上更集中，纯 LLM 版在背叛反转上更突出，但证据和人物关系的转折更依赖临时解释。
+- 产物：`data/story_eval_structured_scifi_20260828T/末世科幻_20260828T000300_story_20260828T121750.json`、对应 Markdown，以及 `data/story_eval_pure_llm_scifi_20260828T/04_末世科幻_纯LLM_story_20260828T121953.json`、对应 Markdown。
+
+## 本轮（2026-08-28 续 9）：提取结构化正文 Prompt 的直接调用对照
+- 从结构化正文产物中提取 `STORY_PROMPT` 和 `write_story` 的完整输入 payload，包含 Function 约束、场景计划、动机/伏笔/因果增强和结局要求；不经过 LangGraph 前置节点，直接调用一次 LLM 生成正文。
+- 直接调用《废土绿洲》生成 `3170` 个中文字符；结构化原文《温室坐标》为 `3495` 字，差 `325` 字，二者均在 `3000–5000` 字区间。
+- 两篇的宏观情节和关键因果高度接近，说明结构信息已经主要由最终正文 Prompt 携带；直接调用仍出现 `P3` 角色 ID 泄漏，并对部分动机和结局过程进行了压缩，说明节点链路还承担输入整理、角色替换和输出稳定性作用。
+- 新增实验脚本：`Code/test/run_extracted_story_prompt_compare.py`。产物：`Code/data/story_eval_extracted_prompt_20260828T/04_末世科幻_提取prompt_story_20260828T125611.json` 及对应 Markdown。
+
+## 本轮（2026-08-28 续 10）：提取现代情感正文 Prompt
+- 根据 `现代情感_20260828T000710_story_20260828T113744.json` 重建 `write_story` 的完整输入，生成可直接复制使用的 prompt 文件；本轮未调用 LLM 生成新正文。
+- Prompt 包含 `STORY_PROMPT`、seed、mechanism_plan、Function 约束、场景计划、动机/伏笔/因果增强、写作长度要求和 ending；总长度 `22050` 字符。
+- 产物：`Code/data/story_prompt_extract_20260828T/现代情感_20260828T000710_story_20260828T113744_story_prompt.txt`。提取脚本：`Code/test/extract_story_prompt.py`。
+
+## 本轮（2026-08-28 续 11）：反应区间规则后的正文复测
+- 在 `SCENE_PLAN_PROMPT` 与 `STORY_PROMPT` 中加入“Function 由场景组整体兑现”“重大事件后的后果反应”“单场最多一个重大转折”和“关系一次最多推进一级”。未改变图拓扑、状态结构或固定场景字数。
+- 同一现代情感大纲重新生成《暗处有光》：10 场、`5098` 个中文字符，因超过 5000 字上限 98 字而标记 `length_ok=false`。
+- 相比旧结构化版，新增了流言后的主动回避、袭击后的照料与两天日常相处，情感转折不再全部挤在袭击当晚；但受伤后的过去坦白和后续表白仍然偏快，说明 Prompt 规则能改善节奏倾向，但不能完全替代更细的关系阶段规划。
+- 与用户提供的纯 LLM《没有风的地方》对照：新结构化版完成了完整的反派处理、身份揭露、公开选择和稳定关系；纯 LLM 版语言与氛围更自然，但停留在审计启动和男女主初步建立联系。
+- 产物：`Code/data/story_eval_modern_pacing_20260828T/现代情感_20260828T000710_story_20260828T201011.json` 及对应 Markdown。
+
+## 本轮（2026-08-28 续 12）：取消正文目标与最大字数约束
+- `STORY_PROMPT` 不再要求目标字数或最大字数，也不设置单场景字数；正文以场景目标、关键行动、后果反应、关系变化、伏笔兑现和结局动作均已充分展开为结束条件。
+- `writing_requirements` 仅保留 `min_chinese_chars=3000` 作为防止过早结束的软提示；导出 `length_ok` 改为只检查是否达到该下限，超过 5000 字不再判定失败。
+- 同步清理正文 Prompt 提取脚本和直接对照脚本中的旧目标/最大字数字段。定向测试 `11 passed`，Python 编译通过。
+
+## 本轮（2026-08-28 续 13）：取消长度上限后的现代情感复测
+- 使用取消目标/最大字数约束后的正文链重新生成《暗夜灯塔》：11 场、`5588` 个中文字符，`length_ok=true`。
+- 结构上出现了医院恢复、一周后的共同生活和关系重新确认，重大事件后的反应区间比上一版更充分；同时正文自然超过原 5000 字上限，验证了长度统计不应把超长直接当作失败。
+- 与纯 LLM《没有风的地方》对照：新结构化版完成了完整反派处理、身份揭露、公开选择和稳定关系；纯 LLM 版在语言氛围和心理克制上更自然，但停留在审计启动与初步建立联系。
+- 产物：`Code/data/story_eval_modern_no_length_cap_20260828T/现代情感_20260828T000710_story_20260828T202553.json` 及对应 Markdown。
+
+## 本轮（2026-08-28 续 14）：限制 mechanism_plan 与大纲状态幅度
+- `MECH_PROMPT` 规定每段只产生当前 Function 所需的最小状态变化，关系每次最多推进一级，重复 Function 通过风险、信息、代价或投入递进，不得提前完成后续 Function 或结局。
+- `REALIZE_PROMPT` 禁止大纲把 mechanism_plan 的状态结果继续放大；`VALIDATE_PROMPT` 与 `validate_node` 开始接收并检查 `mechanism_plan`，提前完成后续 Function、关系终态或 ending_spec 时必须判失败。
+- 离线验证：Outline、Story 与 LLM 定向测试共 `23 passed`，Python 编译通过。
+- 同一 Snapshot、现代情感题材与“拯救之恋”Pattern 重新生成大纲，`overall_ok=true`。前四段分别停在首次正面互动、初步好感、经救援后的信任、暴露脆弱后的理解，第五段才进入明确承诺；产物：`Code/data/outline_eval_mechanism_pacing_20260828T/现代情感_20260828T204205.json`。
+- 新大纲生成正文《失真的数据》，8 场、`2639` 字，`length_ok=false`。正文最后擅自加入当众求婚与半年后婚礼，超出大纲的“明确承诺”，说明本轮已修复 mechanism_plan → outline 的状态过满，但正文层仍可能放大结局且当前没有正文后语义校验。
+- 正文产物：`Code/data/story_eval_mechanism_pacing_20260828T/现代情感_20260828T204205_story_20260828T204641.json` 及对应 Markdown。
+
+## 本轮（2026-08-28 续 15）：同一新大纲第二次正文采样
+- 保持 `现代情感_20260828T204205.json` 完全不变，重新运行 Story_Agent，生成《晚风与归途》：11 场、`9121` 个中文字符，`length_ok=true`。
+- 新版本按首次援助、茶水间接触、正式约会、第二次危机、半个月持续互动、暴露过去、最终共同解决危机的顺序推进关系；结尾只确认交往，没有再次越界到求婚或婚礼。
+- 相比同大纲第一次采样《失真的数据》的 `2639` 字和突兀求婚，本次递进明显自然，说明 mechanism_plan 与大纲修复已经提供了可实现的合理骨架，但单次 Story_Agent 采样在篇幅和结局强度上仍存在较大方差。
+- 产物：`Code/data/story_eval_mechanism_pacing_retry_20260828T/现代情感_20260828T204205_story_20260828T205700.json` 及对应 Markdown。
+
+## 本轮（2026-08-29）：人物关系、动机与双向状态变化进入 Outline schema
+- `SeedCharacter` 新增 `motivation` 与 `relationships`：前者区分人物目标和愿意承担代价的原因，后者使用稳定人物 ID 记录开场关系事实、态度、利益联系与边界；结构角色不自动规定人物的开场态度。
+- `MechanismStep` 新增 `character_state_changes`：逐人物记录变化前状态、可观察触发证据或代价、变化后状态；关系变化必须覆盖双方，不能只生成主角变化并默认另一方同步接受。
+- `MECH_PROMPT` 要求每步 `why` 从 seed 动机、初始关系与前序事实推出；`REALIZE_PROMPT` 和 `VALIDATE_PROMPT` 已消费并检查逐人物变化，原有总体 `state_change` 和合同账本保持不变。
+- 关系状态不使用固定恋爱阶梯，而是根据题材和冲突选择熟悉程度、信任、利益立场、权力、责任、依赖或亲密等实际维度；一个动作不能自动解决无直接因果关系的其他状态维度。
+- 离线验证：Outline、合同流与 Story 定向测试共 `22 passed`，Python 编译通过。
+- 使用“压抑觉醒与决断”真实重跑，`overall_ok=true`。P2 形成“谨慎好感→留意异常→主动帮助→认真考虑关系→私下坦白并承诺”的独立变化链；公开处理上司压力与私下确认关系已分离。产物：`Code/data/outline_eval_character_motivation_20260829T/现代情感_20260829T091817.json`。
+
+## 本轮（2026-08-29 续 2）：大纲结局收束与通过率修复
+- `OutlineRealization.ending` 改为必需字段；`rule_check` 对所有大纲检查独立的解决动作、冲突结果和稳定终态。
+- `REALIZE_PROMPT` 将 `ending` 明确定义为 Function 链之后的独立结局收束单元。最后一个 Function 只需形成可支持结局的事实、证据、资源、选择、对手弱点或关系条件，不能被要求承担其语义之外的全局解决。
+- `VALIDATE_PROMPT` 改为检查最后一个 Function 是否支持 ending，以及 ending 是否实际完成 `resolution_actions`、`ending_spec` 和 `ending_direction`，不再把非终结 Function 本身当作全局结局。
+- `candidate_patterns` 默认优先选择带正式 `ending_spec` 的 Pattern；显式指定 Pattern 的行为不变，也未恢复手工结局 Function 名单。
+- 全量离线回归：`289 passed`。修复后跨题材稳定性批次产物：`Code/data/story_stability/stability_20260829T101911/`。
+- 复测结果：9 份大纲中 8 份通过，16 篇正文生成；修复前为 3/9 大纲通过、6 篇正文。悬疑惊悚由 2/3 提升为 3/3，现代情感由 0/3 提升为 3/3，末世科幻为 2/3；唯一阻断样本因 ending 与 `ending_spec` 的外部支援、谜团应对和稳定终态不一致，保留为真实失败。
+
+## 本轮（2026-08-29 续 3）：正文层首轮质量验收
+- 复用上一轮 8 份通过大纲的 16 篇正文样本，使用独立 LLM 诊断器检查 Function/场景兑现、因果、人物动机、冲突解决、结局闭合和可读性。
+- 16/16 篇完成产物且长度统计达标。平均评分：结构 `4.75`、因果 `4.50`、人物动机 `4.62`、冲突解决 `4.75`、结局闭合 `4.81`、可读性 `4.81`。
+- 发现 1 个高严重度问题：`末世科幻_03_run_02` 的正文只叙述“议会逮捕”，没有实际展示逮捕动作；其余问题主要是因果衔接轻微跳步、局部动机铺垫不足和结尾动作展开偏快。
+- 产物：`Code/data/story_stability/stability_20260829T101911/story_quality_report.json` 与对应 Markdown。
+- 结论：大纲层已具备进入正文 MVP 的条件；正文层的首要小步修复是把结局 `resolution_actions` 转成可观察的实际行动，同时保留叙述空间，不恢复逐场固定字数。
+
+## 本轮（2026-08-29 续 1）：跨题材短篇稳定性批次
+- 新增 `Code/test/run_story_stability_batch.py`，固定当前 Snapshot，按悬疑惊悚、现代情感、末世科幻各选 3 个 Catalog Pattern；每份通过校验的大纲固定生成 2 次正文。
+- 批次目录：`Code/data/story_stability/stability_20260829T095042/`；汇总：`stability_report.json`。
+- 9 份大纲中 3 份通过、6 份被 `validation.overall_ok=false` 拦截；因此实际生成 6 篇正文，未让失败大纲进入正文层。通过样本来自悬疑惊悚 2 份、末世科幻 1 份，现代情感 3 份全部被拦截。
+- 6 篇正文均达到当前最低篇幅要求。3 份可配对大纲的两次正文字符差分别为 `2214`、`651`、`1784`，说明一次性正文生成的采样方差仍然明显。
+- 运行中出现一次场景增强 `scene_id` 对齐错误和一次场景计划来源段落对齐错误，均由现有单次重试后成功；这属于链路稳定性信号，后续需与内容质量问题分开处理。
+
+## 本轮（2026-08-28 续 11）：从 raw 正文提取情节创作提示词
+- 根据 `现代情感_20260828T000710_story_20260828T113744.md` 的实际叙事内容，提炼出自然语言情节提示词，仅保留人物、事件顺序、冲突升级、关系推进、反转和结局要求。
+- 该提示词不包含 Function、场景编号、状态账本、结构化 JSON 或正文节点规则，可直接作为 LLM 的故事创作输入。
+- 产物：`Code/data/story_prompt_extract_20260828T/现代情感_夜色里的灯火_plot_prompt.txt`。本轮未调用 LLM。
+
+## 本轮（2026-08-29 续 4）：叙事展开独立节点
+- `Outline_Agent` 的 `scaffold` LLM 节点位于 `planner → seed → mechanism → scaffold → realize → validate → export`。公开大纲包含必需的 `narrative_plan`，逐段保存 `genre_realization`、`motivation_setup`、`connective_event`、`reaction_beat` 和前向/ending `setup_payoffs`。
+- `mechanism` 只保留角色绑定、结构行动、原因、状态变化和下一步结构条件；真实参考机制由 `scaffold` 消费。程序按 `segment_index` 对齐计划，并拒绝指向当前段、前序段或不存在段落的伏笔回收位置。
+- `realize` 与 `validate` 只消费 `narrative_plan` 中已确定的题材实现和叙事支架，不再自行设计第二套动机、反应或伏笔。核心解决动作必须实际发生，逮捕、晋升、制度变化等后续社会结果允许在 `final_state` 概述。
+- `Story_Agent` 的图为 `load_outline → function_constraints → plan_scenes → write_story → export`。`plan_scenes` 只把大纲已经确定的叙事支架分配到场景，旧大纲因缺少 `narrative_plan` 明确拒绝。
+- 形态学辅助标签（衔接、同化、三重化、倒置、省略）不由本节点生成；当前上游尚未发布这些字段。重复 Function 的递进检查只属于生成质量规则，不命名为“三重化”。
+- 离线回归：定向 `26 passed`，全量 `293 passed`。
+- 真实验收：`Code/data/story_stability/stability_20260829T141348/`，3 题材 × 2 大纲 × 1 正文全部完成，6/6 大纲通过、6/6 正文生成且长度达标；Function/叙事展开/Outline 顺序全部一致，37 个伏笔目标全部合法，重复 Function 的题材表现均独立，Story 产物不再含 `scene_enrichments`。
+
+## 本轮（2026-08-29 续 5）：全题材关系状态上界
+- Outline 的 Seed、Scaffold、Realize 和 Validate 提示词统一使用“关系维度 + 状态上界”：题材标签、性别、共同行动或宽泛的“关系稳定”不能自动决定关系类型。
+- Seed 从 Function、角色槽位和 ending contract 能支持的最低关系事实开始；Ending 只能收束 mechanism 已建立的状态，不得把信任、合作、和解或关心推导为另一种关系或更高承诺。
+- Validate 对无结构依据的初始关系和结局跃迁判定 `overall_ok=false`；Story 的约束发布、场景计划和正文节点同样不得放大关系终态。
+- 定向回归：`25 passed`；全量回归：`292 passed`。
+- 使用同一“复仇与关系修复” Pattern 真实重跑，Seed 未再创造 `love_interest` 或爱情预设，Function 链最终将关系稳定在“互信合作伙伴”，结局只执行诉讼、夺回控制权和伙伴关系稳定，`overall_ok=true`。产物：`Code/data/outline_eval_relationship_boundary_20260829T152000/现代情感_20260829T151732.json`。
+
+## 本轮（2026-08-29 续 6）：正文场景开发独立节点
+- `Story_Agent` 图调整为 `load_outline → function_constraints → plan_scenes → develop_scenes → write_story → export`。
+- `plan_scenes` 只拆分场景及确定人物、时空、目标、阻碍、行动、状态变化和衔接；`develop_scenes` 按 `scene_id` 发布 `pacing_mode`、`expand_points`、可选的 `reaction_decision`、局部 `causal_moments` 与 `exit_aftereffect`，不得改变既定情节或创造新内容。
+- `write_story` 只接收 Seed、Function 约束、场景计划、场景开发计划和结局合同，不再重复读取 `mechanism_plan` 与 `narrative_plan`；JSON 产物新增 `scene_developments`，Markdown 仍只包含自然正文。
+- 离线验证：Story Agent 端到端 `8 passed`；全量回归 `294 passed`，Python 编译通过。
+
+## 本轮（2026-08-29 续 7）：上游计划正式 schema 化
+- `Story_Agent.SourceOutlineDocument` 将 `mechanism_plan` 类型化为 `Outline_Agent.MechanismPlan`，与已有的 `NarrativePlan` 一样在大纲加载边界执行字段校验。
+- 旧测试夹具补齐 `segment_index` 和 `character_state_changes`；缺少这些字段的大纲会在进入正文图前明确拒绝。
+- 使用新 schema 重新生成现代情感大纲并通过校验，随后生成正文《证言》：10 场、4201 个中文字符、`length_ok=true`；产物位于 `Code/data/story_schema_modern_20260829T/`。
+
+## 本轮（2026-08-29 续 9）：Outline 到 Story 一键编排
+- 新增 `Code/Pipeline_Agent` 顶层 LangGraph：`START → generate_outline → generate_story → export → END`。两个节点复用现有 `Outline_Agent` 和 `Story_Agent` 编译图，不复制 Prompt 或 LLM 逻辑。
+- `generate_outline` 自动使用已发布 PatternCatalog，可通过 `--pattern` 指定 Pattern；大纲 `validation.overall_ok=false` 时保留大纲并阻止正文启动。
+- 默认运行目录为 `Code/data/pipeline_runs/<时间戳>/`，导出大纲 JSON、正文 JSON、正文 Markdown 和 `pipeline_manifest.json`。
+- 离线 Pipeline 测试：`2 passed`；全量回归：`296 passed`。
+- 真实一键运行 `现代情感` 完成：Pattern 为 `复仇与关系修复`，正文标题《偿还》，3457 个中文字符，`length_ok=true`；产物位于 `Code/data/pipeline_runs/20260829T222355/`。
+
+## 本轮（2026-08-29 续 8）：Story Agent 文学表达计划
+- `Story_Agent.develop_scenes` 的 `SceneDevelopment` 新增必需的 `literary_plan`，逐场记录环境叙事作用、感官锚点、意象/母题、对话潜台词、有限修辞重点和句式节奏。
+- `STORY_PROMPT` 只执行该计划：文学表达必须服务既定行动、人物反应和状态变化，不新增情节，也不要求每场堆砌修辞。
+- 定向回归：`8 passed`，Python 编译通过。
+- 使用现代情感大纲真实生成《破晓》：10 场、4431 个中文字符、`length_ok=true`；10/10 场景均包含文学计划，Markdown 未暴露内部字段。产物位于 `Code/data/story_modern_literary_20260829T/`。
+
+## 本轮（2026-08-30）：统一 StoryCLI
+
+- 新增 `Code/StoryCLI`，公开提供 `function bootstrap/evolve`、`template build` 和 `story write` 三组子命令；批量输入支持多个 `.txt` 文件和递归目录。
+- `template build` 内部串联现有 Function 运行产物、`StoryPattern_Agent`、`Outline_Agent`，按 `StoryPattern → Outline` 生成并导出 `template_bundle.json`；Pattern 与 Outline 被固定在同一 Bundle 中。
+- `story write` 复用 Bundle 中的 Outline；附加用户要求时固定 Pattern、重新生成 Outline，再调用 `Story_Agent`。顶层不复制各 Agent 的 Prompt 或 LangGraph 节点。
+- 新增 `StoryPattern_Agent` 的模块入口，复用原有 Pattern driver，避免统一 CLI 通过不可导入的测试脚本路径启动。
+- 离线测试：`28 passed`（CLI、Outline、Story、兼容 Pipeline）；模块帮助入口和 Python 编译检查通过。
+- 真实正文 smoke：使用现有有效 Outline/Pattern Bundle 调用 `StoryCLI story write`，生成《信任的重量》，5 场、5015 个中文字符、`length_ok=true`；产物位于 `Code/data/story_cli/smoke_story_no_request_retry/`。带附加要求的真实 Outline 实例化因 `overall_ok=false` 被正确阻断，未进入正文。
+
+## 本轮（2026-08-30 续）：真实故事到 Pattern 的统一知识库
+
+- `Code/data/knowledge/story_knowledge.db` 按知识实体保存 `Story → Observation → Function 版本/演化事件 → Snapshot → FunctionOccurrence → Pattern`；`bootstrap/evolve` 作为 `pipeline_runs.workflow` 记录，不作为 Function 类别。
+- Bootstrap/Evolve 在终评 PASS 并发布 Snapshot 后，自动事务写入故事原文、Observation、Function 版本、演化历史、Snapshot、Contract 和 Occurrence；StoryPattern 发布后自动写入 Pattern 版本及其真实故事证据。
+- `StoryCLI library sync-current` 幂等同步正式 Bootstrap 与 Evolve/Pattern 主线，`library status` 查看数量。当前库包含 1 次 Bootstrap、2 次 Evolve、370 篇真实故事、3250 条 Observation、122 个历代 Function 实体、224 个 Function 版本、218 条演化事件、3 个 Snapshot、5443 条按 Snapshot 保留的 Occurrence、62 个 Contract，以及 74 个 published、1 个 rejected、21 个 manual-review Pattern。
+- SQL 已验证可从 Pattern 沿证据关系追溯到 Story、Observation 和 Function；370/370 篇故事保留原文，Pattern 证据关系 253 条，外键违规 0。重复同步数量不变；全量回归 `302 passed`。
+
+## 本轮（2026-08-30 续 2）：Agent 正式读取统一知识库
+
+- `StoryPattern_Agent` 以 `snapshot_id` 从 `story_knowledge.db` 读取 Snapshot manifest、Function、Observation、FunctionOccurrence 和故事元数据，不再要求 Observation、manifest 或 Snapshot 文件路径作为运行输入；Pattern 发布仍写回统一库。
+- `Outline_Agent` 按 `snapshot_id` 从统一库查询 published Pattern，并按 Function ID 读取 FunctionContract。历史 Pattern Snapshot 本身没有 Contract 时，使用数据库中该 Function 的最新正式 Contract，保留 Pattern 原有 Function 顺序。
+- `FunctionExtract_Agent.evolve` 在处理新语料前，从指定 `base_snapshot_id` 或数据库最新正式 Snapshot 读取 Function，并复制到本轮可变工作 Registry；终评通过后发布新 Snapshot 并写回统一库。Bootstrap 继续从原始故事开始构建首版 Function。
+- `Story_Agent` 继续只读取 Outline JSON；正文生成不直接查询知识库。顶层 LangGraph 的节点和边未改变，只调整各入口节点的数据来源。
+- 真实库只读验证：3 个 Snapshot、122 个历代 Function、5443 个 Occurrence、62 个 Contract、96 个 Pattern；命令入口检查通过，全量回归 `303 passed`。
+
+## 本轮（2026-08-30 续 3）：一键正文链路门禁分级
+
+- 数据库接入后，历史 Pattern 会使用后续发布的 FunctionContract。合同中的自然语言状态尚未经过统一词汇规范化，因此同义状态的字面差异改为 `contract_warnings`，继续随大纲导出供审计，不再作为确定性结构错误阻断正文。
+- 缺失合同角色绑定、缺少实例状态变化等确定性结构错误继续进入 `contract_issues`，并保持 `validation.overall_ok=false` 时不启动正文。
+- `Story_Agent` 在 schema 边界将允许为空的 `causal_moments`、文学计划列表和文本字段中的 JSON `null` 正规化为空列表或空字符串；核心展开字段仍保持必需。
+- 真实一键链路的大纲通过：`contract_issues=0`、`contract_warnings=14`。复用该大纲生成正文成功，3360 个中文字符、`length_ok=true`；全量回归 `304 passed`。
+
+## 本轮（2026-08-30 续 4）：Outline 语义校验边界修正
+
+- Outline 校验调用不再注入 `contract_ledger.warnings`，只让校验模型处理确定性的合同 `issues`；完整 warnings 仍保留在导出大纲中供审计。
+- 全题材关系规则明确区分合作关系与亲密关系：持续共同行动、风险承担、资源共享、保护、坦诚、道歉和明确互信可以建立稳固盟友关系，不需要爱情式情感基础，也不能据此升级为恋爱或婚姻。
+- 指向独立 ending 的 setup payoff，只要 ending 明确执行对应 payoff 即视为回收，不要求在 Function 段提前重复完成。
+- 使用相同 `Pipeline_Agent --genre 现代情感 --out-dir data/my_story` 命令真实完成大纲和正文《证据的回响》：5201 个中文字符、`length_ok=true`；全量回归 `304 passed`。
+
+## 本轮（2026-08-30 续 5）：完整大纲入统一库
+
+- `story_knowledge.db` 新增 `outlines` 表，完整保存大纲 JSON、Markdown、Snapshot、Pattern、题材、校验状态和稳定 `outline_id`；重复写入同一大纲保持幂等。
+- `Outline_Agent` 生成后先写库并返回 `outline_id`，JSON/Markdown 继续作为人读与交换导出物；`Story_Agent`、`Pipeline_Agent` 和 `StoryCLI` 均按 `outline_id` 从统一库读取大纲。
+- 已识别并导入 6 份现存完整大纲，其中 4 份校验通过、2 份失败；全部关联 `PAT_751765b2f3e8c2aa`，外键违规为 0。失败大纲可审计但仍被 StoryAgent 门禁拒绝。
+- 全量离线回归 `305 passed`；数据库回读验证可按 ID 加载有效大纲，且失败大纲不会进入正文节点。
+
+## 本轮（2026-08-30 续 6）：Pattern 全库一次性使用限制
+
+- 统一库新增 `pattern_usage`，以全库唯一 `pattern_id` 原子领取 Pattern；OutlineAgent 在 Planner 成功选定后、Seed 之前领取，后续生成异常或校验失败均保留消费记录。
+- 自动候选会过滤已领取 Pattern，显式指定已使用 Pattern 会明确报错；Pipeline 和 StoryCLI 单份生成复用同一领取逻辑。
+- 新增 `StoryCLI outline batch --genre <题材> --count <数量>`，按未使用 Pattern 批量生成只含大纲的批次报告；`--count` 以有效大纲数为目标，失败样本继续消耗 Pattern 并转向下一个候选。
+- 按已确认决定清理原有 4 份大纲及 8 个导出文件，当前 DB `outlines=0`、`pattern_usage=0`，Pattern 保留 96 个，外键检查为 0。
+- 定向回归 `32 passed`，CLI 帮助入口通过；全量离线回归 `310 passed`。
+
+## 本轮（2026-08-31）：五篇跨题材 CLI Bootstrap 实验
+
+- `StoryCLI function bootstrap` 使用悬疑惊悚 2 篇、古风穿越重生 2 篇、现代情感家庭 1 篇完成全新运行，发布 Snapshot `cli_bootstrap5_20260831_20260831T105736055505Z_f9e08b191021`。
+- 最终产物为 46 个 Observation/Occurrence、6 个 Function 和 6 个 FunctionContract；终评 PASS 4/6，Coverage 与 Evidence Count 未达标。
+- 46 个 Occurrence 中 14 个 `MATCHED`、32 个 `UNCERTAIN`。按 `UNCERTAIN` 切分并折叠连续同 Function repetition 后，各故事最长连续结构段为 2，未达到 motif 的 3–6 Function 硬条件，因此 `motif_candidates=0`，Outline 与 Story 未启动。
+- 统一 CLI 复制后的文件名形如 `0001_<原名>.txt`；Bootstrap 递归收集器已改为接受所有 `.txt`，对应 `test_story_cli.py` 5 项测试通过。
+
+## 本轮（2026-08-31）：第二批五篇 Evolve 增量实验
+
+- `StoryCLI function evolve` 显式以首批 Snapshot `cli_bootstrap5_20260831_20260831T105736055505Z_f9e08b191021` 为基础，处理另一批悬疑惊悚 2 篇、古风穿越重生 2 篇、现代情感家庭 1 篇。
+- 新批提取 56 个 Observation：MATCH 34、EXTEND 2、NOVEL 4、Critic RESOLVED 16；36 条证据进入 Curator，6 个 Function 全部保留，平均 supporting 从 3.0 增至 9.0，未新增 Function。
+- 终评 FAIL 3/6（Coverage、Abstraction Quality、Diversity 未通过），未发布子 Snapshot，Pattern、Outline、Story 均未启动；正式知识库仍以首批 Bootstrap Snapshot 为最新版本。
+- 当前活体 Bank 已累计首批 46 + 第二批 56 = 102 个 Observation，第二批中间产物完整保存在 `Code/data/story_cli/experiment_evolve5/function/output/`，但未发布数据不属于正式 Snapshot。
+- Evolve 初始 state 现将输入 manifest 写入 `evaluation_context.manifest_path`；`evaluator_mid_node` / `evaluator_final_node` 在更新 Registry、Bank 和报告路径时保留已有上下文。以本批累计数据验证 Diversity 为 3 个 category、10 个故事、PASS。
+- `test_evolve.py` 使用临时独立 ObservationBank，不再清空真实活体 Bank；回归后真实 Bank 保持 102 条。Evolve 10 项、Evaluator 12 项、StoryCLI 5 项测试通过。
+
+## 本轮（2026-09-01）：Pattern Evolve DB 增量主线
+
+- StoryPattern 生产入口已替换为正式九节点 LangGraph；Function Bootstrap/Evolve 发布 Snapshot 后自动以同一 SQLite、同一 namespace 运行 Pattern Evolve。
+- 新增 `pattern_runs`、`pattern_story_sequences`、`motif_evidence`、`motif_pair_reviews`、`motif_clusters`、`snapshot_patterns`；Pattern 发布在最后节点单事务完成。Motif、pair、cluster 稳定 ID 不再包含 Snapshot ID。
+- 精确 Motif 不调用 LLM；HIGH 及会影响 Cluster 的 EXPANDED pair 才审查。相同输入签名从 DB 继承，LLM 失败整次 Pattern run 失败，无 replay、Catalog 或目录 fallback。
+- 清空旧 knowledge/registry/checkpoint DB 后，以固定 namespace `pattern_evolve_cli` 连续运行 5 批、每批 5 个领域各 1 篇。第五批 Snapshot `pattern_evolve_cli_20260831T191956899727Z_cde003907c34` 首次发布 2 个 Pattern；当批为 25 sequences、17 motifs、25 reviews、14 clusters、2 published。
+- 同一 Snapshot 重跑前后 Pattern 相关 9 张表行数完全一致。离线全量回归为 317 passed、1 个依赖已删除历史 Snapshot 的数据分布测试 skipped；新增测试覆盖 evidence extend、幂等、失败原子性、merge、split、retire 和无 fallback。

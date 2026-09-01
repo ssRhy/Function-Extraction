@@ -118,8 +118,60 @@ python -m Agent.app --namespace o0 --out-dir data/o0       # 自定义命名空�
 - 不做题材过滤：跨题材 obs 直接一起归纳，函数天然题材无关（替代旧的"按题材分批 + 并集合并"流程；`--genre` 与并集工具已删除）
 - `--corpus`：默认 `zhihu_story_subset_120_20260815_clean`；存在 `manifest.json` 时自动注入 category / question_title 元数据（Diversity 维度按题材计）
 - 修订动作：近义 MERGE（supporting obs 程序并集）、定义 REVISE、SPLIT（obs 按向量余弦确定性分配）、weak-fit 剔除、低证据移除；写回前备份 `<registry>.pre_revise.<ns>.jsonl`
-- Abstraction 复核为"首轮全量 + 后续轮增量"：只重评 `revise_node` 标记的变更集，未变更函数按 function_name 沿用旧评审；确定性五维每轮全量（向量秒级）
+- Abstraction 复核为“首轮全量 + 后续轮增量”：只重评 `revise_node` 标记的变更集，未变更函数按 function_name 沿用旧评审；确定性五维每轮全量（向量秒级）
 - LLM 统一 `reasoning_effort="none"`（`Agent/llm.py` 硬编码）；设 `LLM_USAGE=1` 可打印按调用方归因的 usage/耗时
+
+### 一键生成故事（Outline_Agent → Story_Agent）
+
+```bash
+cd Code
+python -X utf8 -m Pipeline_Agent --genre 现代情感
+python -X utf8 -m Pipeline_Agent --genre 现代情感 --pattern "拯救之恋"
+python -X utf8 -m Pipeline_Agent --genre 悬疑惊悚 --out-dir data/pipeline_runs/demo
+```
+
+- 从统一 SQLite 中当前 Snapshot 的 published PatternSet 开始，自动完成 Pattern 选择、大纲生成、场景计划、场景发展和正文生成。
+- 大纲校验未通过时保留大纲并停止，不启动正文。
+- 完整大纲以 `outline_id` 写入 `Code/data/knowledge/story_knowledge.db`；Story_Agent 按 ID 从库中读取，JSON/Markdown 只作为导出物。
+- 默认输出到 `Code/data/pipeline_runs/<时间戳>/`，包含 `outline/`、`story/` 和 `pipeline_manifest.json`。
+
+单独复用库中大纲生成正文：
+
+```bash
+cd Code
+python -X utf8 -m Story_Agent --outline-id OUT_xxx
+```
+
+### 统一 CLI：Function、模板和正文
+
+```bash
+cd Code
+
+# 1. 批量提取 Function（--input 可重复，也可传目录）
+python -X utf8 -m StoryCLI function bootstrap --input <文本文件或目录> --namespace demo
+python -X utf8 -m StoryCLI function evolve --input <新文本目录> --namespace demo
+
+# 2. 从 Function 运行已发布到 DB 的 PatternSet 生成 Outline，导出 Template Bundle
+python -X utf8 -m StoryCLI template build --function-run data/story_cli/functions/<时间戳>/function_run.json --genre 现代情感
+
+# 3. 使用 Template Bundle 写正文
+python -X utf8 -m StoryCLI story write --template data/story_cli/templates/<时间戳>/template_bundle.json
+python -X utf8 -m StoryCLI story write --template data/story_cli/templates/<时间戳>/template_bundle.json --request "现实克制，突出人物共同承担压力后的关系变化"
+
+# 4. 批量生成大纲（每个 pattern_id 全库只使用一次）
+python -X utf8 -m StoryCLI outline --genre 现代情感 --count 3
+python -X utf8 -m StoryCLI outline batch --genre 现代情感 --count 3
+python -X utf8 -m StoryCLI outline batch --genre 悬疑惊悚 --count 3 --pattern "危局援手与连环深渊" --pattern "悬念升级式调查推进"
+```
+
+- `function bootstrap/evolve` 支持多个文件和递归目录输入；Function Snapshot 发布后自动运行 Pattern Evolve。`function_run.json` 只记录运行结果，Pattern 节点不读取它。
+- `template build` 从统一 DB 中指定 Snapshot 的 published PatternSet 选择 Pattern；Pattern 与一次具体 Outline 一起写入 `template_bundle.json`。
+- `story write` 没有 `--request` 时复用 Bundle 中的 `outline_id`；有 `--request` 时固定 Pattern、重新生成 Outline 入库，再交给 Story_Agent 写正文。
+- `outline` 是批量生成大纲的简洁入口，`outline batch` 为等价的显式写法；两者只运行 Outline_Agent，不生成正文。`--count` 表示目标有效大纲数量。已使用 Pattern 自动跳过，校验失败仍消耗 Pattern，并继续尝试其他 Pattern。
+- Pattern 使用记录保存在 `Code/data/knowledge/story_knowledge.db` 的 `pattern_usage` 表；同名但不同 `pattern_id` 的 Pattern 可分别使用。
+- 默认产物分别位于 `Code/data/story_cli/functions/`、`Code/data/story_cli/templates/` 和 `Code/data/story_cli/stories/`；每次运行另有对应的 `function_run.json`、`template_bundle.json` 或 `story_run.json` manifest。
+- StoryPattern 的生产入口为 `python -X utf8 -m StoryPattern_Agent --snapshot <snapshot_id>`。正式 LangGraph 只读写统一 SQLite，不读取 Catalog、review、summary JSON，也不使用旧目录 fallback。
+- Pattern Evolve 节点为 `load_pattern_delta → update_story_sequences → update_motif_evidence → retrieve_variant_pairs → review_changed_pairs → review_internal_bridges → rebuild_clusters → summarize_changed_clusters → publish_pattern_set`。未变化故事继承父 sequence；只有新签名的候选 pair 调用 LLM；发布节点单事务写入 PatternSet。
 
 ### Evolve（增量匹配，Bootstrap 之后持续运行）
 
@@ -219,6 +271,37 @@ python -m pytest test/test_preprocessor.py test/test_confidence.py test/test_eva
 | `confidence` | 置信度 0.0-1.0（多因子计算） |
 
 **去重规则**：同名 `function_name`，或 `definition` 余弦相似度 > `NEAR_DUP_THRESHOLD`（0.85），视为重复，只保留置信度最高者。
+
+## OntologySnapshot 发布契约
+
+Bootstrap 在最终抽象归并并重新全量终评后，Evolve 在 Curator 稳定 Function 并完成 `Evaluator_final` 后，使用当前 Function 的驻留 Observation 生成 `FunctionContract`；只有终评 `PASS` 才自动发布不可变快照：
+
+```text
+Code/data/ontology_snapshots/<snapshot_id>/
+├── manifest.json
+├── functions.jsonl
+├── occurrences.jsonl
+├── function_contracts.jsonl
+└── evaluation.json
+```
+
+Story Pattern Agent 通过统一 loader 只读消费快照，不直接依赖持续变化的 Registry：
+
+```python
+from Contracts.snapshot import load_function_contracts, load_occurrences, load_snapshot
+
+manifest, functions, evaluation = load_snapshot(snapshot_path)
+occurrences = load_occurrences(snapshot_path)
+contracts = load_function_contracts(snapshot_path)
+```
+
+Snapshot v3 为每个 Function 发布一份类型级 `FunctionContract`：角色槽位、状态前置条件、状态效果及义务的开启/推进/解除。发布时验证 Function ID/名称一一对应、定义哈希、证据引用属于该 Function 的驻留 supporting Observation、角色槽位引用及全部文件 SHA-256；Function 定义变化会使旧合同失效并重新生成。内容完全相同的重复发布返回已有目录，v1/v2 历史快照仍可读取。
+
+v3 消费链为 `Snapshot loader → StoryPattern Pattern → Outline Planner → Mechanism Plan → Contract Ledger → Validator`：StoryPattern 将核心链上的合同随 Pattern 发布，Outline 以 Snapshot 合同为权威覆盖旧 Card 字段；Planner 检查相邻状态效果，Mechanism 绑定角色槽位并生成状态/义务账本，Validator 将合同断裂合并为失败项。缺少 v3 合同时保留 v1/v2 的兼容路径。
+
+PatternCatalog schema v2 可在 Pattern 摘要中携带可选的模板级 `ending_spec`：它描述需要解决的核心冲突、结局必须出现的抽象动作和稳定终态，不是新的 Function。Outline 将其传给 Seed、Realizer 和 Validator，并在结果中保留结构化 `ending`；没有 `ending_spec` 的历史 Pattern 继续兼容。
+
+真实 `evolve_250` 验收已生成 Snapshot `evolve_250_contracts_20260827T100511324434Z_670b7cbb13d1`：62/62 个 Function 合同、2193 条 Observation，Snapshot 校验 PASS。合同词汇统计为 94 个 aspect、398 个 state、139 个 obligation key；以同一 Function 集合的历史 71 个 Pattern 做严格相邻链扫描，226 条边中 0 条达到 exact compatibility。该结果说明当前合同词汇仍存在离散化和命名漂移，不能据此直接重发布 PatternCatalog 或重跑盲评；下一步需先建立证据约束下的状态词汇规范化与链边语义规则。
 
 ## Evaluator_v0 六维评估
 

@@ -10,19 +10,34 @@ from contextlib import contextmanager
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
+import pytest
 
+import Agent.app as agent_app
 from Agent import evolve as ev
+from Agent.Bank.bank import ObservationBank
 from Agent.Pre_pro import pre_processor as pp
 from Agent.Observer import observer as ob
 from Agent.Matcher import matcher as mm
 from Agent.Evaluator import evaluator as ev_module
 from Agent.Critic import critic as cc
+from Agent.Contract import contract as fc
 from Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
 from Agent.Pre_pro.pre_processor import PreCorrection
 from Agent.Observer.observer import ObservationResponse, ObservationItem
 from Prompt.Matcher_prompt import MatchResponse, MatchDecision
 from Prompt.Evaluator_prompt import EvaluatorReviewResponse, FunctionQualityReview
 from Prompt.Critic_prompt import CriticResponse, CriticReview
+from Contracts.function_contract import (
+    FunctionContractBody, ObligationEffects, StateCondition, StateEffect,
+)
+
+
+@pytest.fixture(autouse=True)
+def isolated_bank(tmp_path, monkeypatch):
+    bank = ObservationBank(persist_dir=str(tmp_path / "bank"))
+    monkeypatch.setattr(agent_app, "_bank_instance", bank)
+    yield
+    bank.clear()
 
 
 class FakeEmbedder:
@@ -75,7 +90,7 @@ def _write_story(tmp, name, text="角色发现关键线索。角色决定采取�
 @contextmanager
 def _patched_llm(calls, matcher_fn=None):
     originals = {"pp": pp.chat_structured, "ob": ob.chat_structured, "mm": mm.chat_structured,
-                 "ev": ev_module.chat_structured, "cc": cc.chat_structured}
+                 "ev": ev_module.chat_structured, "cc": cc.chat_structured, "fc": fc.chat_structured}
 
     def fake_pre(messages, schema, **kw):
         calls["pre"] += 1
@@ -131,11 +146,25 @@ def _patched_llm(calls, matcher_fn=None):
             for o in oids
         ])
 
+    def fake_contract(messages, schema, **kw):
+        calls["contract"] = calls.get("contract", 0) + 1
+        return FunctionContractBody(
+            role_slots=["行动者"],
+            preconditions=[StateCondition(
+                role_slots=["行动者"], aspect="RESOURCE", state="INSUFFICIENT",
+            )],
+            effects=[StateEffect(
+                role_slots=["行动者"], aspect="RESOURCE", before="INSUFFICIENT", after="AVAILABLE",
+            )],
+            obligation_effects=ObligationEffects(),
+        )
+
     pp.chat_structured = fake_pre
     ob.chat_structured = fake_obs
     mm.chat_structured = fake_matcher
     ev_module.chat_structured = fake_eval
     cc.chat_structured = fake_critic
+    fc.chat_structured = fake_contract
     try:
         yield
     finally:
@@ -144,6 +173,7 @@ def _patched_llm(calls, matcher_fn=None):
         mm.chat_structured = originals["mm"]
         ev_module.chat_structured = originals["ev"]
         cc.chat_structured = originals["cc"]
+        fc.chat_structured = originals["fc"]
 
 
 def _initial(tmp, story_files):
@@ -170,7 +200,36 @@ def _initial(tmp, story_files):
         "errors": [],
         "namespace": "evolve_test",
         "out_dir": tmp,
+        "snapshot_root": os.path.join(tmp, "ontology_snapshots"),
+        "ontology_snapshot": None,
     }
+
+
+def test_evolve_initializes_registry_from_knowledge(tmp_path, monkeypatch):
+    functions = [{
+        "function_id": "F_BASE",
+        "function_name": "BASE_FUNCTION",
+        "definition": "正式快照中的基础功能",
+    }]
+
+    class FakeKnowledge:
+        def __init__(self, db_path):
+            assert db_path == "knowledge.db"
+
+        def latest_snapshot_id(self):
+            return "SNAP_LATEST"
+
+        def load_functions(self, snapshot_id):
+            assert snapshot_id == "SNAP_LATEST"
+            return functions
+
+    monkeypatch.setattr(ev, "StoryKnowledgeStore", FakeKnowledge)
+    store = RegistryStore(db_path=str(tmp_path / "registry.db"), namespace="work")
+
+    snapshot_id = ev.initialize_registry_from_knowledge(store, "knowledge.db")
+
+    assert snapshot_id == "SNAP_LATEST"
+    assert store.load_all()[0]["function_id"] == "F_BASE"
 
 
 def test_evolve_flow():
@@ -373,6 +432,29 @@ def test_evolve_mid_not_triggered(tmp_path, monkeypatch):
     print("evolve Evaluator_mid 不足阈值不触发: OK")
 
 
+def test_evolve_mid_preserves_manifest_path(tmp_path, monkeypatch):
+    manifest_path = str(tmp_path / "manifest.json")
+    captured = {}
+
+    def fake_evaluator(state):
+        captured.update(state["evaluation_context"])
+        return {
+            "evaluation_report": {"dimensions": {}, "recommendations": {}},
+            "evaluator_decision": "FAIL",
+        }
+
+    monkeypatch.setattr(ev, "evaluator_node", fake_evaluator)
+    ev.evaluator_mid_node({
+        "out_dir": str(tmp_path),
+        "mid_reports": [],
+        "pending_evidence": [],
+        "evaluation_context": {"manifest_path": manifest_path},
+    })
+
+    assert captured["manifest_path"] == manifest_path
+    assert captured["report_path"] == str(tmp_path / "evaluation_mid_1.json")
+
+
 def test_evaluator_final_with_baseline(tmp_path):
     """evaluator_final：六维终评 + 前后对比（基线快照存在 → kept/added 正确）。"""
     calls = {"pre": 0, "obs": 0, "matcher": 0, "eval": 0, "critic": 0}
@@ -409,6 +491,84 @@ def test_evaluator_final_with_baseline(tmp_path):
         assert fr["verdict"] in ("PASS", "FAIL")
         assert "confidence" in cmp and "supporting" in cmp
     print("evaluator_final 前后对比（基线存在）: OK")
+
+
+@pytest.mark.parametrize("verdict, published", [("PASS", True), ("FAIL", False)])
+def test_evaluator_final_snapshot_gate(tmp_path, monkeypatch, verdict, published):
+    """Evolve 保留终评工作产物，只有 PASS 发布最终 Registry。"""
+    from Agent.app import get_bank
+    from Contracts.snapshot import load_occurrences, load_snapshot
+
+    bank = get_bank()
+    prev = get_active_store()
+    store = RegistryStore(db_path=str(tmp_path / "functions.db"), namespace="evolve_test")
+    final_func = _mid_func()
+    final_func["supporting_obs_ids"] = ["story_1_obs_001"]
+    store.replace_all([final_func])
+    set_active_store(store)
+
+    captured = {}
+
+    def fake_evaluator(state):
+        captured.update(state["evaluation_context"])
+        report = {
+            "verdict": verdict,
+            "passed_dimensions": ["coverage"] if verdict == "PASS" else [],
+            "failed_dimensions": [] if verdict == "PASS" else ["coverage"],
+            "dimensions": {},
+            "recommendations": {},
+        }
+        return {"evaluation_report": report, "evaluator_decision": verdict}
+
+    monkeypatch.setattr(ev, "evaluator_node", fake_evaluator)
+    def fake_contracts(functions, _observations, _out_dir):
+        from Contracts.function_contract import definition_sha256
+        function = functions[0]
+        return [{
+            "function_id": function["function_id"],
+            "function_name": function["function_name"],
+            "definition_sha256": definition_sha256(function),
+            "evidence_refs": ["story_1_obs_001"],
+            "role_slots": ["行动者"],
+            "preconditions": [{"role_slots": ["行动者"], "aspect": "RESOURCE", "state": "INSUFFICIENT"}],
+            "effects": [{
+                "role_slots": ["行动者"], "aspect": "RESOURCE",
+                "before": "INSUFFICIENT", "after": "AVAILABLE",
+            }],
+            "obligation_effects": {"opens": [], "advances": [], "resolves": []},
+        }]
+    monkeypatch.setattr(ev, "build_function_contracts", fake_contracts)
+    try:
+        result = ev.evaluator_final_node({
+            "namespace": "evolve_test",
+            "out_dir": str(tmp_path),
+            "snapshot_root": str(tmp_path / "snapshots"),
+            "evaluation_context": {"manifest_path": str(tmp_path / "manifest.json")},
+            "occurrences": [{
+                "occurrence_id": "story_1_obs_001",
+                "story_id": "story_1",
+                "event": "事件",
+                "label": "MATCH",
+            }],
+        })
+    finally:
+        set_active_store(prev)
+        bank.clear()
+
+    assert os.path.exists(tmp_path / "evaluation_final.json")
+    assert os.path.exists(tmp_path / "functions_evolve_test.jsonl")
+    assert os.path.exists(tmp_path / "occurrences_final.jsonl")
+    assert captured["manifest_path"] == str(tmp_path / "manifest.json")
+    assert captured["report_path"] == str(tmp_path / "evaluation_final.json")
+    assert bool(result["ontology_snapshot"]) is published
+    if published:
+        from Contracts.snapshot import load_function_contracts
+        manifest, functions, _evaluation = load_snapshot(result["ontology_snapshot"])
+        assert manifest["schema_version"] == 3
+        assert functions == store.load_all()
+        occurrences = load_occurrences(result["ontology_snapshot"])
+        assert occurrences[0]["function_id"] == functions[0]["function_id"]
+        assert load_function_contracts(result["ontology_snapshot"])[0]["function_id"] == functions[0]["function_id"]
 
 
 if __name__ == "__main__":

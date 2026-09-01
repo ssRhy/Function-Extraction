@@ -814,3 +814,76 @@ Instance Card
 整个项目可以压缩成一句话：
 
 > 先把 Function 补成人物、前置条件和状态变化都明确的可生成结构，再从真实故事中学习它怎样组合、怎样实例化；之后让大模型利用这些知识生成一版成立的初稿，再参考故事库只修改真正需要调整的关键位置，最后通过批量筛选得到质量较好的大纲。
+
+---
+
+## 十一、MVP-B 当前状态与后续改进顺序（2026-08-27）
+
+MVP-B 已完成一条可运行、可追溯的最小链路：
+
+```text
+真实 Function
+→ FunctionContract / OntologySnapshot v3
+→ Pattern / Planner
+→ Mechanism Plan / Contract Ledger
+→ Outline / Validator
+```
+
+当前 MVP 暂以“链路可运行、产物可审计、问题可定位”为交付标准。后续改进按以下顺序推进：
+
+1. 在 `FunctionExtract_Agent` 建立证据约束的 `StateVocabulary`，统一 aspect、state、obligation key 的规范 ID、别名、拼写和粒度。
+2. 明确链边语义，区分世界初始条件、Function 输入、上一步输出、持续状态和义务清偿，避免把所有前置条件都按字符串 exact 匹配。
+3. 用规范化合同重新生成 PatternCatalog，并在发布时报告状态断裂、开放义务和未定义终态。
+4. 让 Planner 依据目标冲突与终态规划完整故事链；闭合仍由组合链和实例终态判断，不增加 Function 结局白名单。
+5. 在真实 v3 Snapshot 上重跑 StoryPattern 全流程，再沿用同一三组 A/B/C 材料协议进行复评；多人评审一致性留在后续质量评估阶段。
+
+暂不纳入 MVP-B：Best-of-N、正文生成、全量 StoryProfile、人工结局标签和论文级评审扩展。
+
+---
+
+## 十二、MVP-B 收尾与下一阶段（2026-08-27）
+
+MVP-B 到此收尾。当前交付包括：
+
+- 真实 Function 与 OntologySnapshot v3；
+- Pattern/Planner/Mechanism/Realizer/Validator 大纲生成链；
+- 角色槽位、机制、状态账本和校验结果；
+- 3 个题材 × 3 份完整大纲及 A/B/C 盲评材料。
+
+已知的合同状态词汇问题、严格链兼容性不足、多人盲评一致性、Best-of-N 和正文生成均记录为后续优化，不作为当前 MVP 阻塞。
+
+下一阶段先进入实际使用反馈：针对明确的生成目标批量生成大纲，收集可复现的失败案例，按影响最大的单一问题进行小步修复和复测。暂不启动完整 `StateVocabulary` 本体改造。
+
+当前首个可复现问题已确定为结局段兑现不足：部分大纲停在营救、逃避、重建或后续行动，未解决核心冲突。下一轮只围绕“最后一段兑现 `ending_direction`”做最小修复和小批复测。
+
+该修复已落地为 Pattern 级可选 `ending_spec`：下一次数据发布时重新生成 Pattern summary/catalog，使真实模板携带结局要求；在此之前，历史 Catalog 继续按旧 schema 使用。
+
+本轮已完成新的 Pattern summary/catalog 发布：沿用同一 Snapshot、Bank、manifest 和冻结 HIGH 评审，在 `data/story_pattern_evolve_250/` 生成 schema v2 产物；旧目录保留在可恢复归档中。下一步使用该新 catalog 重新生成实际大纲批次，观察 `ending_spec` 对结局段兑现的实际改善。
+
+## 十三、统一 CLI 与故事生成入口（2026-08-30）
+
+当前公开使用入口分为三组子命令：
+
+```text
+StoryCLI function bootstrap/evolve
+StoryCLI template build
+StoryCLI story write
+```
+
+`function bootstrap/evolve` 在 Function Snapshot 发布后自动执行 Pattern Evolve；`template build` 只从统一 DB 的 published PatternSet 选择 Pattern 并生成 Outline，再把 Pattern、Outline、Snapshot 和来源 Function 运行 manifest 固定为 Template Bundle。`story write` 只消费该 Bundle，用户追加要求时固定 Pattern 并重新实例化 Outline。
+
+## 十四、Pattern Evolve 增量主线（2026-09-01）
+
+Pattern 以父 Snapshot 的 PatternSet 为基线，只更新新增或 FunctionOccurrence 签名变化的故事：
+
+```text
+父 PatternSet + 子 Snapshot delta
+→ sequence 增量
+→ motif evidence 增量
+→ 新签名 pair 的 LLM 审查
+→ cluster lineage
+→ PatternVersion
+→ 子 PatternSet
+```
+
+Exact Motif 由有序 Function ID 链确定，不调用 LLM；语义候选只判 `SAME_PATTERN / RELATED / DIFFERENT`。Pattern 的证据扩展和结构扩展分别产生 `EVIDENCE_EXTENDED` 与 `STRUCTURE_EXTENDED` 版本；未变化 PatternVersion 直接继承。正式输入与中间状态只从统一 SQLite 读取，不使用 Catalog 文件、JSON replay 或旧目录 fallback。

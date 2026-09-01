@@ -1,0 +1,1121 @@
+"""真实故事、Function 演化、Pattern 与大纲的统一 SQLite 知识库。"""
+
+import hashlib
+import json
+import sqlite3
+from pathlib import Path
+
+from Contracts.snapshot import load_function_contracts, load_occurrences, load_snapshot
+
+
+DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "knowledge" / "story_knowledge.db"
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS snapshots (
+    snapshot_id        TEXT PRIMARY KEY,
+    parent_snapshot_id TEXT REFERENCES snapshots(snapshot_id),
+    schema_version     INTEGER NOT NULL,
+    source_workflow    TEXT NOT NULL,
+    namespace          TEXT NOT NULL,
+    created_at         TEXT NOT NULL,
+    payload_json       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pipeline_runs (
+    run_id       TEXT PRIMARY KEY,
+    workflow     TEXT NOT NULL CHECK (workflow IN ('bootstrap', 'evolve')),
+    namespace    TEXT NOT NULL,
+    snapshot_id  TEXT NOT NULL UNIQUE REFERENCES snapshots(snapshot_id),
+    corpus_dir   TEXT,
+    created_at   TEXT NOT NULL,
+    payload_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS stories (
+    story_id       TEXT PRIMARY KEY,
+    title          TEXT,
+    category       TEXT,
+    source_file    TEXT,
+    content_sha256 TEXT,
+    text_content   TEXT,
+    payload_json   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS run_stories (
+    run_id   TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+    story_id TEXT NOT NULL REFERENCES stories(story_id),
+    position INTEGER NOT NULL,
+    PRIMARY KEY (run_id, story_id)
+);
+
+CREATE TABLE IF NOT EXISTS observations (
+    obs_id       TEXT PRIMARY KEY,
+    story_id     TEXT NOT NULL REFERENCES stories(story_id),
+    payload_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS observation_versions (
+    observation_version_id TEXT PRIMARY KEY,
+    obs_id       TEXT NOT NULL REFERENCES observations(obs_id),
+    run_id       TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+    payload_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS run_observations (
+    run_id TEXT NOT NULL REFERENCES pipeline_runs(run_id),
+    obs_id TEXT NOT NULL REFERENCES observations(obs_id),
+    PRIMARY KEY (run_id, obs_id)
+);
+
+CREATE TABLE IF NOT EXISTS functions (
+    function_id        TEXT PRIMARY KEY,
+    function_name      TEXT NOT NULL,
+    definition         TEXT NOT NULL,
+    status             TEXT NOT NULL,
+    latest_snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    payload_json       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS function_versions (
+    snapshot_id  TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    function_id  TEXT NOT NULL REFERENCES functions(function_id),
+    version      INTEGER,
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, function_id)
+);
+
+CREATE TABLE IF NOT EXISTS function_evolution_events (
+    event_id     TEXT PRIMARY KEY,
+    function_id  TEXT NOT NULL REFERENCES functions(function_id),
+    snapshot_id  TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    version      INTEGER,
+    action       TEXT NOT NULL,
+    created_at   TEXT,
+    payload_json TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_functions (
+    snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    function_id TEXT NOT NULL REFERENCES functions(function_id),
+    position    INTEGER NOT NULL,
+    PRIMARY KEY (snapshot_id, function_id)
+);
+
+CREATE TABLE IF NOT EXISTS function_contracts (
+    snapshot_id  TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    function_id  TEXT NOT NULL REFERENCES functions(function_id),
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, function_id)
+);
+
+CREATE TABLE IF NOT EXISTS function_occurrences (
+    snapshot_id   TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    occurrence_id TEXT NOT NULL,
+    obs_id         TEXT NOT NULL REFERENCES observations(obs_id),
+    story_id       TEXT NOT NULL REFERENCES stories(story_id),
+    function_id    TEXT REFERENCES functions(function_id),
+    status         TEXT NOT NULL,
+    payload_json   TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, occurrence_id)
+);
+
+CREATE TABLE IF NOT EXISTS patterns (
+    snapshot_id       TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    pattern_id        TEXT NOT NULL,
+    pattern_name      TEXT,
+    status            TEXT NOT NULL CHECK (status IN ('published', 'blocked', 'retired', 'merged', 'rejected', 'manual_review')),
+    latest_version_id TEXT NOT NULL,
+    payload_json      TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, pattern_id)
+);
+
+CREATE TABLE IF NOT EXISTS pattern_versions (
+    pattern_version_id TEXT PRIMARY KEY,
+    snapshot_id  TEXT NOT NULL,
+    pattern_id   TEXT NOT NULL,
+    status       TEXT NOT NULL,
+    parent_version_id TEXT REFERENCES pattern_versions(pattern_version_id),
+    action       TEXT,
+    structure_signature TEXT,
+    payload_json TEXT NOT NULL,
+    FOREIGN KEY (snapshot_id, pattern_id) REFERENCES patterns(snapshot_id, pattern_id)
+);
+
+CREATE TABLE IF NOT EXISTS pattern_evidence (
+    pattern_version_id TEXT NOT NULL REFERENCES pattern_versions(pattern_version_id),
+    story_id           TEXT NOT NULL REFERENCES stories(story_id),
+    PRIMARY KEY (pattern_version_id, story_id)
+);
+
+CREATE TABLE IF NOT EXISTS pattern_runs (
+    run_id             TEXT PRIMARY KEY,
+    snapshot_id        TEXT NOT NULL UNIQUE REFERENCES snapshots(snapshot_id),
+    parent_snapshot_id TEXT REFERENCES snapshots(snapshot_id),
+    namespace          TEXT NOT NULL,
+    workflow           TEXT NOT NULL CHECK (workflow IN ('bootstrap', 'evolve')),
+    status             TEXT NOT NULL CHECK (status IN ('RUNNING', 'SUCCESS', 'FAILED')),
+    input_signature    TEXT NOT NULL,
+    created_at         TEXT NOT NULL,
+    completed_at       TEXT,
+    payload_json       TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS pattern_story_sequences (
+    snapshot_id               TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    story_id                  TEXT NOT NULL REFERENCES stories(story_id),
+    occurrence_signature      TEXT NOT NULL,
+    inherited_from_snapshot_id TEXT REFERENCES snapshots(snapshot_id),
+    payload_json              TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, story_id)
+);
+
+CREATE TABLE IF NOT EXISTS motif_evidence (
+    snapshot_id  TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    motif_id     TEXT NOT NULL,
+    evidence_id  TEXT NOT NULL,
+    story_id     TEXT NOT NULL REFERENCES stories(story_id),
+    payload_json TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, motif_id, evidence_id)
+);
+
+CREATE TABLE IF NOT EXISTS motif_pair_reviews (
+    variant_pair_id TEXT NOT NULL,
+    input_signature TEXT NOT NULL,
+    verdict         TEXT NOT NULL CHECK (verdict IN ('SAME_PATTERN', 'RELATED', 'DIFFERENT')),
+    similarity      REAL NOT NULL,
+    recall_tier     TEXT NOT NULL CHECK (recall_tier IN ('HIGH', 'EXPANDED')),
+    payload_json    TEXT NOT NULL,
+    PRIMARY KEY (variant_pair_id, input_signature)
+);
+
+CREATE TABLE IF NOT EXISTS motif_clusters (
+    snapshot_id        TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    cluster_id         TEXT NOT NULL,
+    pattern_id         TEXT,
+    status             TEXT NOT NULL CHECK (status IN ('candidate', 'published', 'blocked')),
+    structure_signature TEXT NOT NULL,
+    payload_json       TEXT NOT NULL,
+    PRIMARY KEY (snapshot_id, cluster_id)
+);
+
+CREATE TABLE IF NOT EXISTS snapshot_patterns (
+    snapshot_id        TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    pattern_id         TEXT NOT NULL,
+    pattern_version_id TEXT NOT NULL REFERENCES pattern_versions(pattern_version_id),
+    status             TEXT NOT NULL CHECK (status IN ('published', 'blocked')),
+    is_new             INTEGER NOT NULL CHECK (is_new IN (0, 1)),
+    PRIMARY KEY (snapshot_id, pattern_id),
+    FOREIGN KEY (snapshot_id, pattern_id) REFERENCES patterns(snapshot_id, pattern_id)
+);
+
+CREATE TABLE IF NOT EXISTS outlines (
+    outline_id       TEXT PRIMARY KEY,
+    snapshot_id      TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    pattern_id       TEXT,
+    pattern_name     TEXT NOT NULL,
+    genre            TEXT NOT NULL,
+    user_request     TEXT,
+    schema_version   INTEGER NOT NULL,
+    validation_ok    INTEGER NOT NULL CHECK (validation_ok IN (0, 1)),
+    created_at       TEXT NOT NULL,
+    outline_json     TEXT NOT NULL,
+    outline_markdown TEXT NOT NULL,
+    FOREIGN KEY (snapshot_id, pattern_id) REFERENCES patterns(snapshot_id, pattern_id)
+);
+
+CREATE TABLE IF NOT EXISTS pattern_usage (
+    pattern_id  TEXT PRIMARY KEY,
+    snapshot_id TEXT NOT NULL,
+    claimed_at  TEXT NOT NULL,
+    outline_id  TEXT,
+    FOREIGN KEY (snapshot_id, pattern_id) REFERENCES patterns(snapshot_id, pattern_id),
+    FOREIGN KEY (outline_id) REFERENCES outlines(outline_id)
+);
+"""
+
+
+def _json(value) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _digest(*values: str) -> str:
+    return hashlib.sha256("|".join(values).encode("utf-8")).hexdigest()
+
+
+def _read_json(path: Path):
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"无法读取 JSON: {path}") from exc
+
+
+def _read_jsonl(path: Path) -> list[dict]:
+    try:
+        return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"无法读取 JSONL: {path}") from exc
+
+
+class StoryKnowledgeStore:
+    def __init__(self, db_path=DEFAULT_DB_PATH):
+        self.db_path = Path(db_path)
+
+    def connect(self) -> sqlite3.Connection:
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(self.db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys = ON")
+        return conn
+
+    def initialize(self) -> None:
+        with self.connect() as conn:
+            conn.executescript(SCHEMA)
+
+    @staticmethod
+    def _story_stub(conn: sqlite3.Connection, story_id: str) -> None:
+        conn.execute(
+            """INSERT OR IGNORE INTO stories
+               (story_id, title, category, source_file, content_sha256, text_content, payload_json)
+               VALUES (?, NULL, NULL, NULL, NULL, NULL, ?)""",
+            (story_id, _json({"story_id": story_id})),
+        )
+
+    @staticmethod
+    def _observation_stub(conn: sqlite3.Connection, obs_id: str, story_id: str) -> None:
+        StoryKnowledgeStore._story_stub(conn, story_id)
+        conn.execute(
+            "INSERT OR IGNORE INTO observations (obs_id, story_id, payload_json) VALUES (?, ?, ?)",
+            (obs_id, story_id, _json({"obs_id": obs_id, "story_id": story_id})),
+        )
+
+    def _record_snapshot(
+        self,
+        conn: sqlite3.Connection,
+        snapshot_path,
+        parent_snapshot_id: str | None = None,
+    ) -> dict:
+        snapshot_path = Path(snapshot_path)
+        manifest, functions, _evaluation = load_snapshot(str(snapshot_path))
+        snapshot_id = manifest["snapshot_id"]
+        if manifest["source_workflow"] == "bootstrap":
+            parent_snapshot_id = None
+        elif parent_snapshot_id is None:
+            previous = conn.execute(
+                """SELECT snapshot_id FROM snapshots
+                   WHERE namespace=? AND snapshot_id<>?
+                   ORDER BY created_at DESC LIMIT 1""",
+                (manifest["namespace"], snapshot_id),
+            ).fetchone()
+            parent_snapshot_id = previous["snapshot_id"] if previous else None
+        if parent_snapshot_id and not conn.execute(
+            "SELECT 1 FROM snapshots WHERE snapshot_id=?", (parent_snapshot_id,)
+        ).fetchone():
+            raise ValueError(f"父 Snapshot 尚未入库: {parent_snapshot_id}")
+        conn.execute(
+            """INSERT INTO snapshots
+               (snapshot_id, parent_snapshot_id, schema_version, source_workflow,
+                namespace, created_at, payload_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(snapshot_id) DO UPDATE SET
+               parent_snapshot_id=COALESCE(snapshots.parent_snapshot_id, excluded.parent_snapshot_id),
+               payload_json=excluded.payload_json""",
+            (
+                snapshot_id, parent_snapshot_id, manifest["schema_version"],
+                manifest["source_workflow"], manifest["namespace"],
+                manifest["created_at"], _json(manifest),
+            ),
+        )
+        for position, function in enumerate(functions, 1):
+            conn.execute(
+                """INSERT INTO functions
+                   (function_id, function_name, definition, status, latest_snapshot_id, payload_json)
+                   VALUES (?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(function_id) DO UPDATE SET
+                   function_name=excluded.function_name, definition=excluded.definition,
+                   status=excluded.status, latest_snapshot_id=excluded.latest_snapshot_id,
+                   payload_json=excluded.payload_json
+                   WHERE (SELECT created_at FROM snapshots WHERE snapshot_id=excluded.latest_snapshot_id)
+                      >= (SELECT created_at FROM snapshots WHERE snapshot_id=functions.latest_snapshot_id)""",
+                (
+                    function["function_id"], function["function_name"], function["definition"],
+                    function.get("status", "provisional"), snapshot_id, _json(function),
+                ),
+            )
+            conn.execute(
+                """INSERT OR REPLACE INTO function_versions
+                   (snapshot_id, function_id, version, payload_json) VALUES (?, ?, ?, ?)""",
+                (
+                    snapshot_id,
+                    function["function_id"],
+                    function.get("version") or max(
+                        (item.get("version", 0) for item in function.get("version_history") or []),
+                        default=0,
+                    ),
+                    _json(function),
+                ),
+            )
+            conn.execute(
+                """INSERT OR REPLACE INTO snapshot_functions
+                   (snapshot_id, function_id, position) VALUES (?, ?, ?)""",
+                (snapshot_id, function["function_id"], position),
+            )
+            for event in function.get("version_history") or []:
+                event_json = _json(event)
+                conn.execute(
+                    """INSERT OR IGNORE INTO function_evolution_events
+                       (event_id, function_id, snapshot_id, version, action, created_at, payload_json)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        _digest(function["function_id"], event_json), function["function_id"],
+                        snapshot_id, event.get("version"), event.get("action", "UNKNOWN"),
+                        event.get("ts"), event_json,
+                    ),
+                )
+        occurrences = load_occurrences(str(snapshot_path)) if manifest["schema_version"] >= 2 else []
+        for occurrence in occurrences:
+            obs_id, story_id = occurrence["obs_id"], occurrence["story_id"]
+            self._observation_stub(conn, obs_id, story_id)
+            conn.execute(
+                """INSERT OR REPLACE INTO function_occurrences
+                   (snapshot_id, occurrence_id, obs_id, story_id, function_id, status, payload_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    snapshot_id, occurrence["occurrence_id"], obs_id, story_id,
+                    occurrence.get("function_id"), occurrence["status"], _json(occurrence),
+                ),
+            )
+        if manifest["schema_version"] >= 3:
+            for contract in load_function_contracts(str(snapshot_path)):
+                conn.execute(
+                    """INSERT OR REPLACE INTO function_contracts
+                       (snapshot_id, function_id, payload_json) VALUES (?, ?, ?)""",
+                    (snapshot_id, contract["function_id"], _json(contract)),
+                )
+        conn.execute(
+            """INSERT INTO pipeline_runs
+               (run_id, workflow, namespace, snapshot_id, corpus_dir, created_at, payload_json)
+               VALUES (?, ?, ?, ?, NULL, ?, ?)
+               ON CONFLICT(run_id) DO UPDATE SET payload_json=excluded.payload_json""",
+            (
+                snapshot_id, manifest["source_workflow"], manifest["namespace"], snapshot_id,
+                manifest["created_at"], _json({"snapshot_path": str(snapshot_path.resolve())}),
+            ),
+        )
+        return manifest
+
+    def record_snapshot(self, snapshot_path, parent_snapshot_id: str | None = None) -> dict:
+        self.initialize()
+        with self.connect() as conn:
+            manifest = self._record_snapshot(conn, snapshot_path, parent_snapshot_id)
+            self._check(conn)
+        return manifest
+
+    def record_function_run(
+        self,
+        snapshot_path,
+        corpus_dir,
+        story_files: list[str],
+        story_meta: dict[str, dict],
+        observations: list[dict],
+        parent_snapshot_id: str | None = None,
+    ) -> dict:
+        self.initialize()
+        corpus_dir = Path(corpus_dir)
+        with self.connect() as conn:
+            manifest = self._record_snapshot(conn, snapshot_path, parent_snapshot_id)
+            run_id = manifest["snapshot_id"]
+            conn.execute(
+                "UPDATE pipeline_runs SET corpus_dir=?, payload_json=? WHERE run_id=?",
+                (
+                    str(corpus_dir.resolve()),
+                    _json({"snapshot_path": str(Path(snapshot_path).resolve()), "story_count": len(story_files)}),
+                    run_id,
+                ),
+            )
+            run_story_ids = set()
+            for position, relative in enumerate(story_files, 1):
+                relative = relative.replace("\\", "/")
+                story_id = Path(relative).stem
+                path = corpus_dir / relative
+                try:
+                    text = path.read_text(encoding="utf-8")
+                except OSError as exc:
+                    raise ValueError(f"无法读取故事原文: {path}") from exc
+                meta = dict(story_meta.get(relative) or {})
+                payload = {**meta, "story_id": story_id, "source_file": relative}
+                conn.execute(
+                    """INSERT INTO stories
+                       (story_id, title, category, source_file, content_sha256, text_content, payload_json)
+                       VALUES (?, ?, ?, ?, ?, ?, ?)
+                       ON CONFLICT(story_id) DO UPDATE SET
+                       title=excluded.title, category=excluded.category,
+                       source_file=excluded.source_file, content_sha256=excluded.content_sha256,
+                       text_content=excluded.text_content, payload_json=excluded.payload_json""",
+                    (
+                        story_id, meta.get("question_title") or meta.get("title"), meta.get("category"),
+                        relative, hashlib.sha256(text.encode("utf-8")).hexdigest(), text, _json(payload),
+                    ),
+                )
+                conn.execute(
+                    "INSERT OR REPLACE INTO run_stories (run_id, story_id, position) VALUES (?, ?, ?)",
+                    (run_id, story_id, position),
+                )
+                run_story_ids.add(story_id)
+            for observation in observations:
+                obs_id, story_id = observation["obs_id"], observation["story_id"]
+                self._story_stub(conn, story_id)
+                payload = _json(observation)
+                conn.execute(
+                    """INSERT INTO observations (obs_id, story_id, payload_json) VALUES (?, ?, ?)
+                       ON CONFLICT(obs_id) DO UPDATE SET
+                       story_id=excluded.story_id, payload_json=excluded.payload_json""",
+                    (obs_id, story_id, payload),
+                )
+                version_id = _digest(run_id, obs_id, payload)
+                conn.execute(
+                    """INSERT OR IGNORE INTO observation_versions
+                       (observation_version_id, obs_id, run_id, payload_json) VALUES (?, ?, ?, ?)""",
+                    (version_id, obs_id, run_id, payload),
+                )
+                if story_id in run_story_ids:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO run_observations (run_id, obs_id) VALUES (?, ?)",
+                        (run_id, obs_id),
+                    )
+            self._check(conn)
+        return manifest
+
+    def load_pattern_run(self, snapshot_id: str) -> dict | None:
+        self.initialize()
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM pattern_runs WHERE snapshot_id=?", (snapshot_id,)
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["payload"] = json.loads(result.pop("payload_json"))
+        return result
+
+    def begin_pattern_run(self, snapshot_id: str, input_signature: str) -> dict:
+        self.initialize()
+        with self.connect() as conn:
+            snapshot = conn.execute(
+                "SELECT parent_snapshot_id, namespace, source_workflow FROM snapshots WHERE snapshot_id=?",
+                (snapshot_id,),
+            ).fetchone()
+            if not snapshot:
+                raise ValueError(f"知识库中不存在 Snapshot: {snapshot_id}")
+            workflow = snapshot["source_workflow"]
+            parent_snapshot_id = snapshot["parent_snapshot_id"]
+            if workflow == "evolve":
+                parent = conn.execute(
+                    "SELECT status, namespace FROM pattern_runs WHERE snapshot_id=?",
+                    (parent_snapshot_id,),
+                ).fetchone()
+                if not parent or parent["status"] != "SUCCESS":
+                    raise ValueError(f"父 Snapshot 缺少成功的 Pattern 运行: {parent_snapshot_id}")
+                if parent["namespace"] != snapshot["namespace"]:
+                    raise ValueError(
+                        f"父子 Snapshot namespace 不一致: {parent['namespace']} != {snapshot['namespace']}"
+                    )
+            run_id = "PR_" + _digest(snapshot_id)[:16]
+            payload = {
+                "run_id": run_id,
+                "snapshot_id": snapshot_id,
+                "parent_snapshot_id": parent_snapshot_id,
+                "namespace": snapshot["namespace"],
+                "workflow": workflow,
+            }
+            conn.execute(
+                """INSERT INTO pattern_runs
+                   (run_id, snapshot_id, parent_snapshot_id, namespace, workflow, status,
+                    input_signature, created_at, completed_at, payload_json)
+                   VALUES (?, ?, ?, ?, ?, 'RUNNING', ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL, ?)
+                   ON CONFLICT(snapshot_id) DO UPDATE SET
+                   status='RUNNING', input_signature=excluded.input_signature,
+                   completed_at=NULL, payload_json=excluded.payload_json""",
+                (
+                    run_id, snapshot_id, parent_snapshot_id, snapshot["namespace"],
+                    workflow, input_signature, _json(payload),
+                ),
+            )
+        return payload
+
+    def fail_pattern_run(self, snapshot_id: str, error: str) -> None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM pattern_runs WHERE snapshot_id=?", (snapshot_id,)
+            ).fetchone()
+            if not row:
+                return
+            payload = json.loads(row["payload_json"])
+            payload["error"] = error
+            conn.execute(
+                """UPDATE pattern_runs SET status='FAILED', completed_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                   payload_json=? WHERE snapshot_id=?""",
+                (_json(payload), snapshot_id),
+            )
+
+    def load_pattern_sequences(self, snapshot_id: str | None) -> dict[str, dict]:
+        if not snapshot_id:
+            return {}
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT story_id, occurrence_signature, inherited_from_snapshot_id, payload_json
+                   FROM pattern_story_sequences WHERE snapshot_id=? ORDER BY story_id""",
+                (snapshot_id,),
+            ).fetchall()
+        return {
+            row["story_id"]: {
+                "occurrence_signature": row["occurrence_signature"],
+                "inherited_from_snapshot_id": row["inherited_from_snapshot_id"],
+                "payload": json.loads(row["payload_json"]),
+            }
+            for row in rows
+        }
+
+    def load_motif_evidence(self, snapshot_id: str | None) -> list[dict]:
+        if not snapshot_id:
+            return []
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT payload_json FROM motif_evidence
+                   WHERE snapshot_id=? ORDER BY motif_id, evidence_id""",
+                (snapshot_id,),
+            ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def load_motif_pair_review(self, pair_id: str, input_signature: str) -> dict | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """SELECT payload_json FROM motif_pair_reviews
+                   WHERE variant_pair_id=? AND input_signature=?""",
+                (pair_id, input_signature),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row else None
+
+    def load_motif_clusters(self, snapshot_id: str | None) -> list[dict]:
+        if not snapshot_id:
+            return []
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM motif_clusters WHERE snapshot_id=? ORDER BY cluster_id",
+                (snapshot_id,),
+            ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def load_snapshot_pattern_rows(self, snapshot_id: str | None) -> list[dict]:
+        if not snapshot_id:
+            return []
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT sp.pattern_id, sp.pattern_version_id, sp.status, sp.is_new,
+                          p.pattern_name, p.payload_json, pv.payload_json AS version_json,
+                          pv.structure_signature,
+                          (SELECT MIN(s.created_at) FROM patterns p2
+                           JOIN snapshots s ON s.snapshot_id=p2.snapshot_id
+                           WHERE p2.pattern_id=sp.pattern_id) AS born_at
+                   FROM snapshot_patterns sp
+                   JOIN patterns p ON p.snapshot_id=sp.snapshot_id AND p.pattern_id=sp.pattern_id
+                   JOIN pattern_versions pv ON pv.pattern_version_id=sp.pattern_version_id
+                   WHERE sp.snapshot_id=? ORDER BY sp.pattern_id""",
+                (snapshot_id,),
+            ).fetchall()
+        return [{
+            "pattern_id": row["pattern_id"],
+            "pattern_version_id": row["pattern_version_id"],
+            "status": row["status"],
+            "is_new": bool(row["is_new"]),
+            "pattern_name": row["pattern_name"],
+            "pattern": json.loads(row["payload_json"]),
+            "version": json.loads(row["version_json"]),
+            "structure_signature": row["structure_signature"],
+            "born_at": row["born_at"],
+        } for row in rows]
+
+    def commit_pattern_run(self, snapshot_id: str, data: dict) -> dict:
+        """原子发布一个 PatternSet；前置节点不写正式 Pattern 数据。"""
+        self.initialize()
+        with self.connect() as conn:
+            run = conn.execute(
+                "SELECT run_id, status FROM pattern_runs WHERE snapshot_id=?", (snapshot_id,)
+            ).fetchone()
+            if not run:
+                raise ValueError(f"Pattern 运行尚未开始: {snapshot_id}")
+            if run["status"] == "SUCCESS":
+                return json.loads(conn.execute(
+                    "SELECT payload_json FROM pattern_runs WHERE snapshot_id=?", (snapshot_id,)
+                ).fetchone()[0])
+
+            for story_id, item in sorted(data["sequences"].items()):
+                conn.execute(
+                    """INSERT OR REPLACE INTO pattern_story_sequences
+                       (snapshot_id, story_id, occurrence_signature, inherited_from_snapshot_id, payload_json)
+                       VALUES (?, ?, ?, ?, ?)""",
+                    (
+                        snapshot_id, story_id, item["occurrence_signature"],
+                        item.get("inherited_from_snapshot_id"), _json(item["payload"]),
+                    ),
+                )
+            for motif in data["motifs"]:
+                for evidence in motif["evidence"]:
+                    evidence_id = _digest(
+                        motif["motif_id"], evidence["story_id"],
+                        _json(evidence.get("structural_orders") or []),
+                        _json(evidence.get("occurrence_ids") or []),
+                    )
+                    payload = {
+                        "motif_id": motif["motif_id"],
+                        "function_ids": motif["function_ids"],
+                        "function_names": motif["function_names"],
+                        "length": motif["length"],
+                        "evidence": evidence,
+                    }
+                    conn.execute(
+                        """INSERT OR REPLACE INTO motif_evidence
+                           (snapshot_id, motif_id, evidence_id, story_id, payload_json)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (snapshot_id, motif["motif_id"], evidence_id, evidence["story_id"], _json(payload)),
+                    )
+            for review in data["reviews"]:
+                conn.execute(
+                    """INSERT OR IGNORE INTO motif_pair_reviews
+                       (variant_pair_id, input_signature, verdict, similarity, recall_tier, payload_json)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        review["variant_pair_id"], review["input_signature"], review["verdict"],
+                        review["embedding_similarity"], review["recall_tier"], _json(review),
+                    ),
+                )
+            for cluster in data["clusters"]:
+                conn.execute(
+                    """INSERT OR REPLACE INTO motif_clusters
+                       (snapshot_id, cluster_id, pattern_id, status, structure_signature, payload_json)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        snapshot_id, cluster["cluster_id"], cluster.get("pattern_id"),
+                        cluster["status"], cluster["structure_signature"], _json(cluster),
+                    ),
+                )
+            for item in data["patterns"]:
+                pattern = item["pattern"]
+                conn.execute(
+                    """INSERT OR REPLACE INTO patterns
+                       (snapshot_id, pattern_id, pattern_name, status, latest_version_id, payload_json)
+                       VALUES (?, ?, ?, ?, ?, ?)""",
+                    (
+                        snapshot_id, item["pattern_id"], pattern.get("pattern_name"),
+                        item["status"], item["pattern_version_id"], _json(pattern),
+                    ),
+                )
+                version = item.get("version")
+                if version:
+                    conn.execute(
+                        """INSERT OR IGNORE INTO pattern_versions
+                           (pattern_version_id, snapshot_id, pattern_id, status, parent_version_id,
+                            action, structure_signature, payload_json)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (
+                            item["pattern_version_id"], snapshot_id, item["pattern_id"],
+                            item["status"], version.get("parent_version_id"), version["action"],
+                            item["structure_signature"], _json(version),
+                        ),
+                    )
+                    for story_id in sorted(set(pattern.get("story_ids") or [])):
+                        self._story_stub(conn, story_id)
+                        conn.execute(
+                            """INSERT OR IGNORE INTO pattern_evidence
+                               (pattern_version_id, story_id) VALUES (?, ?)""",
+                            (item["pattern_version_id"], story_id),
+                        )
+                if item["status"] in {"published", "blocked"}:
+                    conn.execute(
+                        """INSERT OR REPLACE INTO snapshot_patterns
+                           (snapshot_id, pattern_id, pattern_version_id, status, is_new)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (
+                            snapshot_id, item["pattern_id"], item["pattern_version_id"],
+                            item["status"], int(item["is_new"]),
+                        ),
+                    )
+            result = dict(data["result"])
+            result.update({"run_id": run["run_id"], "snapshot_id": snapshot_id})
+            conn.execute(
+                """UPDATE pattern_runs SET status='SUCCESS',
+                   completed_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), payload_json=?
+                   WHERE snapshot_id=?""",
+                (_json(result), snapshot_id),
+            )
+            self._check(conn)
+        return result
+
+    def record_pattern_catalog(self, catalog_path) -> dict:
+        catalog = _read_json(Path(catalog_path))
+        snapshot_id = str(catalog.get("snapshot_id") or "").strip()
+        if not snapshot_id:
+            raise ValueError("PatternCatalog 缺少 snapshot_id")
+        groups = (
+            ("published", catalog.get("published_patterns") or []),
+            ("rejected", catalog.get("rejected_patterns") or []),
+            ("manual_review", catalog.get("manual_review_patterns") or []),
+        )
+        self.initialize()
+        with self.connect() as conn:
+            if not conn.execute("SELECT 1 FROM snapshots WHERE snapshot_id=?", (snapshot_id,)).fetchone():
+                raise ValueError(f"Pattern 来源 Snapshot 尚未入库: {snapshot_id}")
+            for status, items in groups:
+                for item in items:
+                    body = item.get("pattern") if status == "rejected" and item.get("pattern") else item
+                    pattern_id = body.get("pattern_id") or item.get("cluster_id") or body.get("cluster_id")
+                    if not pattern_id:
+                        raise ValueError(f"Pattern 缺少稳定标识: {status}")
+                    payload = _json(item)
+                    version_id = _digest(snapshot_id, pattern_id, status, payload)
+                    conn.execute(
+                        """INSERT INTO patterns
+                           (snapshot_id, pattern_id, pattern_name, status, latest_version_id, payload_json)
+                           VALUES (?, ?, ?, ?, ?, ?)
+                           ON CONFLICT(snapshot_id, pattern_id) DO UPDATE SET
+                           pattern_name=excluded.pattern_name, status=excluded.status,
+                           latest_version_id=excluded.latest_version_id, payload_json=excluded.payload_json""",
+                        (
+                            snapshot_id, pattern_id, body.get("pattern_name"), status,
+                            version_id, payload,
+                        ),
+                    )
+                    conn.execute(
+                        """INSERT OR IGNORE INTO pattern_versions
+                           (pattern_version_id, snapshot_id, pattern_id, status, payload_json)
+                           VALUES (?, ?, ?, ?, ?)""",
+                        (version_id, snapshot_id, pattern_id, status, payload),
+                    )
+                    if status == "published":
+                        conn.execute(
+                            """INSERT OR REPLACE INTO snapshot_patterns
+                               (snapshot_id, pattern_id, pattern_version_id, status, is_new)
+                               VALUES (?, ?, ?, 'published', 1)""",
+                            (snapshot_id, pattern_id, version_id),
+                        )
+                    for story_id in sorted(set(body.get("story_ids") or item.get("story_ids") or [])):
+                        self._story_stub(conn, story_id)
+                        conn.execute(
+                            """INSERT OR IGNORE INTO pattern_evidence
+                               (pattern_version_id, story_id) VALUES (?, ?)""",
+                            (version_id, story_id),
+                        )
+            self._check(conn)
+        return self.status()
+
+    def record_outline(self, document: dict, markdown_text: str) -> str:
+        body = dict(document)
+        body.pop("outline_id", None)
+        body.setdefault("schema_version", 1)
+        required = ("snapshot_id", "pattern_name", "genre", "generated_at", "validation")
+        missing = [key for key in required if not body.get(key)]
+        if missing:
+            raise ValueError(f"大纲缺少字段: {', '.join(missing)}")
+        validation_ok = bool(body["validation"].get("overall_ok"))
+        outline_id = "OUT_" + _digest(_json(body))[:16]
+        body["outline_id"] = outline_id
+        payload = _json(body)
+
+        self.initialize()
+        with self.connect() as conn:
+            snapshot_id = body["snapshot_id"]
+            pattern_id = body.get("pattern_id")
+            if not conn.execute(
+                "SELECT 1 FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
+            ).fetchone():
+                raise ValueError(f"大纲来源 Snapshot 尚未入库: {snapshot_id}")
+            if pattern_id and not conn.execute(
+                "SELECT 1 FROM patterns WHERE snapshot_id=? AND pattern_id=?",
+                (snapshot_id, pattern_id),
+            ).fetchone():
+                raise ValueError(f"大纲来源 Pattern 尚未入库: {pattern_id}")
+            if pattern_id:
+                usage = conn.execute(
+                    "SELECT outline_id FROM pattern_usage WHERE pattern_id=?",
+                    (pattern_id,),
+                ).fetchone()
+                if not usage:
+                    raise ValueError(f"Pattern 尚未领取: {pattern_id}")
+                if usage["outline_id"] and usage["outline_id"] != outline_id:
+                    raise ValueError(f"Pattern 已绑定其他大纲: {pattern_id}")
+            existing = conn.execute(
+                "SELECT outline_json, outline_markdown FROM outlines WHERE outline_id=?",
+                (outline_id,),
+            ).fetchone()
+            if existing and (existing["outline_json"] != payload or existing["outline_markdown"] != markdown_text):
+                raise ValueError(f"大纲 ID 冲突: {outline_id}")
+            conn.execute(
+                """INSERT OR IGNORE INTO outlines
+                   (outline_id, snapshot_id, pattern_id, pattern_name, genre, user_request,
+                    schema_version, validation_ok, created_at, outline_json, outline_markdown)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    outline_id, snapshot_id, pattern_id, body["pattern_name"], body["genre"],
+                    body.get("user_request"), body["schema_version"], int(validation_ok),
+                    body["generated_at"], payload, markdown_text,
+                ),
+            )
+            if pattern_id:
+                conn.execute(
+                    """UPDATE pattern_usage SET outline_id=?
+                       WHERE pattern_id=? AND (outline_id IS NULL OR outline_id=?)""",
+                    (outline_id, pattern_id, outline_id),
+                )
+            self._check(conn)
+        return outline_id
+
+    def claim_pattern(self, snapshot_id: str, pattern_id: str) -> None:
+        self.initialize()
+        with self.connect() as conn:
+            if not conn.execute(
+                "SELECT 1 FROM patterns WHERE snapshot_id=? AND pattern_id=?",
+                (snapshot_id, pattern_id),
+            ).fetchone():
+                raise ValueError(f"知识库中不存在 Pattern: {pattern_id}")
+            if conn.execute(
+                "SELECT 1 FROM outlines WHERE pattern_id=?", (pattern_id,)
+            ).fetchone():
+                raise ValueError(f"Pattern 已使用: {pattern_id}")
+            try:
+                conn.execute(
+                    """INSERT INTO pattern_usage
+                       (pattern_id, snapshot_id, claimed_at, outline_id)
+                       VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL)""",
+                    (pattern_id, snapshot_id),
+                )
+            except sqlite3.IntegrityError as exc:
+                raise ValueError(f"Pattern 已使用: {pattern_id}") from exc
+
+    def used_pattern_ids(self) -> set[str]:
+        self.initialize()
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT pattern_id FROM pattern_usage
+                   UNION SELECT pattern_id FROM outlines WHERE pattern_id IS NOT NULL"""
+            ).fetchall()
+        return {row[0] for row in rows}
+
+    def load_outline(self, outline_id: str) -> dict:
+        self.initialize()
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT outline_json FROM outlines WHERE outline_id=?", (outline_id,)
+            ).fetchone()
+        if not row:
+            raise ValueError(f"知识库中不存在大纲: {outline_id}")
+        return json.loads(row["outline_json"])
+
+    @staticmethod
+    def _check(conn: sqlite3.Connection) -> None:
+        violations = conn.execute("PRAGMA foreign_key_check").fetchall()
+        if violations:
+            raise ValueError(f"知识库外键检查失败: {len(violations)}")
+
+    def status(self) -> dict:
+        if not self.db_path.is_file():
+            raise ValueError(f"知识库不存在: {self.db_path}")
+        tables = (
+            "pipeline_runs", "stories", "observations", "observation_versions",
+            "functions", "function_versions", "function_evolution_events", "snapshots",
+            "function_occurrences", "function_contracts", "patterns", "pattern_versions",
+            "pattern_runs", "pattern_story_sequences", "motif_evidence",
+            "motif_pair_reviews", "motif_clusters", "snapshot_patterns",
+            "outlines", "pattern_usage",
+        )
+        with self.connect() as conn:
+            counts = {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in tables}
+            workflows = {
+                row["workflow"]: row["count"]
+                for row in conn.execute(
+                    "SELECT workflow, COUNT(*) AS count FROM pipeline_runs GROUP BY workflow"
+                )
+            }
+            pattern_status = {
+                row["status"]: row["count"]
+                for row in conn.execute("SELECT status, COUNT(*) AS count FROM patterns GROUP BY status")
+            }
+        return {
+            "db_path": str(self.db_path.resolve()),
+            "counts": counts,
+            "workflows": workflows,
+            "pattern_status": pattern_status,
+        }
+
+    def latest_snapshot_id(self, namespace: str | None = None) -> str:
+        with self.connect() as conn:
+            if namespace:
+                row = conn.execute(
+                    """SELECT snapshot_id FROM snapshots WHERE namespace=?
+                       ORDER BY created_at DESC LIMIT 1""",
+                    (namespace,),
+                ).fetchone()
+            else:
+                row = conn.execute(
+                    "SELECT snapshot_id FROM snapshots ORDER BY created_at DESC LIMIT 1"
+                ).fetchone()
+        if not row:
+            raise ValueError("知识库中没有已发布 Snapshot")
+        return row["snapshot_id"]
+
+    def load_snapshot_manifest(self, snapshot_id: str) -> dict:
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT payload_json FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
+            ).fetchone()
+        if not row:
+            raise ValueError(f"知识库中不存在 Snapshot: {snapshot_id}")
+        return json.loads(row["payload_json"])
+
+    def load_functions(self, snapshot_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT fv.payload_json
+                   FROM snapshot_functions sf
+                   JOIN function_versions fv
+                     ON fv.snapshot_id=sf.snapshot_id AND fv.function_id=sf.function_id
+                   WHERE sf.snapshot_id=? ORDER BY sf.position""",
+                (snapshot_id,),
+            ).fetchall()
+        if not rows:
+            raise ValueError(f"Snapshot 没有 Function: {snapshot_id}")
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def load_contracts(self, snapshot_id: str, latest_by_function: bool = False) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                "SELECT payload_json FROM function_contracts WHERE snapshot_id=? ORDER BY function_id",
+                (snapshot_id,),
+            ).fetchall()
+            if not rows and latest_by_function:
+                rows = conn.execute(
+                    """SELECT fc.payload_json
+                       FROM snapshot_functions target
+                       JOIN function_contracts fc ON fc.function_id=target.function_id
+                       JOIN snapshots source ON source.snapshot_id=fc.snapshot_id
+                       WHERE target.snapshot_id=?
+                         AND source.created_at=(
+                           SELECT MAX(s2.created_at)
+                           FROM function_contracts fc2
+                           JOIN snapshots s2 ON s2.snapshot_id=fc2.snapshot_id
+                           WHERE fc2.function_id=target.function_id
+                         )
+                       ORDER BY target.position""",
+                    (snapshot_id,),
+                ).fetchall()
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def load_occurrences(self, snapshot_id: str) -> list[dict]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT payload_json FROM function_occurrences
+                   WHERE snapshot_id=? ORDER BY story_id, occurrence_id""",
+                (snapshot_id,),
+            ).fetchall()
+        if not rows:
+            raise ValueError(f"Snapshot 没有 FunctionOccurrence: {snapshot_id}")
+        return [json.loads(row["payload_json"]) for row in rows]
+
+    def load_story_pattern_inputs(self, snapshot_id: str) -> dict:
+        manifest = self.load_snapshot_manifest(snapshot_id)
+        occurrences = self.load_occurrences(snapshot_id)
+        with self.connect() as conn:
+            observations = [
+                json.loads(row["payload_json"])
+                for row in conn.execute(
+                    """SELECT DISTINCT o.obs_id, o.payload_json
+                       FROM function_occurrences fo
+                       JOIN observations o ON o.obs_id=fo.obs_id
+                       WHERE fo.snapshot_id=? ORDER BY o.story_id, o.obs_id""",
+                    (snapshot_id,),
+                )
+            ]
+            metadata = [
+                json.loads(row["payload_json"])
+                for row in conn.execute(
+                    """SELECT DISTINCT s.story_id, s.payload_json,
+                              COALESCE(rs.position, 2147483647) AS story_position
+                       FROM function_occurrences fo
+                       JOIN stories s ON s.story_id=fo.story_id
+                       LEFT JOIN run_stories rs
+                         ON rs.run_id=? AND rs.story_id=s.story_id
+                       WHERE fo.snapshot_id=?
+                       ORDER BY story_position, s.story_id""",
+                    (snapshot_id, snapshot_id),
+                )
+            ]
+        return {
+            "manifest": manifest,
+            "functions": self.load_functions(snapshot_id),
+            "contracts": self.load_contracts(snapshot_id),
+            "observations": observations,
+            "story_metadata": metadata,
+            "occurrences": occurrences,
+        }
+
+    def load_pattern_catalog(self, snapshot_id: str) -> dict:
+        self.initialize()
+        groups = {"published": [], "rejected": [], "manual_review": []}
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT sp.status, p.payload_json
+                   FROM snapshot_patterns sp
+                   JOIN patterns p ON p.snapshot_id=sp.snapshot_id AND p.pattern_id=sp.pattern_id
+                   WHERE sp.snapshot_id=? ORDER BY sp.pattern_id""",
+                (snapshot_id,),
+            ).fetchall()
+        for row in rows:
+            if row["status"] == "published":
+                groups["published"].append(json.loads(row["payload_json"]))
+        if not groups["published"]:
+            raise ValueError(f"Snapshot 没有已发布 Pattern: {snapshot_id}")
+        return {
+            "snapshot_id": snapshot_id,
+            "published_patterns": groups["published"],
+            "rejected_patterns": groups["rejected"],
+            "manual_review_patterns": groups["manual_review"],
+        }
+
+
+def sync_current_library(
+    db_path,
+    bootstrap_corpus_dir,
+    bootstrap_observations_path,
+    bootstrap_snapshot_path,
+    corpus_dir,
+    observations_path,
+    pattern_snapshot_path,
+    current_snapshot_path,
+    catalog_path,
+) -> dict:
+    """把当前正式 Function→Pattern 主线幂等写入统一知识库。"""
+    bootstrap_corpus_dir = Path(bootstrap_corpus_dir)
+    bootstrap_manifest = _read_json(bootstrap_corpus_dir / "manifest.json")
+    bootstrap_meta = {
+        item["txt_file"].replace("\\", "/"): item for item in bootstrap_manifest
+    }
+    store = StoryKnowledgeStore(db_path)
+    store.record_function_run(
+        bootstrap_snapshot_path,
+        bootstrap_corpus_dir,
+        list(bootstrap_meta),
+        bootstrap_meta,
+        _read_jsonl(Path(bootstrap_observations_path)),
+    )
+    corpus_dir = Path(corpus_dir)
+    manifest = _read_json(corpus_dir / "manifest.json")
+    story_meta = {item["txt_file"].replace("\\", "/"): item for item in manifest}
+    story_files = list(story_meta)
+    pattern_manifest = store.record_function_run(
+        pattern_snapshot_path,
+        corpus_dir,
+        story_files,
+        story_meta,
+        _read_jsonl(Path(observations_path)),
+    )
+    store.record_snapshot(current_snapshot_path, pattern_manifest["snapshot_id"])
+    store.record_pattern_catalog(catalog_path)
+    return store.status()
