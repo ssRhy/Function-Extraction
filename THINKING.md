@@ -1055,3 +1055,9 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - 用户要求补 Coordinator 的真实子进程测试。原有测试只替换 `_run_stage`，只能证明 LangGraph 路由，不能证明子进程 stdout、JSON 解析和退出码组合真的闭合。
 - 最小测试使用实际 Python 子进程输出 `run_result`，不调用 LLM、不新增测试 Agent；同时覆盖正常 Function → Pattern 路由和非零退出码覆盖成功报告两条边界。
 - 这验证的是 Coordinator 的进程协议，不等同于真实 LLM 业务回归；后者仍由 Bootstrap/Evolve/Pattern 各自的真实运行验证负责。
+
+## 155. 自动化先补阶段超时，不急于增加 Coordinator 恢复层（2026-09-02）
+
+- 用户要求执行 Run 恢复、阶段级超时和有限错误分类。结合当前代码，Function/Pattern Run 已在各自 SQLite 启动时收口悬挂 Run；再增加 Coordinator 持久 Run 会形成第二套状态真相，因此暂不实现。
+- 当前真正的自动化风险是 `Popen` 子进程可能无限等待。最小修复是 Coordinator 侧单一阶段超时，超时返回 `STAGE_TIMEOUT`，并复用已有有限重试次数。
+- 错误分类只保护明确的永久失败码，其他情况继续尊重子 Agent 的 `retryable`。这样避免盲目重试质量失败，也不增加新的错误层级或 LLM Supervisor。

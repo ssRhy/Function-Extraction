@@ -21,7 +21,7 @@ def _kwargs():
 def test_success_routes_function_to_pattern_and_finishes(monkeypatch):
     calls = []
 
-    def fake_run(command, stage, attempt):
+    def fake_run(command, stage, attempt, timeout):
         calls.append((stage, attempt))
         if stage == "BOOTSTRAP":
             return {"status": "PASS", "snapshot_id": "snapshot_x"}
@@ -38,7 +38,7 @@ def test_success_routes_function_to_pattern_and_finishes(monkeypatch):
 def test_function_failure_stops_before_pattern(monkeypatch):
     calls = []
 
-    def fake_run(command, stage, attempt):
+    def fake_run(command, stage, attempt, timeout):
         calls.append(stage)
         return {"status": "FAILED", "snapshot_id": None}
 
@@ -52,7 +52,7 @@ def test_function_failure_stops_before_pattern(monkeypatch):
 def test_transient_function_failure_retries_once(monkeypatch):
     calls = []
 
-    def fake_run(command, stage, attempt):
+    def fake_run(command, stage, attempt, timeout):
         calls.append((stage, attempt))
         if stage == "BOOTSTRAP" and attempt == 1:
             return {"status": "FAILED", "retryable": True}
@@ -68,7 +68,7 @@ def test_transient_function_failure_retries_once(monkeypatch):
 
 
 def test_pattern_failure_does_not_hide_function_snapshot(monkeypatch):
-    def fake_run(command, stage, attempt):
+    def fake_run(command, stage, attempt, timeout):
         if stage == "BOOTSTRAP":
             return {"status": "PASS", "snapshot_id": "snapshot_x"}
         return {"status": "FAILED", "error_code": "PATTERN_FAILED"}
@@ -120,3 +120,31 @@ def test_real_subprocess_nonzero_exit_overrides_reported_success(monkeypatch):
     assert result["function_result"]["status"] == "FAILED"
     assert result["function_result"]["process_returncode"] == 7
     assert result["pattern_result"] is None
+
+
+def test_real_subprocess_timeout_is_retryable_and_stops(monkeypatch):
+    monkeypatch.setattr(
+        app, "_function_command",
+        lambda _state: [sys.executable, "-c", "import time; time.sleep(10)"],
+    )
+
+    options = _kwargs()
+    options.update(stage_timeout=0.05, max_retries=0)
+    result = app.run_coordinator(**options)
+
+    assert result["status"] == "FAILED"
+    assert result["function_result"]["error_code"] == "STAGE_TIMEOUT"
+    assert result["function_result"]["retryable"] is True
+    assert result["pattern_result"] is None
+
+
+def test_permanent_error_code_overrides_retryable_flag():
+    state = {
+        "function_result": {
+            "status": "FAILED", "error_code": "EVALUATION_FAILED", "retryable": True,
+        },
+        "function_attempt": 1,
+        "max_retries": 1,
+    }
+
+    assert app.route_after_function(state) == "stop"

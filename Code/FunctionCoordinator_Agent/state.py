@@ -16,6 +16,7 @@ class FunctionCoordinatorState(TypedDict, total=False):
     top_k: int | None
     rebuild_pattern: bool
     max_retries: int
+    stage_timeout: float
     function_attempt: int
     pattern_attempt: int
     function_result: dict
