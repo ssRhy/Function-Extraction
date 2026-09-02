@@ -37,7 +37,7 @@ def test_function_failure_stops_before_pattern(monkeypatch):
 
     def fake_run(command, stage, attempt):
         calls.append(stage)
-        return {"status": "FAIL", "snapshot_id": None}
+        return {"status": "FAILED", "snapshot_id": None}
 
     monkeypatch.setattr(app, "_run_stage", fake_run)
     result = app.run_coordinator(**_kwargs())

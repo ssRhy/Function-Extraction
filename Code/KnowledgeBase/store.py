@@ -6,6 +6,7 @@ import sqlite3
 from pathlib import Path
 
 from Contracts.snapshot import load_function_contracts, load_occurrences, load_snapshot
+from Contracts.run_result import failed_run_result
 from Contracts.versioning import observation_version_id, story_version_id
 
 
@@ -347,18 +348,24 @@ class StoryKnowledgeStore:
 
     def _recover_interrupted_function_runs(self, conn: sqlite3.Connection) -> None:
         rows = conn.execute(
-            """SELECT run_id FROM pipeline_runs
+            """SELECT run_id, workflow, namespace, parent_snapshot_id FROM pipeline_runs
                WHERE status='RUNNING' AND snapshot_id IS NULL"""
         ).fetchall()
         for row in rows:
             run_id = row["run_id"]
             self._remove_function_run_staging(conn, run_id)
+            failure = failed_run_result(
+                stage=row["workflow"], workflow=row["workflow"], run_id=run_id,
+                namespace=row["namespace"], snapshot_id=None,
+                parent_snapshot_id=row["parent_snapshot_id"],
+                error_code="INTERRUPTED_BEFORE_SNAPSHOT",
+                error="进程在 Snapshot 发布前中断",
+            )
             conn.execute(
                 """UPDATE pipeline_runs
                    SET status='FAIL', completed_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
-                       payload_json='{"reason":"interrupted_before_snapshot_publish"}'
-                   WHERE run_id=?""",
-                (run_id,),
+                       payload_json=? WHERE run_id=?""",
+                (_json(failure), run_id),
             )
 
     def stage_story_observations(
@@ -692,7 +699,14 @@ class StoryKnowledgeStore:
         ).fetchall()
         for row in rows:
             payload = json.loads(row["payload_json"])
-            payload["error"] = "interrupted_before_pattern_commit"
+            payload.update(failed_run_result(
+                stage="pattern", workflow=payload.get("workflow"),
+                run_id=payload.get("run_id"), namespace=payload.get("namespace"),
+                snapshot_id=row["snapshot_id"],
+                parent_snapshot_id=payload.get("parent_snapshot_id"),
+                error_code="INTERRUPTED_BEFORE_PATTERN_COMMIT",
+                error="进程在 Pattern 提交前中断",
+            ))
             conn.execute(
                 """UPDATE pattern_runs
                    SET status='FAILED', completed_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
@@ -742,7 +756,7 @@ class StoryKnowledgeStore:
             conn.execute("DELETE FROM pattern_story_sequences WHERE snapshot_id=?", (snapshot_id,))
             conn.execute("DELETE FROM pattern_runs WHERE snapshot_id=?", (snapshot_id,))
 
-    def fail_pattern_run(self, snapshot_id: str, error: str) -> None:
+    def fail_pattern_run(self, snapshot_id: str, error: dict) -> None:
         with self.connect() as conn:
             row = conn.execute(
                 "SELECT payload_json FROM pattern_runs WHERE snapshot_id=?", (snapshot_id,)
@@ -750,7 +764,7 @@ class StoryKnowledgeStore:
             if not row:
                 return
             payload = json.loads(row["payload_json"])
-            payload["error"] = error
+            payload.update(error)
             conn.execute(
                 """UPDATE pattern_runs SET status='FAILED', completed_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
                    payload_json=? WHERE snapshot_id=?""",

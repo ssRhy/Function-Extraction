@@ -101,7 +101,11 @@ def test_new_run_recovers_interrupted_unpublished_run(tmp_path):
         ).fetchone()
         assert row["status"] == "FAIL"
         assert row["snapshot_id"] is None
-        assert json.loads(row["payload_json"])["reason"] == "interrupted_before_snapshot_publish"
+    payload = json.loads(row["payload_json"])
+    assert payload["status"] == "FAILED"
+    assert payload["stage"] == "bootstrap"
+    assert payload["error_code"] == "INTERRUPTED_BEFORE_SNAPSHOT"
+    with store.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM run_stories WHERE run_id='R1'").fetchone()[0] == 0
         assert conn.execute("SELECT COUNT(*) FROM run_observations WHERE run_id='R1'").fetchone()[0] == 0
         assert conn.execute(

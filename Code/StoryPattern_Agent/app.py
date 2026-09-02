@@ -9,6 +9,7 @@ from collections import Counter, defaultdict
 from langgraph.graph import END, START, StateGraph
 
 from KnowledgeBase import DEFAULT_DB_PATH, StoryKnowledgeStore
+from Contracts.run_result import failed_run_result
 from .clusters import build_motif_clusters
 from .inputs import load_inputs
 from .review import review_motif_pairs
@@ -701,8 +702,9 @@ def run_pattern_evolve(
             "SELECT parent_snapshot_id FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
         ).fetchone()
     input_signature = _digest(snapshot_id, row["parent_snapshot_id"], _json(manifest))
+    run = None
     try:
-        store.begin_pattern_run(snapshot_id, input_signature)
+        run = store.begin_pattern_run(snapshot_id, input_signature)
         result = _build_graph().compile().invoke({
             "messages": [],
             "knowledge_db": str(knowledge_db),
@@ -711,7 +713,14 @@ def run_pattern_evolve(
         return result["pattern_result"]
     except BaseException as exc:
         error = str(exc) or type(exc).__name__
-        store.fail_pattern_run(snapshot_id, error)
+        if run:
+            store.fail_pattern_run(snapshot_id, failed_run_result(
+                stage="pattern", workflow=run["workflow"], run_id=run["run_id"],
+                namespace=run["namespace"], snapshot_id=snapshot_id,
+                parent_snapshot_id=run.get("parent_snapshot_id"),
+                error_code="PATTERN_RUN_FAILED", error=error,
+                retryable=isinstance(exc, (TimeoutError, ConnectionError)),
+            ))
         raise
 
 
@@ -725,6 +734,17 @@ def main(argv=None) -> int:
         result = run_pattern_evolve(args.snapshot, args.knowledge_db, args.rebuild)
         print(json.dumps({"run_result": result}, ensure_ascii=False))
         return 0
-    except (OSError, RuntimeError, ValueError) as exc:
-        print(f"[StoryPattern] error: {exc}")
+    except BaseException as exc:
+        run = StoryKnowledgeStore(args.knowledge_db).load_pattern_run(args.snapshot)
+        if run and isinstance(run.get("payload"), dict) and run["payload"].get("status") == "FAILED":
+            failure = run["payload"]
+        else:
+            failure = failed_run_result(
+                stage="pattern", workflow=run.get("workflow") if run else None,
+                run_id=run.get("run_id") if run else None,
+                namespace=run.get("namespace") if run else None,
+                snapshot_id=args.snapshot, parent_snapshot_id=run.get("parent_snapshot_id") if run else None,
+                error_code="PATTERN_START_FAILED", error=str(exc) or type(exc).__name__,
+            )
+        print(json.dumps({"run_result": failure}, ensure_ascii=False))
         return 1

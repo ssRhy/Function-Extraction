@@ -1354,3 +1354,10 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Coordinator 通过子 Agent 已有 CLI 的 `run_result` 做路由：Function `PASS + snapshot_id` 才进入 Pattern，Pattern `SUCCESS` 才完成；业务质量失败直接停止，进程级超时/限流等暂时错误最多按 `--max-retries` 有限重试。
 - 现有 `Pipeline_Agent` 保持 `Outline → Story` 职责不变；Function Coordinator 是独立控制面。Coordinator 最终返回包含 Function/Pattern 子结果和尝试次数的机器可读 `run_result`。
 - 新增 5 项路由、重试和结果解析测试；验证结果为 `299 passed, 1 skipped`，CLI `--help` 和 `git diff --check` 通过。
+
+## 本轮（2026-09-02）：统一 Bootstrap / Evolve / Pattern 失败结果
+
+- 新增 `Code/Contracts/run_result.py`，三个子 Agent 的失败返回统一为 `status=FAILED`，并携带阶段、工作流、Run、namespace、父/子 Snapshot、错误码、错误信息和 `retryable`。
+- Bootstrap/Evolve 的语料、基础 Snapshot、checkpoint 等早期失败也输出同一 `{"run_result": ...}` 协议；运行中异常和评估不通过沿用同一协议。
+- Pattern 运行异常和启动收口写入相同失败 payload；正式 SQLite 的物理状态仍保留 `pipeline_runs.status=FAIL`、`pattern_runs.status=FAILED`，不改变已有成功状态语义。
+- 验证：全套测试 `302 passed, 1 skipped`；测试生成的共享 Bank 已恢复为 80 行真实基线，临时 Chroma 目录已移入回收站。

@@ -1043,3 +1043,9 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - Coordinator 内核负责状态路由、恢复、重试上限、预算、Snapshot 完整性和停止；现有 Evaluator/Curator 负责 Function 语义修订，Pattern/Outline/Story 负责各自领域，避免总 Agent 越权修改专家产物。
 - LLM Supervisor 只在错误无法由规则分类时工作，并只能从 `RETRY_STAGE`、`RESUME_RUN`、`REBUILD_PATTERN`、`STOP` 等有限动作中提出建议；规则层校验目标 Run、父 Snapshot、尝试次数和数据边界后才执行。
 - 这样正常路径无需额外 LLM，已知错误可自动处理，未知错误可自动暂停并保留证据；正式知识边界始终由 SQLite Run 和不可变 Snapshot 决定。
+
+## 153. 三个子 Agent 必须共享失败协议（2026-09-02）
+
+- 用户要求先统一 Bootstrap、Evolve、Pattern 的错误结果。仅在最终成功/异常路径打印 `run_result` 不够，因为语料不存在、基础 Snapshot 不存在和不可恢复 checkpoint 等早期失败同样会被 Coordinator 消费。
+- 最小做法是增加一个纯结果构造函数，不引入新的状态表或错误层级：所有失败均返回 `status=FAILED`、`stage`、`workflow`、Run/Snapshot 上下文、`error_code`、`error`、`retryable`。
+- 数据库内部的 `FAIL` 与 `FAILED` 继续保持各表现有语义；统一的是跨进程接口 payload，不为适配器再增加一套持久状态。

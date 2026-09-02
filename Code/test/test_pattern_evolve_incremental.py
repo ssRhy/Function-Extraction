@@ -193,6 +193,10 @@ def test_pattern_timeout_closes_run_as_failed(monkeypatch):
 
         def begin_pattern_run(self, *_args):
             calls["began"] = True
+            return {
+                "run_id": "PR_test", "workflow": "evolve", "namespace": "test",
+                "parent_snapshot_id": None,
+            }
 
         def fail_pattern_run(self, snapshot_id, error):
             calls["failed"] = (snapshot_id, error)
@@ -210,10 +214,11 @@ def test_pattern_timeout_closes_run_as_failed(monkeypatch):
     with pytest.raises(TimeoutError, match="review stage timeout"):
         app.run_pattern_evolve("snapshot_test", "unused.db")
 
-    assert calls == {
-        "began": True,
-        "failed": ("snapshot_test", "review stage timeout"),
-    }
+    assert calls["began"] is True
+    assert calls["failed"][0] == "snapshot_test"
+    assert calls["failed"][1]["status"] == "FAILED"
+    assert calls["failed"][1]["error_code"] == "PATTERN_RUN_FAILED"
+    assert calls["failed"][1]["error"] == "review stage timeout"
 
 
 def test_variant_review_keeps_only_mutual_top_two_publishable_pairs(monkeypatch):

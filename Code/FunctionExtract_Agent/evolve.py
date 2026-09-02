@@ -42,6 +42,7 @@ from FunctionExtract_Agent.Curator.curator import curator_node, _bump_version
 from FunctionExtract_Agent.Contract.contract import build_function_contracts
 from Contracts.snapshot import DEFAULT_SNAPSHOT_ROOT, publish_snapshot
 from Contracts.occurrence import align_occurrences, assignment_metrics
+from Contracts.run_result import failed_run_result
 from KnowledgeBase import DEFAULT_DB_PATH, StoryKnowledgeStore
 
 
@@ -53,6 +54,19 @@ def _collect_txt(root: str) -> list[str]:
             if fn.endswith(".txt"):
                 files.append(os.path.relpath(os.path.join(dirpath, fn), root).replace(os.sep, "/"))
     return sorted(files, key=natural_key)
+
+
+def _evolve_failure(error_code: str, error: str, *, namespace: str,
+                    parent_snapshot_id: str | None = None,
+                    run_id: str | None = None) -> int:
+    result = failed_run_result(
+        stage="evolve", workflow="evolve", run_id=run_id,
+        namespace=namespace, snapshot_id=None,
+        parent_snapshot_id=parent_snapshot_id,
+        error_code=error_code, error=error,
+    )
+    print(json.dumps({"run_result": result}, ensure_ascii=False))
+    return 1
 
 
 def initialize_registry_from_knowledge(
@@ -462,9 +476,15 @@ def evaluator_final_node(state: dict) -> dict:
             print(f"  KnowledgeBase → {knowledge_db}")
     else:
         if state.get("knowledge_db"):
-            StoryKnowledgeStore(state["knowledge_db"]).fail_function_run(
-                run_id, final_report,
+            failure = failed_run_result(
+                stage="evolve", workflow="evolve", run_id=run_id,
+                namespace=ns, snapshot_id=None,
+                parent_snapshot_id=state.get("base_snapshot_id"),
+                error_code="EVALUATION_FAILED",
+                error="最终评估未通过，未发布 Snapshot",
+                report=final_report,
             )
+            StoryKnowledgeStore(state["knowledge_db"]).fail_function_run(run_id, failure)
         print("  最终终评未通过，不发布 OntologySnapshot")
 
     return {
@@ -472,15 +492,26 @@ def evaluator_final_node(state: dict) -> dict:
         "occurrences": final_occurrences,
         "function_contracts": function_contracts,
         "ontology_snapshot": snapshot_path,
-        "run_result": {
-            "run_id": run_id,
-            "status": "PASS" if snapshot_path else "FAIL",
-            "workflow": "evolve",
-            "namespace": ns,
-            "snapshot_id": os.path.basename(snapshot_path) if snapshot_path else None,
-            "parent_snapshot_id": state.get("base_snapshot_id"),
-            "report": final_report,
-        },
+        "run_result": (
+            {
+                "run_id": run_id,
+                "status": "PASS",
+                "stage": "evolve",
+                "workflow": "evolve",
+                "namespace": ns,
+                "snapshot_id": os.path.basename(snapshot_path),
+                "parent_snapshot_id": state.get("base_snapshot_id"),
+                "report": final_report,
+            }
+            if snapshot_path else failed_run_result(
+                stage="evolve", workflow="evolve", run_id=run_id,
+                namespace=ns, snapshot_id=None,
+                parent_snapshot_id=state.get("base_snapshot_id"),
+                error_code="EVALUATION_FAILED",
+                error="最终评估未通过，未发布 Snapshot",
+                report=final_report,
+            )
+        ),
         "messages": [{"role": "system", "content": f"[Evaluator_final] {final_report['verdict']}（{len(final_report['passed_dimensions'])}/6）"}],
     }
 
@@ -525,7 +556,7 @@ def _build_evolve_graph() -> StateGraph:
     return graph
 
 
-def main() -> None:
+def main() -> int:
     parser = argparse.ArgumentParser(description="Evolve 单图：新文本 → 提取 obs → Matcher 五分类 → 直写/Pools/报告")
     parser.add_argument("--corpus", type=str, required=True, help="新文本语料目录（含 .txt，递归收集）")
     parser.add_argument("--namespace", type=str, default="evolve_work",
@@ -543,21 +574,29 @@ def main() -> None:
 
     matcher_module.MATCH_BATCH_SIZE = args.batch_size
     matcher_module.TOP_K = args.top_k
+    stories_dir = os.path.abspath(args.corpus)
+    if not os.path.isdir(stories_dir):
+        print(f"语料目录不存在: {stories_dir}")
+        return _evolve_failure(
+            "CORPUS_NOT_FOUND", f"语料目录不存在: {stories_dir}",
+            namespace=args.namespace,
+        )
     store = RegistryStore(namespace=args.namespace)
     set_active_store(store)
     out_dir = os.path.abspath(args.out_dir) if args.out_dir else DEFAULT_OUT_DIR
     os.makedirs(out_dir, exist_ok=True)
-    base_snapshot_id = initialize_registry_from_knowledge(
-        store, args.knowledge_db, args.base_snapshot,
-    )
+    try:
+        base_snapshot_id = initialize_registry_from_knowledge(
+            store, args.knowledge_db, args.base_snapshot,
+        )
+    except BaseException as exc:
+        return _evolve_failure(
+            "BASE_SNAPSHOT_LOAD_FAILED", str(exc) or type(exc).__name__,
+            namespace=args.namespace,
+        )
     print(f"=== Evolve 基础：KnowledgeBase Snapshot={base_snapshot_id}，Function={store.count()} ===")
     # 导出演化前基线（供 Evaluator_final 前后对比）
     store.export_jsonl(os.path.join(out_dir, f"functions_{args.namespace}_start.jsonl"))
-
-    stories_dir = os.path.abspath(args.corpus)
-    if not os.path.isdir(stories_dir):
-        print(f"语料目录不存在: {stories_dir}")
-        sys.exit(1)
 
     manifest_path = os.path.join(stories_dir, "manifest.json")
     story_meta: dict = {}
@@ -586,7 +625,10 @@ def main() -> None:
         story_files = story_files[: args.limit]
     if not story_files:
         print(f"目录 {stories_dir} 中没有可处理的 .txt 文件")
-        sys.exit(1)
+        return _evolve_failure(
+            "NO_STORIES", f"目录中没有可处理的 .txt 文件: {stories_dir}",
+            namespace=args.namespace, parent_snapshot_id=base_snapshot_id,
+        )
 
     n_funcs = store.count()
     print(f"=== Evolve 启动：函数库 namespace={args.namespace}（{n_funcs} 个 Function），"
@@ -640,8 +682,17 @@ def main() -> None:
     try:
         result = app.invoke(initial)
     except BaseException as exc:
-        knowledge.fail_function_run(run_id, {"error": str(exc)})
-        raise
+        failure = failed_run_result(
+            stage="evolve", workflow="evolve", run_id=run_id,
+            namespace=args.namespace, snapshot_id=None,
+            parent_snapshot_id=base_snapshot_id,
+            error_code="EVOLVE_RUN_FAILED",
+            error=str(exc) or type(exc).__name__,
+            retryable=isinstance(exc, (TimeoutError, ConnectionError)),
+        )
+        knowledge.fail_function_run(run_id, failure)
+        print(json.dumps({"run_result": failure}, ensure_ascii=False))
+        return 1
     elapsed = time.time() - start_time
     report = result.get("match_report") or {}
     print(f"\n=== Evolve 完成: {elapsed:.1f}s ({elapsed / max(total, 1):.1f}s/篇) ===")
@@ -652,8 +703,10 @@ def main() -> None:
         print(f"  RetroMatch: 回看 {retro['rematched']} 条，新增归属 {retro['newly_matched']} 条")
     if result.get("errors"):
         print(f"  失败记录 {len(result['errors'])} 条（不中断）")
-    print(json.dumps({"run_result": result.get("run_result")}, ensure_ascii=False))
+    run_result = result.get("run_result")
+    print(json.dumps({"run_result": run_result}, ensure_ascii=False))
+    return 0 if run_result and run_result.get("status") == "PASS" else 1
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

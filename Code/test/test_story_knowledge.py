@@ -221,7 +221,10 @@ def test_pattern_start_recovers_interrupted_run(tmp_path):
 
     recovered = store.load_pattern_run(first_id)
     assert recovered["status"] == "FAILED"
-    assert recovered["payload"]["error"] == "interrupted_before_pattern_commit"
+    assert recovered["payload"]["status"] == "FAILED"
+    assert recovered["payload"]["stage"] == "pattern"
+    assert recovered["payload"]["error_code"] == "INTERRUPTED_BEFORE_PATTERN_COMMIT"
+    assert recovered["payload"]["error"] == "进程在 Pattern 提交前中断"
     assert store.load_pattern_run(second_id)["status"] == "RUNNING"
 
 

@@ -51,6 +51,7 @@ from FunctionExtract_Agent.Contract.contract import build_function_contracts
 from FunctionExtract_Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
 from Contracts.snapshot import DEFAULT_SNAPSHOT_ROOT, publish_snapshot
 from Contracts.occurrence import align_occurrences, assignment_metrics
+from Contracts.run_result import failed_run_result
 from KnowledgeBase import DEFAULT_DB_PATH, StoryKnowledgeStore
 from FunctionExtract_Agent.Bank.bank import ObservationBank
 from FunctionExtract_Agent.Retrieval.retrieval import Retriever
@@ -371,19 +372,18 @@ def export_node(state: NarrativePipelineState) -> dict:
     if not survivors:
         print(f"=== 无达标函数，O_0 为空（命名空间 {ns} 已清空，未导出快照）===")
         report = state.get("evaluation_report") or {}
+        failure = failed_run_result(
+            stage="bootstrap", workflow="bootstrap", run_id=run_id,
+            namespace=ns, snapshot_id=None, parent_snapshot_id=None,
+            error_code="NO_FUNCTION_SURVIVED",
+            error="最终评估后没有可发布 Function",
+            report=report,
+        )
         if knowledge and run_id:
-            knowledge.fail_function_run(run_id, report)
+            knowledge.fail_function_run(run_id, failure)
         return {
             "discarded": True,
-            "run_result": {
-                "run_id": run_id,
-                "status": "FAIL",
-                "workflow": "bootstrap",
-                "namespace": ns,
-                "snapshot_id": None,
-                "parent_snapshot_id": None,
-                "report": report,
-            },
+            "run_result": failure,
             "messages": [{"role": "system", "content": "[Finalize] 无达标函数，O_0 为空"}],
         }
     # 全量抽象归并：把同一结构作用的函数合并为更高层类别（1 次 LLM 调用）
@@ -448,7 +448,14 @@ def export_node(state: NarrativePipelineState) -> dict:
             print(f"  KnowledgeBase → {state['knowledge_db']}")
     else:
         if knowledge and run_id:
-            knowledge.fail_function_run(run_id, final_report)
+            failure = failed_run_result(
+                stage="bootstrap", workflow="bootstrap", run_id=run_id,
+                namespace=ns, snapshot_id=None, parent_snapshot_id=None,
+                error_code="EVALUATION_FAILED",
+                error="最终评估未通过，未发布 Snapshot",
+                report=final_report,
+            )
+            knowledge.fail_function_run(run_id, failure)
         print("  最终终评未通过，不发布 OntologySnapshot")
     print(f"全部 {state.get('total_stories', 0)} 个故事处理完成")
     return {
@@ -457,15 +464,25 @@ def export_node(state: NarrativePipelineState) -> dict:
         "occurrences": final_occurrences,
         "function_contracts": function_contracts,
         "ontology_snapshot": snapshot_path,
-        "run_result": {
-            "run_id": run_id,
-            "status": "PASS" if snapshot_path else "FAIL",
-            "workflow": "bootstrap",
-            "namespace": ns,
-            "snapshot_id": os.path.basename(snapshot_path) if snapshot_path else None,
-            "parent_snapshot_id": None,
-            "report": final_report,
-        },
+        "run_result": (
+            {
+                "run_id": run_id,
+                "status": "PASS",
+                "stage": "bootstrap",
+                "workflow": "bootstrap",
+                "namespace": ns,
+                "snapshot_id": os.path.basename(snapshot_path),
+                "parent_snapshot_id": None,
+                "report": final_report,
+            }
+            if snapshot_path else failed_run_result(
+                stage="bootstrap", workflow="bootstrap", run_id=run_id,
+                namespace=ns, snapshot_id=None, parent_snapshot_id=None,
+                error_code="EVALUATION_FAILED",
+                error="最终评估未通过，未发布 Snapshot",
+                report=final_report,
+            )
+        ),
     }
 
 
@@ -557,7 +574,18 @@ def collect_story_files(root: str, recursive: bool) -> list[str]:
     return sorted(files, key=natural_key)
 
 
-def main() -> None:
+def _bootstrap_failure(error_code: str, error: str, *, run_id: str | None = None,
+                       namespace: str | None = None) -> int:
+    result = failed_run_result(
+        stage="bootstrap", workflow="bootstrap", run_id=run_id,
+        namespace=namespace, snapshot_id=None, parent_snapshot_id=None,
+        error_code=error_code, error=error,
+    )
+    print(json.dumps({"run_result": result}, ensure_ascii=False))
+    return 1
+
+
+def main() -> int:
     parser = argparse.ArgumentParser(description="Bootstrap 单图全流程：全量提取 → 统一归纳 → 评估修订 → 快照")
     parser.add_argument("--corpus", type=str, default=None, help=f"语料目录（缺省 = 仓库下 {DEFAULT_CORPUS}）")
     parser.add_argument("--namespace", type=str, default="bootstrap", help="Registry 命名空间（缺省 bootstrap）")
@@ -574,7 +602,7 @@ def main() -> None:
     if not os.path.isdir(stories_dir):
         print(f"语料目录不存在: {stories_dir}")
         print(f"请用 --corpus 指定语料目录，或先用 clean_corpus.py 生成缺省语料 {DEFAULT_CORPUS}。")
-        sys.exit(1)
+        return _bootstrap_failure("CORPUS_NOT_FOUND", f"语料目录不存在: {stories_dir}", namespace=args.namespace)
 
     manifest_path = os.path.join(stories_dir, "manifest.json")
     corpus_mode = args.corpus is not None or os.path.exists(manifest_path)
@@ -605,7 +633,7 @@ def main() -> None:
         story_files = story_files[: args.limit]
     if not story_files:
         print(f"目录 {stories_dir} 中没有可处理的 .txt 文件")
-        sys.exit(1)
+        return _bootstrap_failure("NO_STORIES", f"目录中没有可处理的 .txt 文件: {stories_dir}", namespace=args.namespace)
 
     bank = get_bank()
     registry_store = RegistryStore(namespace=args.namespace)
@@ -618,7 +646,10 @@ def main() -> None:
     if args.resume:
         if app.checkpointer.get_tuple({"configurable": {"thread_id": thread_id}}) is None:
             print(f"--resume：thread {thread_id} 无 checkpoint，请先运行完整流程（不带 --resume）。")
-            sys.exit(1)
+            return _bootstrap_failure(
+                "CHECKPOINT_NOT_FOUND", f"--resume 无 checkpoint: {thread_id}",
+                namespace=args.namespace,
+            )
         print(f"=== --resume：跳过清理，从 checkpoint 续跑（{thread_id}） ===")
     else:
         print("=== 清理 Bank / Registry / Checkpoint ===")
@@ -644,7 +675,10 @@ def main() -> None:
         run = knowledge.load_function_run(run_id) if run_id else None
         if not run or run["status"] != "RUNNING":
             print("--resume：checkpoint 不存在可恢复的 RUNNING Function Run，请重新开始 Bootstrap。")
-            sys.exit(1)
+            return _bootstrap_failure(
+                "RUN_NOT_RESUMABLE", "checkpoint 不存在可恢复的 RUNNING Function Run",
+                run_id=run_id, namespace=args.namespace,
+            )
     else:
         run_id = "FR_" + uuid.uuid4().hex[:16]
         knowledge.begin_function_run(run_id, "bootstrap", args.namespace, None, stories_dir)
@@ -685,8 +719,16 @@ def main() -> None:
             }
             result = app.invoke(initial, config={"configurable": {"thread_id": thread_id}})
     except BaseException as exc:
-        knowledge.fail_function_run(run_id, {"error": str(exc) or type(exc).__name__})
-        raise
+        failure = failed_run_result(
+            stage="bootstrap", workflow="bootstrap", run_id=run_id,
+            namespace=args.namespace, snapshot_id=None, parent_snapshot_id=None,
+            error_code="BOOTSTRAP_RUN_FAILED",
+            error=str(exc) or type(exc).__name__,
+            retryable=isinstance(exc, (TimeoutError, ConnectionError)),
+        )
+        knowledge.fail_function_run(run_id, failure)
+        print(json.dumps({"run_result": failure}, ensure_ascii=False))
+        return 1
     elapsed = time.time() - start_time
 
     decision = result.get("evaluator_decision")
@@ -701,10 +743,12 @@ def main() -> None:
         print(f"修订动作: 合并 {len(rev.get('merged', []))} / 修订 {len(rev.get('revised', []))} "
               f"/ 拆分 {len(rev.get('split', []))} / 移除 {len(rev.get('removed', []))}（备份 {rev.get('backup', 'N/A')}）")
     print(f"=== 运行耗时: {elapsed:.1f} 秒 ({elapsed / max(total, 1):.1f} 秒/篇) ===")
-    print(json.dumps({"run_result": result.get("run_result")}, ensure_ascii=False))
+    run_result = result.get("run_result")
+    print(json.dumps({"run_result": run_result}, ensure_ascii=False))
     if result.get("discarded"):
         print("=== 无达标函数，O_0 为空，未导出快照 ===")
-        sys.exit(1)
+        return 1
+    return 0 if run_result and run_result.get("status") == "PASS" else 1
 
 
 if __name__ == "__main__":
