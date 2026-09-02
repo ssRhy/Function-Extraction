@@ -1061,3 +1061,9 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - 用户要求执行 Run 恢复、阶段级超时和有限错误分类。结合当前代码，Function/Pattern Run 已在各自 SQLite 启动时收口悬挂 Run；再增加 Coordinator 持久 Run 会形成第二套状态真相，因此暂不实现。
 - 当前真正的自动化风险是 `Popen` 子进程可能无限等待。最小修复是 Coordinator 侧单一阶段超时，超时返回 `STAGE_TIMEOUT`，并复用已有有限重试次数。
 - 错误分类只保护明确的永久失败码，其他情况继续尊重子 Agent 的 `retryable`。这样避免盲目重试质量失败，也不增加新的错误层级或 LLM Supervisor。
+
+## 156. Evolve namespace 必须由父 Snapshot 决定（2026-09-02）
+
+- 真实 Coordinator 验证发现，使用临时 namespace 会使 Evolve 子 Snapshot 与父 Snapshot namespace 不一致，Pattern 的已有 lineage 检查因此正确拒绝启动。
+- 这不是只针对测试的适配：Evolve 的 namespace 是 Snapshot lineage 的一部分，必须从 `base_snapshot_id` 的 manifest 继承；测试隔离应复制 KnowledgeDB，而不是改 namespace。
+- 最小修复是在 Coordinator 入口读取父 Snapshot manifest并覆盖 Evolve namespace，Bootstrap 继续接受显式 namespace；不放宽 Pattern 的父子一致性检查。

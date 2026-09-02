@@ -1373,3 +1373,9 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Coordinator 为每个 Bootstrap/Evolve/Pattern 子进程增加默认 1800 秒阶段超时，超时后终止当前进程并返回统一 `STAGE_TIMEOUT` 失败结果；不增加 Coordinator Run 表或第二套恢复状态。
 - 重试判定沿用子 Agent 的 `retryable`，仅增加少量永久错误码保护（语料、Snapshot、checkpoint 和质量门失败不重试）；没有引入 LLM 错误分类器。
 - 验证：真实子进程、超时、退出码和永久错误码测试均通过；全套测试 `306 passed, 1 skipped`。共享 Bank 已恢复为 80 行真实基线，临时 Chroma 已移入回收站。
+
+## 本轮（2026-09-02）：Coordinator Evolve 自动继承父 Snapshot namespace
+
+- Coordinator 的 Evolve 模式现在读取 `base_snapshot_id` 对应 Snapshot manifest，并将其 namespace 作为 Evolve Registry、Function Run 和子 Snapshot 的唯一 namespace；调用者传入的不一致值只作为提示，不再覆盖父 lineage。
+- Bootstrap 仍使用显式 namespace；不新增 namespace 映射表、Run 表或数据库边界。
+- 验证：新增父 Snapshot namespace 继承测试；全套测试 `307 passed, 1 skipped`，共享 Bank 已恢复为 80 行真实基线。

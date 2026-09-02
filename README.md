@@ -120,6 +120,7 @@ python -m FunctionCoordinator_Agent --mode evolve --corpus <新语料目录> \
 - Coordinator 使用 LangGraph 条件边读取子 Agent 的 `run_result`：Function `PASS` 且有 `snapshot_id` 才进入 Pattern，Pattern `SUCCESS` 才完成。
 - 进程级暂时错误最多按 `--max-retries` 重试（默认 1 次）；业务质量失败直接停止，不自动修改 Function 或 Snapshot。
 - Coordinator 对每个子 Agent 默认设置 1800 秒阶段超时，可用 `--stage-timeout` 调整；超时只终止当前子进程并按有限重试规则处理。
+- Evolve 自动从 `--base-snapshot` 读取父 Snapshot 的 namespace；即使命令行传入其他 namespace，也以父 Snapshot 为准，保证子 Snapshot 能被 Pattern 接续。
 - 不新增数据库或第二套持久状态；正式 Run 和 Snapshot 仍由 Bootstrap、Evolve、Pattern 写入统一 SQLite。
 - 三个子 Agent 的失败结果统一为 `status=FAILED`，并包含 `stage`、`workflow`、`run_id`、`namespace`、`snapshot_id`、`parent_snapshot_id`、`error_code`、`error` 和 `retryable`；数据库内部仍按各自表的 `FAIL/FAILED` 状态记录。
 - Coordinator 测试包含真实 Python 子进程协议：实际读取 stdout 的 `run_result`，并验证非零退出码会覆盖子 Agent 报告的成功状态。

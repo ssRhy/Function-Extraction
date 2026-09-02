@@ -148,3 +148,31 @@ def test_permanent_error_code_overrides_retryable_flag():
     }
 
     assert app.route_after_function(state) == "stop"
+
+
+def test_evolve_inherits_parent_snapshot_namespace(monkeypatch):
+    captured = {}
+
+    class FakeStore:
+        def __init__(self, _path):
+            pass
+
+        def initialize(self):
+            pass
+
+        def load_snapshot_manifest(self, _snapshot_id):
+            return {"namespace": "parent_namespace"}
+
+    class FakeGraph:
+        def invoke(self, state):
+            captured.update(state)
+            return {"final_result": {"status": "FAILED"}}
+
+    monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
+    monkeypatch.setattr(app, "_build_graph", lambda: FakeGraph())
+    options = _kwargs()
+    options.update(mode="evolve", namespace="wrong_namespace", base_snapshot_id="parent")
+
+    app.run_coordinator(**options)
+
+    assert captured["namespace"] == "parent_namespace"

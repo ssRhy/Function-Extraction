@@ -12,6 +12,7 @@ from datetime import datetime
 from langgraph.graph import END, START, StateGraph
 
 from Contracts.run_result import failed_run_result
+from KnowledgeBase import StoryKnowledgeStore
 from .state import FunctionCoordinatorState
 
 
@@ -247,6 +248,25 @@ def finish_node(state: FunctionCoordinatorState) -> dict:
     return {"final_result": final}
 
 
+def _resolve_namespace(mode: str, namespace: str | None, knowledge_db: str,
+                       base_snapshot_id: str | None) -> str:
+    if mode == "bootstrap":
+        if not namespace:
+            raise ValueError("Bootstrap Coordinator 需要 namespace")
+        return namespace
+    if not base_snapshot_id:
+        raise ValueError("Coordinator 的 evolve 模式需要显式 base_snapshot_id")
+    store = StoryKnowledgeStore(knowledge_db)
+    store.initialize()
+    manifest = store.load_snapshot_manifest(base_snapshot_id)
+    parent_namespace = manifest.get("namespace")
+    if not parent_namespace:
+        raise ValueError(f"父 Snapshot 缺少 namespace: {base_snapshot_id}")
+    if namespace and namespace != parent_namespace:
+        print(f"[Coordinator] Evolve namespace 已从 {namespace} 改为父 Snapshot namespace {parent_namespace}")
+    return parent_namespace
+
+
 def _build_graph():
     graph = StateGraph(FunctionCoordinatorState)
     graph.add_node("run_function", run_function_node)
@@ -268,12 +288,16 @@ def _build_graph():
 
 
 def run_coordinator(**kwargs) -> dict:
+    namespace = _resolve_namespace(
+        kwargs["mode"], kwargs.get("namespace"),
+        os.path.abspath(kwargs["knowledge_db"]), kwargs.get("base_snapshot_id"),
+    )
     state: FunctionCoordinatorState = {
         "mode": kwargs["mode"],
         "corpus": os.path.abspath(kwargs["corpus"]),
         "stories": kwargs.get("stories"),
         "limit": kwargs.get("limit"),
-        "namespace": kwargs["namespace"],
+        "namespace": namespace,
         "base_snapshot_id": kwargs.get("base_snapshot_id"),
         "knowledge_db": os.path.abspath(kwargs["knowledge_db"]),
         "out_dir": os.path.abspath(kwargs["out_dir"]),
@@ -287,8 +311,6 @@ def run_coordinator(**kwargs) -> dict:
         "function_attempt": 0,
         "pattern_attempt": 0,
     }
-    if state["mode"] == "evolve" and not state.get("base_snapshot_id"):
-        raise ValueError("Coordinator 的 evolve 模式需要显式 base_snapshot_id")
     return _build_graph().invoke(state)["final_result"]
 
 
