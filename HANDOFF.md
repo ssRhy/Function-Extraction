@@ -1361,3 +1361,9 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Bootstrap/Evolve 的语料、基础 Snapshot、checkpoint 等早期失败也输出同一 `{"run_result": ...}` 协议；运行中异常和评估不通过沿用同一协议。
 - Pattern 运行异常和启动收口写入相同失败 payload；正式 SQLite 的物理状态仍保留 `pipeline_runs.status=FAIL`、`pattern_runs.status=FAILED`，不改变已有成功状态语义。
 - 验证：全套测试 `302 passed, 1 skipped`；测试生成的共享 Bank 已恢复为 80 行真实基线，临时 Chroma 目录已移入回收站。
+
+## 本轮（2026-09-02）：补 Coordinator 真实子进程协议测试
+
+- 在 `Code/test/test_function_coordinator.py` 增加真实 Python 子进程测试，不 mock `_run_stage`；子进程输出进度日志和 JSON `run_result`，由 Coordinator 实际读取、解析并完成 Function → Pattern 路由。
+- 增加非零退出码覆盖测试：即使子进程报告 `PASS`，Coordinator 也会将结果收口为 `FAILED`，并阻止进入 Pattern。
+- 验证：Coordinator 定向测试 `7 passed`；未调用 LLM。

@@ -1049,3 +1049,9 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - 用户要求先统一 Bootstrap、Evolve、Pattern 的错误结果。仅在最终成功/异常路径打印 `run_result` 不够，因为语料不存在、基础 Snapshot 不存在和不可恢复 checkpoint 等早期失败同样会被 Coordinator 消费。
 - 最小做法是增加一个纯结果构造函数，不引入新的状态表或错误层级：所有失败均返回 `status=FAILED`、`stage`、`workflow`、Run/Snapshot 上下文、`error_code`、`error`、`retryable`。
 - 数据库内部的 `FAIL` 与 `FAILED` 继续保持各表现有语义；统一的是跨进程接口 payload，不为适配器再增加一套持久状态。
+
+## 154. Coordinator 需要真实验证跨进程协议（2026-09-02）
+
+- 用户要求补 Coordinator 的真实子进程测试。原有测试只替换 `_run_stage`，只能证明 LangGraph 路由，不能证明子进程 stdout、JSON 解析和退出码组合真的闭合。
+- 最小测试使用实际 Python 子进程输出 `run_result`，不调用 LLM、不新增测试 Agent；同时覆盖正常 Function → Pattern 路由和非零退出码覆盖成功报告两条边界。
+- 这验证的是 Coordinator 的进程协议，不等同于真实 LLM 业务回归；后者仍由 Bootstrap/Evolve/Pattern 各自的真实运行验证负责。
