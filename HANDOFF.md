@@ -1386,3 +1386,67 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Evolve Run `FR_2e754a7cab6f4739` 成功，发布临时子 Snapshot `real_50_50_20260901_20260902T131330691437Z_ba37aa81a6ad`；Snapshot 为 104 篇故事、919 个 Observation、19 个 Function。
 - Pattern Run `PR_de14350298651dae` 在输入一致性检查处失败：`motif candidate Function ID/名称不一致: MC_47c799047da2d87e: F_E7DF0FDE`。该错误被标记为不可重试，Coordinator 正确停止，未完成 Pattern 发布。
 - 正式 KnowledgeDB 最新 Snapshot 仍未改变，Registry 备份恢复后一致；临时验证目录已移入回收站。
+
+## 本轮（2026-09-02）：Pattern 增量 Motif 名称按当前 Snapshot 重投影
+
+- 修复 Pattern 继承父 Snapshot Motif 证据时携带旧 `function_names` 的问题；继承路径现在只保留 `function_ids` 和证据，名称统一从当前 Snapshot 的 `function_by_id` 重新生成。
+- 历史 Snapshot 不修改，Function ID 仍是 Pattern 的唯一引用；本次投影只发生在每次 Pattern 运行的输入构建阶段，不增加 LLM 调用，也不需要重跑 Observation。
+- 如果 `MERGE/SPLIT` 使 Function ID 消失，仍需依靠 lineage 做显式重映射；本修复针对同一稳定 ID 的 Function 名称修订。
+- 验证：针对性测试 `41 passed, 1 skipped`；全套离线测试 `308 passed, 1 skipped`。
+
+## 本轮（2026-09-02）：真实 Pattern 重建验证名称投影
+
+- 使用临时 KnowledgeDB 中的真实子 Snapshot `real_50_50_20260901_20260902T131330691437Z_ba37aa81a6ad` 重跑 Pattern；该 Snapshot 曾因 `F_E7DF0FDE` 的旧名称继承而失败。
+- 真实 Pattern Run `PR_de14350298651dae` 成功完成：104 条序列、261 个 Motif、242 个 Cluster、9 个 published Cluster、9 个 published Pattern；原一致性错误未再出现。
+- 正式 KnowledgeDB 最新 Snapshot 仍为 `real_50_50_20260901_20260902T073957699614Z_6f112aad5060`，本次只修改临时验证库。
+
+## 本轮（2026-09-02）：原路径全新库上的 Coordinator 全链路验证
+
+- 将正式运行状态 `data/knowledge`、`data/registry`、`FunctionExtract_Agent/data/bank`、`data/ontology_snapshots` 和 `data/checkpoints` 移入回收站，在原路径重建空运行环境；语料和历史输出目录未删除。
+- 真实 Coordinator Bootstrap 处理 10 篇故事，Function Run `FR_ff890e0fd24d48eb` PASS，发布根 Snapshot `real_coordinator_rebuild_20260902_20260902T143306834821Z_2cf78969b5c8`；包含 10 篇故事、69 个 Observation、8 个 Function。根 Pattern Run `PR_3d04b6d5c11ef88b` SUCCESS，但当前样本仅形成 1 个 candidate Cluster，0 个 published Pattern。
+- 真实 Coordinator Evolve 增加剩余 5 篇故事，自动从父 Snapshot 继承 namespace，Function Run `FR_d150784b96b644f0` PASS，发布子 Snapshot `real_coordinator_rebuild_20260902_20260902T143716690768Z_46b96bd1031b`；子 Snapshot 共 15 篇故事、128 个 Observation、9 个 Function。子 Pattern Run `PR_3d499ccd724bdd00` SUCCESS，16 个 candidate Cluster，0 个 published Pattern。
+- 自动化链路验证通过：Bootstrap → Pattern、Evolve → Pattern 均由 Coordinator 子进程自动衔接，无中途人工纠正；父子 Snapshot、两组 Run 状态均正确，`PRAGMA foreign_key_check` 为空。Evaluator 的业务质量报告仍可能 PASS 但未达 6/6，Pattern 0 published 属于当前样本结构不足，不是流程失败。
+
+## 本轮（2026-09-02）：同一正式库追加 10 篇并自动提取 Pattern
+
+- 沿用最新父 Snapshot `real_coordinator_rebuild_20260902_20260902T143716690768Z_46b96bd1031b`，在同一个 `data/knowledge/story_knowledge.db` 中追加 10 篇未处理真实语料；没有新建数据库，也没有人工衔接。
+- Evolve Run `FR_e3685e7972684062` PASS，发布子 Snapshot `real_coordinator_rebuild_20260902_20260902T144924647688Z_46f8a97d4a75`；累计 25 篇故事、225 个 Observation、8 个 Function，assignment coverage `130/225=57.78%`。
+- Coordinator 自动启动 Pattern Run `PR_2dcaf84c5d487461` SUCCESS；25 条序列、73 个新输入 Motif、67 个 Cluster、4 个 published Cluster、4 个 published Pattern（`PAT_012e4b8327a64ef5`、`PAT_3b533703d96368fd`、`PAT_4ed54faaee43fd11`、`PAT_e67be7980a7a5ba2`）。
+- 最终核验：3 个 Function Run 和 3 个 Pattern Run 均无 `RUNNING`；最新 Snapshot 父子关系正确，`PRAGMA foreign_key_check` 为空。过程中出现的 LLM 结构化输出错误由现有重试自动恢复。
+
+## 本轮（2026-09-02）：建立第一版可信增量质量基线
+
+- 对最新 Snapshot `real_coordinator_rebuild_20260902_20260902T144924647688Z_46f8a97d4a75` 完成结构检查和 60 个 Observation 语义抽样评审；报告位于 `Code/data/real_coordinator_rebuild_20260902/quality_baseline_20260902.md`。
+- 自动检查通过：4 个 Published Pattern 的 Function ID 均存在且名称投影无旧值；父子 Snapshot 正确；没有悬挂 Run；外键检查通过。
+- 30 个 MATCHED 样本初评为 `C=20`、`P=6`、`M=4`；30 个 UNCERTAIN 样本中 `U_OK=14`、`U_RE=16`。这说明下一步应优先做受限 RetroMatch 和 Pattern 重叠评审，而不是增加 Supervisor。
+- 4 个 Published Pattern 中至少 3 个共享“揭示—威胁”骨架，当前应视为“1 个较强候选 + 3 个待合并/验证变体”，暂不直接删除。
+- 质量基线同时发现最新 Snapshot 有 32/225 个 Observation 缺少 `source_text`（MATCHED 23、UNCERTAIN 9）；这不是引用完整性错误，但会降低人工证据复核强度，下一轮应单独追踪其输入定位来源。
+
+## 本轮（2026-09-02）：跨题材真实增量观察
+
+- 在同一正式 KnowledgeDB 中，以 Snapshot `real_coordinator_rebuild_20260902_20260902T144924647688Z_46f8a97d4a75` 为父版本，追加 10 篇未处理故事：古风仙侠 3、现代情感 3、末世科幻 2、现实家庭职场 2；没有新增数据库或中途人工干预。
+- Evolve Run `FR_fe7c93bb90994570` PASS，发布 Snapshot `real_coordinator_rebuild_20260902_20260902T152656592904Z_22bb53b3ba5b`；累计 35 篇故事、304 个 Observation、9 个 Function。最终 assignment coverage `189/304=62.17%`，`UNCERTAIN=115`。
+- 受限 RetroMatch 实际回看 5 个旧未决 Observation，新增归属 2 个；没有全量重跑 Observation。该机制在跨题材批次中确实产生了有限增量收益。
+- Pattern Run `PR_e27bba34b67c4815` SUCCESS，发布 5 个 Pattern，同时退休上一 Snapshot 的 4 个 Pattern。当前仍可见重复骨架：两组“关系破裂—威胁—反思”和两组“隐藏能力揭示—威胁”高度重叠；这是重复出现的质量问题，不是流程或引用错误。
+- 跨题材后的 Evaluator 仍因 `abstraction_quality` 失败，明确指出 `THREAT_OR_DANGER_CONFRONTATION`、`PERSONAL_GROWTH_AND_REFORM` 过宽；该问题不再能归因于单一悬疑题材。各题材 assignment coverage 为：悬疑 `64.8%`、古风 `62.7%`、现代 `64.0%`、末世 `60.0%`、家庭职场 `57.1%`。
+- 本轮没有修改代码。当前结论是：继续积累数据用于判断重复问题是合理的；下一次仍先观察，不因一批结果直接增加去重 Agent 或 LLM Supervisor。
+
+## 本轮（2026-09-02）：第二批跨题材真实增量观察
+
+- 继续沿用同一正式库和 Snapshot 链，追加 8 篇未处理故事：古风仙侠、现代情感、末世科幻、现实家庭职场各 2 篇；悬疑语料已经全部处理完，因此没有人为重复采样。
+- Evolve Run `FR_e73729f19de5448b` PASS，发布 Snapshot `real_coordinator_rebuild_20260902_20260902T154930744187Z_9195b273a20a`；累计 43 篇故事、367 个 Observation、8 个 Function，assignment coverage `212/367=57.77%`，`UNCERTAIN=155`。
+- 本轮受限 RetroMatch 回看 2 个旧未决 Observation，新增归属 2 个；仍保持局部增量，不重跑全部旧 Observation。
+- Pattern Run `PR_96377123e12a4d35` SUCCESS；当前 4 个 Published Pattern，1 个 Pattern 合并，1 个候选 Cluster 被阻断，2 个上一轮 Pattern 退休。Pattern 仍集中在“关系破裂/身份或属性揭示—威胁—反思/资源”骨架，但已有跨题材支持的模式。
+- 上一批的 Function 过宽警告本轮最终未重复出现，Evaluator `abstraction_quality=1.0`；但本轮中期曾再次提示 `THREAT_OR_DANGER_CONFRONTATION` 把“对抗”和“逃离”放在同一定义中，因此该问题暂时只能判定为间歇性重复，不能视为已解决。
+- 各题材 assignment coverage 为：悬疑 `66.7%`、古风 `56.5%`、现代 `53.8%`、末世 `57.9%`、家庭职场 `50.0%`。跨题材后整体匹配率仍偏低，家庭职场和现代情感尤其明显。
+- 本轮没有修改业务代码，也没有新增测试库；当前仍以数据积累和批次比较为主。
+
+## 本轮（2026-09-02）：第三批跨题材真实增量观察
+
+- 以 Snapshot `real_coordinator_rebuild_20260902_20260902T154930744187Z_9195b273a20a` 为父版本，在同一正式 KnowledgeDB 中追加 10 篇未处理故事：古风 2、现代 2、末世 3、家庭职场 3。
+- Evolve Run `FR_0b1f40b721ad45e1` PASS，发布 Snapshot `real_coordinator_rebuild_20260902_20260902T160122211213Z_8d96cbbc6312`；累计 53 篇故事、456 个 Observation、8 个 Function。最终 assignment coverage `271/456=59.43%`，`UNCERTAIN=185`。
+- 受限 RetroMatch 本批没有单独产生回看输出变化；Evolve、Pattern 均由 Coordinator 自动完成，Function/Pattern Run 无悬挂，外键检查通过。
+- 最终 Evaluator 连续通过 6/6，`abstraction_quality=1.0`；本批没有新增或移除 Function。说明上一批的 Function 过宽警告尚未形成连续最终失败，但不能认为语义边界已稳定。
+- Pattern Run `PR_8c152aa766f1013b` SUCCESS：10 个 Published Pattern，3 个旧 Pattern 更新，未发生合并或阻断。模式仍高度集中于“揭示—威胁—反思/资源”组合，并出现跨题材支持，但重复骨架没有消失。
+- 各题材 assignment coverage 为：悬疑 `66.7%`、古风 `54.4%`、现代 `53.5%`、末世 `62.2%`、家庭职场 `58.7%`。整体仍处于约 59% 的低匹配区间，现代和古风较弱。
+- 本轮没有修改业务代码。当前结论：Pattern 重复和跨题材低匹配已具备多批次证据，下一阶段可以做最小诊断规则；仍不需要增加 Supervisor 或独立 Agent。

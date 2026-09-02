@@ -1073,3 +1073,58 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - 真实 Coordinator 复测证明 namespace 继承已生效：错误的命令行 namespace 被替换为父 Snapshot namespace，Evolve 成功发布子 Snapshot。
 - Pattern 随后在 motif 输入一致性检查处失败，具体为 `MC_47c799047da2d87e` 携带的 Function ID `F_E7DF0FDE` 与当前 Function 名称映射不一致。这个问题位于 Evolve 产生的 Motif/Function 引用或 Pattern 输入校验，不是 Coordinator 路由问题。
 - 由于该失败不可安全自动推断，Coordinator 正确停止且不重试。下一步应追查 Motif candidate 的 ID/名称来源和 Function lineage 映射，不能用放宽校验或模糊匹配掩盖错配。
+
+## 158. Pattern 的 Function 名称是可变投影，不是引用身份（2026-09-02）
+
+- 真实失败的根因是：未变化故事继承父 Snapshot 的 Motif 证据时，同时继承了旧 `function_names`；当前 Snapshot 对同一稳定 Function ID 执行 `REVISE` 后，名称已更新，导致 ID/名称校验失败。
+- 因此 Pattern 的 Motif 数据流应以 `function_ids` 为唯一引用，`function_names` 只在当前 Snapshot 输入边界按 ID 重新投影。不能删除历史 Snapshot 或 FunctionVersion 来规避问题，因为它们仍承担不可变审计和 lineage 作用。
+- 本次决定保持最小增量：不重跑 Observation、不增加 LLM 调用、不修改历史数据；每次 Pattern 运行自动刷新继承 Motif 的名称。Function ID 因 `MERGE/SPLIT` 消失时，仍需单独使用显式 lineage 重映射。
+
+## 159. 真实 Pattern 验证名称重投影闭环（2026-09-02）
+
+- 在上次真实 Coordinator 失败的同一临时子 Snapshot 上直接重跑 Pattern，未重跑 Evolve；`F_E7DF0FDE` 的 ID/名称错配不再出现，Pattern Run 成功发布 9 个 Pattern。
+- 这证明该修复确实作用于真实增量继承路径，而不仅是单元测试；名称重投影是本地确定性处理，不增加故事抽取或额外 LLM 阶段。
+
+## 160. Coordinator 在原路径新库上完成两轮真实自动化（2026-09-02）
+
+- 为验证完整链路，清空并重建原路径的 KnowledgeDB、Bank、Registry、Snapshot 和 checkpoint 运行状态后，从 Bootstrap 10 篇开始，再由 Coordinator 自动执行 Evolve 新增 5 篇；没有中途由 Codex 修正或手动衔接。
+- 两轮均返回成功：Bootstrap 根 Snapshot 后自动进入 Pattern，Evolve 子 Snapshot 后自动进入 Pattern；名称重投影修复未再触发 ID/名称错配。
+- 根 Pattern 与子 Pattern 均没有 published Pattern（分别为 1 个和 16 个 candidate Cluster），这是当前小样本下的发布门槛结果，不是 Coordinator 流程失败。后续应区分“自动化链路成功”和“Pattern 业务质量达标”。
+
+## 161. 同一正式库追加 10 篇后 Pattern 发布闭环（2026-09-02）
+
+- 在同一 Snapshot 链和同一 SQLite 库上追加 10 篇真实故事，累计 25 篇后，Coordinator 自动完成 Evolve → Pattern；无需 Codex 中途修正。
+- 本轮 Pattern 从此前的 0 published 提升为 4 个 published Pattern，说明前两轮样本不足是主要原因之一；但 Evolve 的 assignment coverage 仍为 57.78%，Pattern 发布数量不能替代 Observation 匹配质量指标。
+- LLM 曾返回非法枚举和角色槽位校验错误，现有有限重试成功恢复；这支持当前“确定性 Coordinator + 子 Agent 自处理”的设计，暂不需要 LLM Supervisor。
+
+## 162. 第一版可信增量质量基线显示主要矛盾已转为语义质量（2026-09-02）
+
+- 对 25 篇故事、4 个 Published Pattern 和 60 个 Observation 完成第一版确定性抽样语义评审；自动引用、Snapshot 和 Run 一致性均通过，问题不再是新旧版本串线。
+- MATCHED 样本严格正确率为 `20/30=66.7%`，另有 6 个部分可接受；UNCERTAIN 样本有 16 个值得用现有 Function 受限 RetroMatch，14 个保持 UNCERTAIN 合理。
+- 4 个 Published Pattern 中至少 3 个共享揭示—威胁骨架，故事支持也集中在少数悬疑语料；Pattern 发布成功不等于模式已经独立、稳定或跨题材成立。
+- 当前最小下一步是记录并比较质量基线，优先验证 RetroMatch 和 Pattern 去重；不因少量边界样本立刻增加 Function，也不引入 LLM Supervisor。
+- 本次基线还确认 `source_text` 并非全量可靠：225 个 Observation 中 32 个为空。因此后续质量指标必须同时区分“结构字段可用”和“原文证据完整”，否则 MATCHED 的语义正确率会被高估。
+
+## 163. 跨题材增量用于区分偶发问题与结构性问题（2026-09-02）
+
+- 用户要求继续积累不同题材数据，观察基线问题是否重复。采用最小实验：同一 SQLite、同一 Snapshot 链、追加 10 篇非悬疑故事，由 Coordinator 自动完成 Evolve → Pattern。
+- 结果显示 assignment coverage 在五类题材间均约 `57.1%~64.8%`，未出现只在悬疑语料中存在的异常；Evaluator 的 `abstraction_quality` 再次失败，并再次指出威胁与个人成长 Function 过宽，因此这是跨题材重复的结构性语义问题。
+- 受限 RetroMatch 从父 Snapshot 的 95 个未决项中召回 5 个并新增归属 2 个，证明现有局部回看足以提供小幅增量收益，不需要每轮重跑全部 Observation。
+- Pattern 重叠也重复出现：当前 5 个已发布模式中有两组共享关系破裂—威胁骨架、两组共享隐藏能力揭示—威胁骨架。现阶段先把它作为质量诊断记录，不立即引入 Pattern Dedup Agent 或新增持久化边界。
+- 当前决策：继续积累至少下一批跨题材数据；只有同一问题连续批次重复且影响发布/匹配时，才做局部规则或阈值修复。
+
+## 164. 第二批跨题材结果：质量问题部分重复、部分具有波动性（2026-09-02）
+
+- 用户要求继续积累未处理的跨题材数据。因悬疑语料已耗尽，本批追加古风、现代、末世、家庭职场各 2 篇，共 8 篇，继续使用同一正式 DB 和父 Snapshot。
+- 最终 `abstraction_quality` 从上一批的失败恢复到 `1.0`，所以“Function 过宽”目前不能仅凭连续两批最终报告判定为稳定故障；但中期再次指出 Threat Function 混合对抗与逃离，说明语义边界问题仍有波动性。
+- assignment coverage 从上一批 `62.17%` 降为 `57.77%`，其中家庭职场 `50.0%`、现代情感 `53.8%`；说明跨题材累积并没有自动改善匹配率，低匹配可能是稳定问题。
+- Pattern 阶段首次出现 1 次合并，并退休 2 个旧 Pattern；但已发布模式仍共享揭示—威胁—反思/资源骨架。去重机制开始发挥作用，但还不足以说明 Pattern 已经跨题材稳定。
+- 当前决策保持不变：先继续观察至少一个批次；如果低 assignment coverage 和重复骨架继续出现，再做最小的 Matcher/Pattern 局部规则修复，不增加 Supervisor 或独立 Dedup Agent。
+
+## 165. 第三批跨题材结果支持低匹配与 Pattern 重复为稳定问题（2026-09-02）
+
+- 用户要求继续观察下一批。追加 10 篇未处理故事，保持同一 SQLite 和 Snapshot 父子链，Coordinator 自动完成 Evolve → Pattern。
+- 最终 assignment coverage 为 `59.43%`，此前两批为 `62.17%`、`57.77%`；三批都处于约 58%～62% 区间。古风、现代和家庭职场持续偏低，低匹配已不宜再视为单批波动。
+- Evaluator 最终连续两批 `abstraction_quality=1.0`，但中期和历史报告仍曾指出 Threat Function 粒度问题；当前更准确的判断是“最终质量门暂时通过，语义边界仍需专项诊断”。
+- 当前 10 个 Published Pattern 仍共享揭示—威胁—反思/资源骨架；本批没有合并或阻断，说明已有 Pattern 合并能力并不能稳定消除相似模式。Pattern 重复已获得多批次证据。
+- 当前决策：数据积累阶段的观察目标基本达到。下一步如果开始改代码，应只增加离线诊断/发布前相似度提示，先不改变 Pattern 生成、不引入新 Agent，也不自动删除 Pattern。

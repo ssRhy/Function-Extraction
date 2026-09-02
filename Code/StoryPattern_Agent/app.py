@@ -246,13 +246,19 @@ def update_motif_evidence(state: StoryPatternState) -> dict:
             "motif_id": row["motif_id"],
             "snapshot_id": state["snapshot_id"],
             "function_ids": list(row["function_ids"]),
-            "function_names": list(row["function_names"]),
             "length": row["length"],
             "evidence": [],
         })
         motif["evidence"].append(dict(row["evidence"]))
     candidates = []
     for motif in grouped.values():
+        function_names = []
+        for function_id in motif["function_ids"]:
+            function = state["function_by_id"].get(function_id)
+            if function is None:
+                raise ValueError(f"Motif 证据引用未知 Function: {motif['motif_id']}: {function_id}")
+            function_names.append(function["function_name"])
+        motif["function_names"] = function_names
         motif["evidence"].sort(key=lambda item: (
             item["story_id"], item["structural_orders"], item["occurrence_ids"],
         ))

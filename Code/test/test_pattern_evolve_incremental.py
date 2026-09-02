@@ -92,6 +92,39 @@ def test_update_story_sequences_keeps_zero_observation_story():
     }
 
 
+def test_update_motif_evidence_refreshes_inherited_function_names(monkeypatch):
+    class FakeStore:
+        def __init__(self, _path):
+            pass
+
+        def load_motif_evidence(self, _snapshot_id):
+            return [{
+                "motif_id": "MC_A",
+                "function_ids": ["F_A", "F_B", "F_C"],
+                "length": 3,
+                "evidence": {
+                    "story_id": "story_a", "category": "测试",
+                    "structural_orders": [1, 2, 3], "occurrence_ids": ["o1"],
+                },
+            }]
+
+    monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
+    result = app.update_motif_evidence({
+        "knowledge_db": "unused", "parent_snapshot_id": "parent",
+        "snapshot_id": "child", "unchanged_story_ids": ["story_a"],
+        "new_story_ids": [], "changed_story_ids": [],
+        "function_by_id": {
+            "F_A": {"function_name": "NEW_A"},
+            "F_B": {"function_name": "NEW_B"},
+            "F_C": {"function_name": "NEW_C"},
+        },
+    })
+
+    assert result["motif_candidates"][0]["function_names"] == [
+        "NEW_A", "NEW_B", "NEW_C",
+    ]
+
+
 def test_llm_review_failure_has_no_fallback(monkeypatch):
     pair = {
         "variant_pair_id": "MV_AB", "input_signature": "sig", "similarity": 0.9,
