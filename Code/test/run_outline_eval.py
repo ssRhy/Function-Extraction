@@ -22,7 +22,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from pydantic import BaseModel, Field
 
-from Agent.llm import chat_structured
+from FunctionExtract_Agent.llm import chat_structured
 import Outline_Agent.app as app
 
 
@@ -130,12 +130,12 @@ def _render_comp(comp):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--snapshot-id", default=app.DEFAULT_SNAPSHOT_ID)
+    parser.add_argument("--snapshot-id", required=True)
     parser.add_argument("--out-dir", default="")
     args = parser.parse_args()
 
     snapshot_id = args.snapshot_id
-    catalog = app.load_catalog()
+    catalog = app.load_catalog(snapshot_id)
     root = args.out_dir or os.path.join(app._DATA, "outline_eval", snapshot_id)
     full_dir = os.path.join(root, "full")
     cmp_dir = os.path.join(root, "comparison")

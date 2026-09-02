@@ -2,7 +2,7 @@
 
 import json
 
-from Agent.llm import chat_structured
+from FunctionExtract_Agent.llm import chat_structured
 from .Prompt.Summary_prompt import StoryPatternSummary, SUMMARY_SYSTEM_PROMPT
 from .state import StoryPatternState
 
@@ -80,9 +80,23 @@ def summarize_story_patterns(state: StoryPatternState) -> dict:
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ], StoryPatternSummary)
         data = result.model_dump()
-        function_by_name = {item["function_name"]: item for item in function_by_id.values()}
-        core_names = [str(name).strip() for name in data["core_function_names"]]
-        if len(core_names) < 4 or any(name not in function_by_name for name in core_names):
+        anchor_id = cluster.get("anchor_motif_id")
+        if not anchor_id:
+            eligible_motif_ids = [
+                motif_id for motif_id in cluster["member_motif_ids"]
+                if len(candidate_by_id[motif_id].get("function_ids", [])) >= 4
+            ] or cluster["member_motif_ids"]
+            anchor_id = min(
+                eligible_motif_ids,
+                key=lambda motif_id: (
+                    -candidate_by_id[motif_id].get("story_support", 0),
+                    -len(candidate_by_id[motif_id].get("function_ids", [])),
+                    motif_id,
+                ),
+            )
+        anchor = candidate_by_id.get(anchor_id)
+        core_ids = anchor.get("function_ids", []) if anchor else []
+        if len(core_ids) < 4 or any(function_id not in function_by_id for function_id in core_ids):
             raise ValueError(f"summary 核心 Function 无效: {cluster_id}")
         summaries.append({
             "pattern_id": cluster.get("pattern_id") or f"PAT_{cluster_id.removeprefix('MCL_')}",
@@ -92,16 +106,17 @@ def summarize_story_patterns(state: StoryPatternState) -> dict:
             "abstract_definition": data["abstract_definition"].strip(),
             "core_function_chain": [
                 {
-                    "function_id": function_by_name[name]["function_id"],
-                    "function_name": name,
-                    "definition": function_by_name[name]["definition"],
+                    "function_id": function["function_id"],
+                    "function_name": function["function_name"],
+                    "definition": function["definition"],
                     **({
                         "contract": function_contract_by_id[
-                            function_by_name[name]["function_id"]
+                            function["function_id"]
                         ],
-                    } if function_contract_by_id else {}),
+                    } if function["function_id"] in function_contract_by_id else {}),
                 }
-                for name in core_names
+                for function_id in core_ids
+                for function in [function_by_id[function_id]]
             ],
             "optional_steps": data["optional_steps"],
             "applicability_conditions": data["applicability_conditions"],

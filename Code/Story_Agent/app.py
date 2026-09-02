@@ -20,7 +20,7 @@ if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
 from pydantic import ValidationError
 from langgraph.graph import END, START, StateGraph
 
-from Agent.llm import chat_structured
+from FunctionExtract_Agent.llm import chat_structured
 from KnowledgeBase import DEFAULT_DB_PATH, StoryKnowledgeStore
 from Story_Agent.Prompt.Story_prompt import (
     DEVELOP_SCENES_PROMPT,

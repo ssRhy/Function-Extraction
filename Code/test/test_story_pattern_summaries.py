@@ -53,7 +53,6 @@ def test_summarizes_clean_clusters_and_binds_snapshot_evidence(monkeypatch):
         return schema(
             pattern_name="资源推进危机链",
             abstract_definition="角色获得资源后遭遇升级威胁，并进入下一阶段行动。",
-            core_function_names=["FUNCTION_1", "FUNCTION_2", "FUNCTION_3", "FUNCTION_4"],
             optional_steps=["可插入一次关系铺垫"],
             applicability_conditions=["角色需要从准备阶段进入危机应对阶段"],
             counterexamples_limitations=["不适用于核心因果方向相反的序列"],
@@ -79,7 +78,6 @@ def test_v3_summary_carries_function_contract_into_pattern(monkeypatch):
         return schema(
             pattern_name="合同模式",
             abstract_definition="状态推进",
-            core_function_names=["FUNCTION_1", "FUNCTION_2", "FUNCTION_3", "FUNCTION_4"],
             optional_steps=[], applicability_conditions=[], counterexamples_limitations=[],
         )
 
@@ -104,7 +102,6 @@ def test_summary_carries_pattern_ending_spec(monkeypatch):
         return schema(
             pattern_name="可闭合模式",
             abstract_definition="状态推进并解决核心冲突",
-            core_function_names=["FUNCTION_1", "FUNCTION_2", "FUNCTION_3", "FUNCTION_4"],
             optional_steps=[], applicability_conditions=[], counterexamples_limitations=[],
             ending_spec={
                 "resolves": "压迫关系",
@@ -146,21 +143,26 @@ def test_skips_cluster_when_summary_generation_fails(monkeypatch):
         summaries.summarize_story_patterns(_state())
 
 
-def test_rejects_unknown_core_function(monkeypatch):
+def test_summary_binds_anchor_function_chain_without_llm_function_selection(monkeypatch):
     monkeypatch.setattr(
         summaries,
         "chat_structured",
         lambda _messages, schema: schema(
             pattern_name="模式",
             abstract_definition="定义",
-            core_function_names=["UNKNOWN", "FUNCTION_2", "FUNCTION_3", "FUNCTION_4"],
             optional_steps=[],
             applicability_conditions=[],
             counterexamples_limitations=[],
         ),
     )
-    with pytest.raises(ValueError, match="核心 Function 无效"):
-        summaries.summarize_story_patterns(_state())
+    state = _state()
+    state["motif_clusters"][0]["anchor_motif_id"] = "MC_A"
+
+    result = summaries.summarize_story_patterns(state)
+
+    assert [item["function_id"] for item in result["pattern_summaries"][0]["core_function_chain"]] == [
+        "F_1", "F_2", "F_3", "F_4",
+    ]
 
 
 @pytest.mark.parametrize("change, message", [

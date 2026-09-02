@@ -1220,3 +1220,137 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 
 - `begin_function_run` 现在在同一 SQLite 事务内先收口所有 `RUNNING` 且没有 `snapshot_id` 的遗留 Function Run：删除其暂存成员及版本，标记为 `FAIL`，并写入 `interrupted_before_snapshot_publish` 审计原因。
 - Snapshot 已发布的 Run 不在恢复范围内；新的 Run 随后正常创建。因此强杀、断电或宿主退出不会在下一次 Function Run 后留下可见的悬挂暂存数据。
+
+## 本轮（2026-09-01）：正式库按新 Observation 身份重建并完成真实链路
+
+- 为消除旧正式库中的 `_obs_001` 数字型 Observation，先将旧数据库和旧 Snapshot 移出活动路径，清空活动知识边界后，使用同一批 10 + 5 + 15 篇故事重跑；重建验证完成后已删除旧归档。
+- Bootstrap 生成根 Snapshot `real_e2e_10_5_20260901T153223102634Z_982958b04ca9`：80 个 Observation、8 个 Function。
+- 第一轮 Evolve 生成子 Snapshot `real_e2e_10_5_20260901T153832895720Z_44ee180820c2`：累计 123 个 Observation。
+- 第二轮 Evolve 生成最新 Snapshot `real_e2e_10_5_20260901T155714939955Z_09730b26ad29`：累计 287 个 Observation、12 个 Function；父子关系连续正确。
+- 最终 Pattern 成功：30 个故事序列、48 个 cluster、1 个 published pattern（`PAT_e7de04b6cedd03d6`）。
+- 收尾检查通过：旧数字型 Observation=0、缺少 `source_text` 的 ObservationVersion=0、Occurrence 与 Snapshot 版本错位=0、`PRAGMA foreign_key_check` 为空；3 个 Function Run 均 `PASS`，3 个 Pattern Run 均 `SUCCESS`。
+- 活动 Snapshot 目录只包含上述三代新链；旧数据库和旧 Snapshot 已删除，未进入当前正式数据库。
+
+## 本轮（2026-09-01）：Function 演化后回看父 Snapshot 未决 Observation
+
+- Evolve 在 `Curator` 与最终评估之间增加 `rematch_unresolved` 节点。
+- 仅读取父 Snapshot 中状态为 `UNCERTAIN` / `OTHER` 且仍存在于当前 Bank 视图的 Observation。
+- 仅当 Observation 与本轮新增、修订、拆分或合并的 Function 相似度达到 0.60 时，才复用 Matcher 调用 LLM。
+- 成功的 `MATCH` / `EXTEND` 只加入当前工作区 Function 的 `supporting_obs_ids`；最终 Occurrence 仍由当前 Bank 和当前 Function 统一重建，父 Snapshot 不变。
+- 不新增 SQLite 表、不重跑全部 Observation；回看统计写入当前 `match_report.json` 的 `retro_match` 字段。
+
+## 本轮（2026-09-01）：Snapshot assignment 可见性与 Pattern 摘要语义失效
+
+- Bootstrap 与 Evolve 在最终 `align_occurrences` 后，从正式 `MATCHED` / `UNCERTAIN` / `OTHER` Occurrence 计算 `assignment_coverage`、`uncertain_rate`、`other_rate`，写入并打印 Snapshot 的 `evaluation.json`；Evaluator 原有的语义 `coverage` 和 PASS 门槛保持不变。
+- Pattern Cluster 新增 `summary_input_signature`，只哈希该 Cluster 实际用于摘要的 Function ID、名称、定义和 Contract，不绑定 Function 支持证据、置信度或完整 FunctionVersion。
+- 同一结构且同一摘要输入才继承旧摘要；语义签名变化时只重跑受影响 Cluster 的摘要，PatternVersion 动作为 `SEMANTICS_REVISED`。故事 sequence 与 occurrence signature 不因此重建。
+- 针对性回归：Occurrence 指标测试 5 项通过；Pattern 局部语义测试 6 项通过；合计 11 passed，`py_compile` 与 `git diff --check` 通过。
+
+## 本轮（2026-09-01）：50 篇 Bootstrap + 50 篇 Evolve 真实重建
+
+- 清空活动知识边界后，用同一语料排序的前 50 篇 Bootstrap、后 50 篇 Evolve 重建；正式 SQLite 仍为同一个 `Code/data/knowledge/story_knowledge.db`。
+- Bootstrap Run `FR_75c161ee85b3f8e1` 为 `PASS`，发布根 Snapshot `real_50_50_20260901_20260901T181717556851Z_0c6768e15f35`：50 篇、446 个 Observation、23 个 Function；Assignment 为 `133/446=0.2982`，语义 coverage `0.8184`。
+- Evolve 首次因 RetroMatch 的逐字段单条 embedding 长时间停滞而中止并标记 `FAIL`；将 `Embedder.encode_observations` 改为批量编码后重跑。成功 Run `FR_2ca066fd591e41b3` 为 `PASS`，发布子 Snapshot `real_50_50_20260901_20260901T194558190303Z_7929591261b8`，父 Snapshot 正确为根 Snapshot：累计 100 篇、880 个 Observation、20 个 Function。
+- Evolve 最终 Assignment 为 `MATCHED=560/880=0.6364`、`UNCERTAIN=320/880=0.3636`、`OTHER=0`；语义 coverage `0.7898`，Evaluator 总体 `PASS`，但 separation 与 diversity 未达标。RetroMatch 回看父 Snapshot 未决 313 个，选中 136 个，新增归属 112 个。
+- 新身份检查通过：两个 Snapshot 的 Observation 都有 `source_text`，旧 `_obs_001` 数字型 ID 为 0，Observation ID 唯一；Snapshot 文件校验、父子成员关系和 `PRAGMA foreign_key_check` 均通过。相关回归测试 26 项通过。
+- 根 Snapshot 的 Pattern 基线 `PR_023db679e3165d4f` 为 `SUCCESS`，但 0 个 published Pattern；50 篇中有 1 篇没有 Observation，因此 Pattern 序列表为 49 条。子 Snapshot Pattern `PR_bc4add9a9969e22e` 运行约 36 分钟后被停止并标记 `FAILED`，未发布 Pattern，也没有生成文章；这不是“100 篇仍无 Pattern”的正式结果。
+- 子 Snapshot 的只读复算显示：100 篇形成 370 个 Motif 候选、1390 对语义变体，其中 754 对为 HIGH，当前实现会逐对串行调用 LLM；594 对 HIGH 涉及长度至少 4 的 Motif。实际瓶颈是候选对和串行审查规模，不是缺少可发布候选。
+- 本轮确认的运行问题：① RetroMatch 原实现对每个 Observation 的 6 个字段分别推理，已改为批量编码；② LLM 偶尔返回非法 `label`、非法 `SEMI_SAME` 或格式错误，当前靠结构化重试恢复；③ Pattern 在 Motif 数增长后产生大量语义配对并串行 LLM 审查，缺少限量、批处理和可见进度；④ Pattern 不应从 Snapshot 中省略零 Observation 故事，49/50 的输入覆盖需要后续修正；⑤ Bootstrap checkpoint 将约 2195 个 `all_pairs` 保存在 LangGraph 状态，文件约 157MB，存在状态膨胀问题。
+
+## 本轮（2026-09-01）：精简 Pattern 审查并完成单篇文章验证
+
+- Pattern 审查收紧为轻量条件：只审查 `HIGH` 召回、至少一个 Motif 长度不小于 4、双方互相进入 Top-2 的候选对；未选中的变体不再进入串行 LLM 审查。
+- 子 Snapshot 的 Pattern Run `PR_bc4add9a9969e22e` 成功：99 条故事序列、370 个 Motif、90 条 Pair Review、323 个 Cluster，其中 26 个发布、296 个候选、1 个阻塞；当前正式 Pattern 数为 26。此前的 0 个发布结果是旧审查规模未完成，不是候选为空。
+- 用 Pattern“层层递进的真相揭示与威胁升级”完成一篇真实文章验证：Outline `OUT_19035f8cb68d64e0` 成功，正文 JSON 约 92.5KB、Markdown 约 19.9KB，产物位于 `Code/data/rebuild_50_50_20260901/article/`，正文的 `source_outline_id` 和 `snapshot_id` 均正确指向本轮结果。
+- 因本轮 Function Evolve 是直接调用 Agent，未自动生成 StoryCLI 所需的 `function_run.json`；没有重跑抽取，而是补写已有 Snapshot/Pattern 的运行清单后完成文章验证。该流程入口不一致应后续统一，但不影响本次数据库结果。
+- 本轮确认的剩余问题：100 篇中有 1 篇没有 Observation，因而只生成 99 条 Pattern 序列；当前精简筛选偏保守，可能少审查有效候选，后续若需要提升召回应采用批量审查/可恢复队列，而不是恢复全量串行审查。
+
+## 本轮（2026-09-01）：Pattern Review 阶段超时与失败状态收口
+
+- 在 Motif Review 和 Pattern Summary 两个 LLM 阶段增加固定 15 分钟总预算；每条 Review/摘要前后检查截止时间，超时抛出 `TimeoutError`，不进入 Pattern 提交节点。
+- `run_pattern_evolve` 统一捕获异常、`KeyboardInterrupt` 和 `SystemExit`，调用 `fail_pattern_run` 写入 `pattern_runs.status=FAILED` 及错误原因；正式 Pattern 仍只通过 `commit_pattern_run` 原子发布。
+- 临时 SQLite 集成验证确认：模拟 Review 超时后，运行记录为 `FAILED`，错误原因可追溯；Pattern 相关回归测试 50 项全部通过，`py_compile` 与 `git diff --check` 通过。
+- 该方案不改变 Function Snapshot、不新增表；底层 OpenAI 客户端原有的单请求 120 秒超时继续保留，新增的是整个 Review 阶段的总预算。
+
+## 本轮（2026-09-01）：补齐 Function MERGE/SPLIT lineage
+
+- 不新增表或数据库；复用 `version_history` 写入现有 `function_evolution_events.payload_json`。
+- MERGE 事件现在记录 `source_function_ids` 和 `target_function_ids`；SPLIT 的每个子 Function 记录父 Function ID 与完整子 Function ID 集合。
+- Bootstrap Revise 和 Evolve Curator 两条演化路径统一写入 lineage；REVISE 保留原 Function ID，不额外生成 lineage 边。
+- 相关回归验证：37 项 Curator/Revise/KnowledgeBase/Registry 测试通过。
+
+## 本轮（2026-09-01）：移出 Bootstrap 累计 pair，收敛 checkpoint 体积
+
+- 根因：即使 `all_pairs` 只保存 `obs_id + similarity`，累计列表仍会在每个 LangGraph checkpoint 中被重复序列化。
+- 修复：删除 `NarrativePipelineState.all_pairs`；`pairs_collector` 将三元组追加到当前 `out_dir/pairs_<namespace>.jsonl`，`cluster_node` 再从该工作文件读取并通过 Bank 恢复完整 Observation。聚类后的 `induction_components` 也只保存 pair 引用，`induce_step` 使用时再从 Bank 恢复。重复 pair 在聚类读取时去重，支持节点重试/续跑。
+- 清理：Bootstrap fresh 启动时删除对应 pair 工作文件，并对已删除的 checkpoint 页面执行 `VACUUM`；不改知识库 SQLite、Snapshot 或正式数据结构。
+- 验证：Bootstrap 续跑与聚类归纳测试通过；checkpoint `writes` 中不再有 `all_pairs`；全套测试 `289 passed, 1 skipped`，`py_compile` 与 `git diff --check` 通过。
+
+## 本轮（2026-09-01）：清理旧格式 MERGE 事件索引
+
+- 按精确 `event_id` 从正式 SQLite 的 `function_evolution_events` 删除 3 条旧代码生成、缺少 source/target ID 的 MERGE 记录。
+- 删除后旧格式 MERGE=0，剩余 Function 事件为 `APPLY_EVIDENCE=15`、`CREATE=23`、`RETRO_MATCH=18`、`REVISE=1`；`PRAGMA foreign_key_check`=0。
+- 已发布 Snapshot 文件保持不可变，未直接修改其中的历史 FunctionVersion；后续新事件统一使用 lineage payload。
+
+## 本轮（2026-09-02）：Pattern 保留零 Observation 故事并清理 Observation 孤儿
+
+- Pattern 输入现在以 Snapshot manifest 的完整故事列表为准；没有 Observation 的故事保留空 `raw_sequence` / `structural_sequence`，不制造虚假 Occurrence 或 Motif，也不再静默从 Pattern 输入中丢失。
+- 失败或启动恢复时，删除本 Run 的 ObservationVersion 后，同步删除没有任何 ObservationVersion 归属的 Observation；已有版本或正式 Snapshot 中仍被使用的 Observation 不受影响。
+- 对活动知识库清理了 415 条历史孤儿 Observation；当前 `observations=880`、孤儿为 0，正式 ObservationVersion、Snapshot 成员和 Occurrence 数量未减少。
+- 验证：相关回归 53 项通过；全套测试 `292 passed, 1 skipped`，`compileall` 与 `git diff --check` 通过。
+
+## 后续优化（暂不执行）：Snapshot 内部版本绑定与数据库级不可变保护
+
+- 当前正式数据未发现 Snapshot 版本错位；单写入应用通过 `StoryKnowledgeStore` 提交，Snapshot 文件已有 SHA-256 校验，因此该问题暂不作为当前阻塞项处理。
+- 后续优先采用一个集中式 Snapshot integrity check，在提交和读取时验证 ObservationVersion、StoryVersion、FunctionVersion 与当前 Snapshot 的成员关系。
+- 暂不增加复合外键或多组 SQLite trigger，避免在当前单写入架构中引入不必要的表结构和维护复杂度；只有出现多进程写入、外部 SQL 写入或论文级数据库约束要求时再启用数据库级硬保护。
+
+## 后续优化（暂不执行）：固定 Outline 外部派生输入版本
+
+- 当前 Outline 的 Pattern 与 FunctionContract 已按 Snapshot 从 SQLite 读取；Function Card 和 Transition Index 按同一 `snapshot_id` 分目录，已有基本隔离。
+- 暂不新增版本表或迁移数据库；后续在 A/B 实验、跨批次比较或论文级复现前，在 Outline 运行产物中记录外部 Function Card / Transition Index 的 SHA-256。
+- 该项属于可复现性增强，不阻塞当前 Bootstrap、Evolve、Pattern 或 Outline 链路。
+
+## 本轮（2026-09-02）：删除旧 Agent 兼容入口与失效 Snapshot 默认值
+
+- 删除 `Code/Agent/__init__.py` 兼容 shim；生产代码、测试和脚本统一使用 `FunctionExtract_Agent.*`，并将原先依赖 shim 注入路径的 `Prompt`、`Embedding`、`Retrieval` 导入改为显式包路径。
+- 删除失效的 `DEFAULT_SNAPSHOT_ID` 和一次性脚本中的旧 Snapshot 硬编码；Outline、Pipeline、StoryCLI 现要求显式 Snapshot，避免误读已删除的历史 Snapshot。
+- 入口文档同步到 `FunctionExtract_Agent`；未提前删除仍由当前 Bootstrap 使用的 `record_function_run` 和 stdout Snapshot 解析，待下一阶段 manifest 链路替代后清理。
+- 验证：`292 passed, 1 skipped`；`compileall`、入口 `--help`、`git diff --check` 通过。当前环境下不执行真实 LLM 流程。
+
+## 本轮（2026-09-02）：统一 Bootstrap / Evolve / Pattern 的最小 Run 控制面
+
+- Bootstrap 改为在图启动前创建 `RUNNING` Function Run；每篇故事在 `bank_adder` 写入该 Run 的暂存区（零 Observation 故事也保留 StoryVersion 成员），PASS 时用同一 `run_id` 提交 Snapshot，FAIL 或异常时清理暂存并保留失败记录。`--resume` 仅恢复 checkpoint 中仍为 `RUNNING` 的同一 Run。
+- 删除旧的 `record_function_run` 事后回填路径；它曾在文件 Snapshot 发布后才创建 Run，无法作为正式 Bootstrap 生命周期的一部分。
+- Pattern 的 `begin_pattern_run` 会将先前残留的 `RUNNING` Run 标记为 `FAILED(interrupted_before_pattern_commit)`，然后启动当前 Run。该策略保持现有单机串行写入假设，不增加锁、队列或新表。
+- Bootstrap、Evolve 和 Pattern CLI 的最终结果统一为 `{"run_result": ...}`；Function 结果包含 `run_id`、`status`、`workflow`、`namespace`、父/子 Snapshot 与终评报告，Pattern 保留相同运行标识与 Pattern 统计。
+- 验证：新增 Bootstrap 暂存→提交、零 Observation 故事成员和 Pattern 悬挂 Run 收口测试；全套 `294 passed, 1 skipped`，`git diff --check` 与 `compileall` 通过。未重跑真实 LLM 或修改正式知识库。
+
+## 本轮（2026-09-02）：单篇真实 Evolve → Pattern 接口验证
+
+- 以当前 100 篇正式 Snapshot `real_50_50_20260901_20260901T194558190303Z_7929591261b8` 为父，使用真实 LLM 处理新故事 `01_悬疑惊悚/2944521006_348025005.txt`（5,005 字）。Evolve Run `FR_bb22e41228884f1e` 为 `PASS`，发布子 Snapshot `real_50_50_20260901_20260902T073957699614Z_6f112aad5060`。
+- 子 Snapshot 的正式成员为 101 篇故事、886 个 Observation、886 个 Occurrence、19 个 Function；Occurrence 为 `MATCHED=564`、`UNCERTAIN=322`。Snapshot SHA 校验与 `PRAGMA foreign_key_check` 通过。
+- 随后真实 Pattern Run `PR_9dda7ad7f7e431d2` 正确读取该完整子 Snapshot，并在摘要阶段因 LLM 输出的 `core_function_names` 含非当前 Function 名称而标记 `FAILED`：`summary 核心 Function 无效: MCL_a8cd6c625f925707`。
+- 失败未写入任何该 Snapshot 的 Pattern sequence、motif、cluster 或 pattern；Function 子 Snapshot 仍是正式可用的 PASS 结果。这验证了 Pattern 的真实异常收口与原子发布边界；问题位于摘要输出的名称严格校验，而非 Run 生命周期或 Snapshot 数据流。
+
+## 本轮（2026-09-02）：移除 Pattern Summary 对 Function 名称复述的依赖
+
+- `StoryPatternSummary` 不再要求 LLM 输出 `core_function_names` 或任何 Function 选择字段；LLM 只负责生成模式名称、抽象定义、适用条件、限制和结局说明。
+- Pattern 节点直接从 Cluster 的 `anchor_motif_id` 读取稳定 `function_ids`，再从当前 Snapshot 的 Function 表回填名称、定义和 Contract。4 步以上 motif 优先作为锚点，避免 Cluster 中较短变体抢占核心链。
+- 不改数据库表结构、Snapshot 边界或 Pattern 增量签名；这只是把 Function 身份绑定从 LLM 输出移到系统已有的 motif 数据。
+- 真实 Pattern 重试成功：`PR_9dda7ad7f7e431d2`，101 条序列、365 个 Motif、324 个 Cluster、25 个 published Pattern；`PRAGMA foreign_key_check` 为空。
+- 验证：针对性测试 `20 passed`，全套测试 `294 passed, 1 skipped`；测试生成的共享 Bank 已恢复为 80 行真实基线，临时 Chroma 目录已移入回收站。
+
+## 本轮（2026-09-02）：单篇真实 Bootstrap 验证与遗留路径清理
+
+- 使用真实 LLM、真实 Observer、真实 SQLite Run 流程处理一篇 `2944521006_348025005` 故事。Bootstrap Run `FR_3af086d8fcc54cda` 实际完成抽取，生成 9 个 Observation，LLM 调用 2 次、总计约 11,116 tokens。
+- 单篇 Bootstrap 没有跨故事相似对，Induction 分量为 0，Evaluator 判定 `FAIL`，因此没有发布 Snapshot。这是单篇输入的业务结果，不是接口异常；Run 结果已通过 `run_result` 返回并写入隔离验证数据库。
+- 运行使用独立 Bank、Registry、KnowledgeDB 和 Snapshot 输出目录，未清空或污染当前正式知识库；正式共享 Bank 仍恢复为 80 行真实基线。
+- 清理确认：旧 `Code/Agent` 兼容 shim、旧 `test_evolve.py`、旧 Pattern 桥接路径以及 Summary 的 Function 名称/索引字段已无生产引用并已删除；其余人工实验脚本仍有复现价值，未作无依据删除。
+
+## 本轮（2026-09-02）：增加 Function Coordinator 调度 Agent
+
+- 新增 `Code/FunctionCoordinator_Agent`，使用 LangGraph 条件边编排 `Bootstrap/Evolve → Pattern`；不调用 LLM、不新增数据库表，也不改变现有 Function Run、Pattern Run 或 Snapshot 提交边界。
+- Coordinator 通过子 Agent 已有 CLI 的 `run_result` 做路由：Function `PASS + snapshot_id` 才进入 Pattern，Pattern `SUCCESS` 才完成；业务质量失败直接停止，进程级超时/限流等暂时错误最多按 `--max-retries` 有限重试。
+- 现有 `Pipeline_Agent` 保持 `Outline → Story` 职责不变；Function Coordinator 是独立控制面。Coordinator 最终返回包含 Function/Pattern 子结果和尝试次数的机器可读 `run_result`。
+- 新增 5 项路由、重试和结果解析测试；验证结果为 `299 passed, 1 skipped`，CLI `--help` 和 `git diff --check` 通过。

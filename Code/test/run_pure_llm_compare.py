@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from Agent.llm import chat_structured
+from FunctionExtract_Agent.llm import chat_structured
 
 
 SOURCE_PATH = os.path.join(

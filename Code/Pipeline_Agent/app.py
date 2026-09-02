@@ -103,7 +103,7 @@ def main():
     parser = argparse.ArgumentParser(description="一键生成大纲和正文")
     parser.add_argument("--genre", required=True, help="题材，如 现代情感")
     parser.add_argument("--pattern", default=None, help="指定 Pattern 名称")
-    parser.add_argument("--snapshot-id", default=outline_app.DEFAULT_SNAPSHOT_ID)
+    parser.add_argument("--snapshot-id", required=True)
     parser.add_argument("--knowledge-db", default=str(outline_app.DEFAULT_DB_PATH))
     parser.add_argument("--out-dir", default=None, help="本次运行输出目录")
     args = parser.parse_args()

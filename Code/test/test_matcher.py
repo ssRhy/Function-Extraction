@@ -8,10 +8,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from Agent.Matcher import matcher as mm
-from Agent.Matcher.matcher import recall_candidates, _apply_evidence, _story_stage, _make_occurrence, matcher_node
-from Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
-from Prompt.Matcher_prompt import MatchDecision, MatchResponse
+from FunctionExtract_Agent.Matcher import matcher as mm
+from FunctionExtract_Agent.Matcher.matcher import recall_candidates, _apply_evidence, _story_stage, _make_occurrence, matcher_node
+from FunctionExtract_Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
+from FunctionExtract_Agent.Prompt.Matcher_prompt import MatchDecision, MatchResponse
 
 
 class FakeEmbedder:
@@ -114,7 +114,7 @@ def test_apply_evidence_idempotent():
 
 
 def test_matcher_node_mixed_labels(tmp_path):
-    from Agent.app import get_bank
+    from FunctionExtract_Agent.app import get_bank
     bank = get_bank()
     bank.clear()
     bank.embedder = FakeEmbedder()
@@ -156,7 +156,7 @@ def test_matcher_node_mixed_labels(tmp_path):
 
 
 def test_matcher_node_empty_registry(tmp_path):
-    from Agent.app import get_bank
+    from FunctionExtract_Agent.app import get_bank
     bank = get_bank()
     bank.clear()
     bank.embedder = FakeEmbedder()

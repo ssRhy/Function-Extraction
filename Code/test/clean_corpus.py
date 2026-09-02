@@ -25,7 +25,7 @@ import argparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from Agent.Pre_pro.pre_processor import _clean_lines, _join_paragraphs
+from FunctionExtract_Agent.Pre_pro.pre_processor import _clean_lines, _join_paragraphs
 
 _BASE = os.path.join(os.path.dirname(__file__), "..")
 DEFAULT_INPUT = os.path.join(_BASE, "zhihu_story_subset_120_20260815")
@@ -226,7 +226,7 @@ def main() -> int:
             print(f"  {rel:<45} 行 {stats['original_lines']:>5} → 段 {stats['paragraphs']:>4}"
                   f" (噪音 -{stats['noise_removed']:>3}){flag}")
 
-    # 复制 manifest（txt_file 相对路径与清洗目录结构一致，python -m Agent.app 元数据注入仍可用）
+    # 复制 manifest（txt_file 相对路径与清洗目录结构一致，FunctionExtract_Agent 运行时元数据注入仍可用）
     for meta in ("manifest.json", "manifest.csv"):
         src = os.path.join(args.input, meta)
         if os.path.exists(src):

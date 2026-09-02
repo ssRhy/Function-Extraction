@@ -319,11 +319,30 @@ class StoryKnowledgeStore:
                 (run_id, workflow, namespace, parent_snapshot_id, corpus_dir),
             )
 
+    def load_function_run(self, run_id: str) -> dict | None:
+        self.initialize()
+        with self.connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM pipeline_runs WHERE run_id=?", (run_id,)
+            ).fetchone()
+        if not row:
+            return None
+        result = dict(row)
+        result["payload"] = json.loads(result.pop("payload_json"))
+        return result
+
     @staticmethod
     def _remove_function_run_staging(conn: sqlite3.Connection, run_id: str) -> None:
         conn.execute("DELETE FROM run_observations WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM run_stories WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM observation_versions WHERE created_by_run_id=?", (run_id,))
+        conn.execute(
+            """DELETE FROM observations
+               WHERE NOT EXISTS (
+                   SELECT 1 FROM observation_versions
+                   WHERE observation_versions.obs_id=observations.obs_id
+               )"""
+        )
         conn.execute("DELETE FROM story_versions WHERE created_by_run_id=?", (run_id,))
 
     def _recover_interrupted_function_runs(self, conn: sqlite3.Connection) -> None:
@@ -608,55 +627,6 @@ class StoryKnowledgeStore:
             self._check(conn)
         return manifest
 
-    def record_function_run(
-        self,
-        snapshot_path,
-        corpus_dir,
-        story_files: list[str],
-        story_meta: dict[str, dict],
-        observations: list[dict],
-    ) -> dict:
-        corpus_dir = Path(corpus_dir)
-        manifest, _functions, _evaluation = load_snapshot(str(snapshot_path))
-        self.initialize()
-        with self.connect() as conn:
-            if conn.execute("SELECT 1 FROM snapshots WHERE snapshot_id=?", (manifest["snapshot_id"],)).fetchone():
-                return manifest
-        run_id = manifest.get("run_id") or manifest["snapshot_id"]
-        self.begin_function_run(
-            run_id, manifest["source_workflow"], manifest["namespace"],
-            manifest.get("parent_snapshot_id"),
-            str(corpus_dir.resolve()),
-        )
-        by_story: dict[str, list[dict]] = {}
-        for item in observations:
-            by_story.setdefault(item["story_id"], []).append(item)
-        for position, relative in enumerate(story_files, 1):
-            relative = relative.replace("\\", "/")
-            meta = dict(story_meta.get(relative) or {})
-            story_id = meta.get("story_id") or Path(relative).stem
-            path = corpus_dir / relative
-            try:
-                text = path.read_text(encoding="utf-8")
-            except OSError as exc:
-                raise ValueError(f"无法读取故事原文: {path}") from exc
-            version_id = story_version_id(story_id, text)
-            normalized = {
-                "raw_text": text,
-                "metadata": {
-                    "story_id": story_id,
-                    "story_version_id": version_id,
-                    "content_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                    "title": meta.get("question_title") or meta.get("title"),
-                    "story_type": meta.get("category"),
-                },
-            }
-            self.stage_story_observations(
-                run_id, normalized, {**meta, "source_file": relative},
-                by_story.get(story_id, []), position,
-            )
-        return self.commit_function_run(snapshot_path, run_id)
-
     def load_pattern_run(self, snapshot_id: str) -> dict | None:
         self.initialize()
         with self.connect() as conn:
@@ -672,6 +642,7 @@ class StoryKnowledgeStore:
     def begin_pattern_run(self, snapshot_id: str, input_signature: str) -> dict:
         self.initialize()
         with self.connect() as conn:
+            self._recover_interrupted_pattern_runs(conn)
             snapshot = conn.execute(
                 "SELECT parent_snapshot_id, namespace, source_workflow FROM snapshots WHERE snapshot_id=?",
                 (snapshot_id,),
@@ -713,6 +684,21 @@ class StoryKnowledgeStore:
                 ),
             )
         return payload
+
+    @staticmethod
+    def _recover_interrupted_pattern_runs(conn: sqlite3.Connection) -> None:
+        rows = conn.execute(
+            "SELECT snapshot_id, payload_json FROM pattern_runs WHERE status='RUNNING'"
+        ).fetchall()
+        for row in rows:
+            payload = json.loads(row["payload_json"])
+            payload["error"] = "interrupted_before_pattern_commit"
+            conn.execute(
+                """UPDATE pattern_runs
+                   SET status='FAILED', completed_at=strftime('%Y-%m-%dT%H:%M:%fZ', 'now'),
+                       payload_json=? WHERE snapshot_id=?""",
+                (_json(payload), row["snapshot_id"]),
+            )
 
     def clear_pattern_snapshot(self, snapshot_id: str) -> None:
         """清除指定 Snapshot 的 Pattern 派生状态，以便显式重建。"""

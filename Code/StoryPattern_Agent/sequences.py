@@ -30,9 +30,6 @@ def load_occurrences_node(state: StoryPatternState) -> dict:
         seen.add(occurrence_id)
         grouped[story_id].append(occurrence)
 
-    missing = [story_id for story_id in story_ids if not grouped[story_id]]
-    if missing:
-        raise ValueError(f"故事缺少 FunctionOccurrence: {', '.join(sorted(missing))}")
     return {
         "all_occurrences": occurrences,
         "occurrences_by_story": grouped,
@@ -59,8 +56,6 @@ def build_story_sequences(state: StoryPatternState) -> dict:
     if not story_id:
         raise ValueError("build_story_sequences 需要 current_story_id")
     occurrences = state.get("occurrences_by_story", {}).get(story_id, [])
-    if not occurrences:
-        raise ValueError(f"故事缺少 FunctionOccurrence: {story_id}")
     sequence = []
     for index, occurrence in enumerate(sorted(occurrences, key=_sequence_key), 1):
         item = {
@@ -90,9 +85,6 @@ def annotate_repetitions(state: StoryPatternState) -> dict:
     if not story_id:
         raise ValueError("annotate_repetitions 需要 current_story_id")
     sequence = state.get("current_sequence", [])
-    if not sequence:
-        raise ValueError("annotate_repetitions 需要 current_sequence")
-
     structural = []
     for item in sequence:
         same_run = (

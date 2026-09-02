@@ -8,6 +8,8 @@ import json
 import os
 import sys
 import time
+import argparse
+import glob
 from collections import Counter
 
 from pydantic import BaseModel, Field
@@ -15,19 +17,16 @@ from pydantic import BaseModel, Field
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import Story_Agent.app as story_app
-from Agent.llm import chat_structured
+from FunctionExtract_Agent.llm import chat_structured
 from KnowledgeBase import DEFAULT_DB_PATH, StoryKnowledgeStore
 
 
-SNAPSHOT_ID = "evolve_250_20260822T063550401096Z_13b1bbda248f"
-OUTLINE_ROOT = os.path.join(story_app._DATA, "outlines", SNAPSHOT_ID)
-LEGACY_OUTLINES = [
-    os.path.join(OUTLINE_ROOT, genre, f"outline_{index}.json")
-    for genre in ("悬疑惊悚", "现代情感", "末世科幻")
-    for index in range(1, 4)
-]
-CURRENT_OUTLINE = os.path.join(OUTLINE_ROOT, "悬疑惊悚_20260827T220804.json")
-OUTLINE_PATHS = LEGACY_OUTLINES + [CURRENT_OUTLINE]
+def _outline_paths(snapshot_id):
+    root = os.path.join(story_app._DATA, "outlines", snapshot_id)
+    return sorted(
+        path for path in glob.glob(os.path.join(root, "**", "*.json"), recursive=True)
+        if os.path.basename(path) != "manifest.json"
+    )
 
 
 class QualityIssue(BaseModel):
@@ -90,12 +89,12 @@ def _legacy_ending(data):
     return data
 
 
-def _import_batch_outline(path):
+def _import_batch_outline(path, snapshot_id):
     with open(path, encoding="utf-8") as f:
         data = _legacy_ending(json.load(f))
     if data.get("validation", {}).get("overall_ok") is False:
         raise ValueError(f"大纲校验未通过，正式正文批次跳过: {path}")
-    data.setdefault("snapshot_id", SNAPSHOT_ID)
+    data.setdefault("snapshot_id", snapshot_id)
     data.setdefault("generated_at", time.strftime(
         "%Y-%m-%dT%H:%M:%S", time.localtime(os.path.getmtime(path)),
     ))
@@ -151,21 +150,22 @@ def _invoke_story(graph, payload):
     raise last_error
 
 
-def main():
+def main(snapshot_id):
+    outline_paths = _outline_paths(snapshot_id)
     timestamp = time.strftime("%Y%m%dT%H%M%S")
-    batch = f"usage_batch_story{len(OUTLINE_PATHS)}_{timestamp}"
-    root = os.path.join(story_app._DATA, f"story_batch_{len(OUTLINE_PATHS)}", batch)
+    batch = f"usage_batch_story{len(outline_paths)}_{timestamp}"
+    root = os.path.join(story_app._DATA, f"story_batch_{len(outline_paths)}", batch)
     os.makedirs(root, exist_ok=True)
 
     graph = story_app._build_graph()
     reports = []
     skipped = []
-    for index, outline_path in enumerate(OUTLINE_PATHS, 1):
+    for index, outline_path in enumerate(outline_paths, 1):
         sample_id = f"story_{index:02d}"
         out_dir = os.path.join(root, sample_id)
-        print(f"=== {sample_id}/{len(OUTLINE_PATHS)} {outline_path}")
+        print(f"=== {sample_id}/{len(outline_paths)} {outline_path}")
         try:
-            outline_id = _import_batch_outline(outline_path)
+            outline_id = _import_batch_outline(outline_path, snapshot_id)
             result = _invoke_story(graph, {
                 "outline_id": outline_id,
                 "knowledge_db": str(DEFAULT_DB_PATH),
@@ -216,11 +216,11 @@ def main():
             severity_counts[issue["severity"]] += 1
     batch_result = {
         "batch": batch,
-        "snapshot_id": SNAPSHOT_ID,
+        "snapshot_id": snapshot_id,
         "count": len(reports),
-        "requested_count": len(OUTLINE_PATHS),
+        "requested_count": len(outline_paths),
         "skipped": skipped,
-        "input_policy": "使用 OUTLINE_PATHS 指定的大纲；历史大纲仅在内存中补 outline.ending",
+        "input_policy": "使用当前 Snapshot 目录中的大纲；历史大纲仅在内存中补 outline.ending",
         "generation_graph": "load_outline → function_constraints → plan_scenes → develop_scenes → write_story → export",
         "quality_evaluator": "独立 LLM 诊断；不改写正文，不作为生成阻断条件",
         "length_ok_count": sum(item["length_ok"] for item in reports),
@@ -237,7 +237,7 @@ def main():
     with open(os.path.join(root, "manifest.json"), "w", encoding="utf-8") as f:
         json.dump({
             "batch": batch,
-            "outline_paths": [os.path.abspath(path) for path in OUTLINE_PATHS],
+            "outline_paths": [os.path.abspath(path) for path in outline_paths],
             "legacy_ending_adapter": True,
             "skipped": skipped,
             "quality_report": json_path,
@@ -249,4 +249,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--snapshot-id", required=True)
+    main(parser.parse_args().snapshot_id)

@@ -7,9 +7,9 @@ import shutil
 import sys, os, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from Bank import ObservationBank
-from Agent.Inducer.confidence import calculate_confidence_detailed
-from Agent.Inducer.inducer import merge_candidates
+from FunctionExtract_Agent.Bank import ObservationBank
+from FunctionExtract_Agent.Inducer.confidence import calculate_confidence_detailed
+from FunctionExtract_Agent.Inducer.inducer import merge_candidates
 
 
 def make_test_observations():

@@ -46,6 +46,7 @@ class NarrativePipelineState(TypedDict):
     match_occurrences: list[dict]    # 当前故事 FunctionOccurrence
     occurrences: list[dict]          # 全流程累积 FunctionOccurrence
     match_report: dict | None        # 匹配报告（分类计数 / coverage / novelty_rate）
+    retro_match_report: dict | None  # 新 Function 回看父 Snapshot 未决 Observation 的统计
     obs_since_eval: int              # 自上次 Evaluator_mid 体检以来处理的新 obs 数
     mid_reports: list[dict]          # Evaluator_mid 体检历史（round/ts/verdict/六维/问题数）
     pending_evidence: list[dict]     # 待应用区：MATCH/EXTEND 与 Critic 归函数证据（function_name/obs_id/source）
@@ -57,7 +58,8 @@ class NarrativePipelineState(TypedDict):
     ontology_snapshot: str | None    # PASS 后发布的不可变快照目录
     knowledge_db: str | None         # PASS 发布后写入统一故事知识库
     base_snapshot_id: str | None     # Evolve 从统一库读取的正式起点
-    run_id: str | None               # 当前 Evolve 暂存可见性边界
+    run_id: str | None               # 当前 Function Run 暂存可见性边界
+    run_result: dict | None          # 供外部协调器读取的 Function Run 结果
 
     # ---- 流程控制 ----
     current_story_index: int
@@ -67,7 +69,6 @@ class NarrativePipelineState(TypedDict):
     story_files: list[str]      # 待处理故事相对路径（自然排序）
     corpus_dir: str             # 语料根目录
     story_meta: dict            # manifest: txt_file -> entry（category/question_title）
-    all_pairs: list[dict]       # 累计跨故事相似 obs 对
     induction_components: list[list[dict]]  # cluster 后的可归纳分量（≥2 故事）
     induction_index: int        # 当前分量下标
     errors: list[str]           # 逐篇/每分量失败记录（不中断）

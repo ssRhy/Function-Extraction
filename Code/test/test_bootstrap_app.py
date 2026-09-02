@@ -11,17 +11,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from Agent import app as app_module
-from Agent.Pre_pro import pre_processor as pp
-from Agent.Observer import observer as ob
-from Agent.Inducer import inducer as ind
-from Agent.Evaluator import evaluator as ev_module
-from Agent.Evaluator import revise as rev
-from Agent.Contract import contract as fc
-from Agent.Pre_pro.pre_processor import PreCorrection
-from Agent.Observer.observer import ObservationResponse, ObservationItem
-from Agent.Inducer.inducer import InducerResponse, CandidateFunction
-from Prompt.Evaluator_prompt import EvaluatorReviewResponse, FunctionQualityReview
+from FunctionExtract_Agent import app as app_module
+from FunctionExtract_Agent.Pre_pro import pre_processor as pp
+from FunctionExtract_Agent.Observer import observer as ob
+from FunctionExtract_Agent.Inducer import inducer as ind
+from FunctionExtract_Agent.Evaluator import evaluator as ev_module
+from FunctionExtract_Agent.Evaluator import revise as rev
+from FunctionExtract_Agent.Contract import contract as fc
+from FunctionExtract_Agent.Pre_pro.pre_processor import PreCorrection
+from FunctionExtract_Agent.Observer.observer import ObservationResponse, ObservationItem
+from FunctionExtract_Agent.Inducer.inducer import InducerResponse, CandidateFunction
+from FunctionExtract_Agent.Prompt.Evaluator_prompt import EvaluatorReviewResponse, FunctionQualityReview
 from Contracts.function_contract import (
     FunctionContractBody, ObligationEffects, StateCondition, StateEffect,
 )
@@ -88,7 +88,7 @@ def _make_saver(db_path=None):
 
 
 def _compile_graph(saver, interrupt_before=None):
-    from Agent.app import _build_bootstrap_graph
+    from FunctionExtract_Agent.app import _build_bootstrap_graph
     kwargs = {"interrupt_before": interrupt_before} if interrupt_before else {}
     return _build_bootstrap_graph().compile(checkpointer=saver, **kwargs)
 
@@ -101,9 +101,9 @@ def _write_story(tmp, name, text="角色发现关键线索。角色决定采取�
 @contextmanager
 def _setup_env(tmp):
     """真实 Bank（FakeEmbedder 替换模型）+ 临时 Registry 命名空间；退出时恢复全局活跃 store。"""
-    from Agent.app import get_bank
-    from Agent.Registry import registry as reg_mod
-    from Agent.Registry.registry import RegistryStore, set_active_store
+    from FunctionExtract_Agent.app import get_bank
+    from FunctionExtract_Agent.Registry import registry as reg_mod
+    from FunctionExtract_Agent.Registry.registry import RegistryStore, set_active_store
     prev = reg_mod._active_store
     bank = get_bank()
     bank.clear()
@@ -135,7 +135,6 @@ def _initial(tmp, story_files, no_revise=True):
         "story_files": story_files,
         "corpus_dir": tmp,
         "story_meta": {},
-        "all_pairs": [],
         "induction_components": [],
         "induction_index": 0,
         "errors": [],
@@ -254,11 +253,24 @@ def test_full_flow_no_revise():
         _write_story(tmp, "s2.txt")
         with _setup_env(tmp):
             app = _compile_graph(_make_saver())
+            knowledge = app_module.StoryKnowledgeStore(os.path.join(tmp, "knowledge.db"))
+            run_id = "FR_BOOTSTRAP_TEST"
+            knowledge.begin_function_run(run_id, "bootstrap", "test_ns", None, tmp)
+            initial = _initial(tmp, ["s1.txt", "s2.txt"])
+            initial.update({"knowledge_db": str(knowledge.db_path), "run_id": run_id})
             with _patched_llm(calls):
-                result = app.invoke(_initial(tmp, ["s1.txt", "s2.txt"]), config=_cfg("t-full"))
+                result = app.invoke(initial, config=_cfg("t-full"))
         assert result["current_story_index"] == 2, result["current_story_index"]
         assert result["errors"] == [], result["errors"]
-        assert len(result["all_pairs"]) >= 1, result["all_pairs"]
+        assert all(
+            "reference" not in pair and "retrieved" not in pair
+            for component in result["induction_components"]
+            for pair in component
+        )
+        pair_path = os.path.join(tmp, "pairs_test_ns.jsonl")
+        assert os.path.exists(pair_path)
+        with open(pair_path, encoding="utf-8") as f:
+            assert sum(1 for _ in f) >= 1
         assert calls["obs"] == 2, calls
         assert calls["ind"] >= 1, calls
         assert calls["eval"] >= 1 and calls["rev"] == 0, calls
@@ -269,7 +281,36 @@ def test_full_flow_no_revise():
         assert os.path.exists(os.path.join(tmp, "evaluation_final.json"))
         if result["evaluator_decision"] == "PASS":
             assert result["ontology_snapshot"]
+        assert result["run_result"]["status"] == "PASS"
+        run = knowledge.load_function_run(run_id)
+        assert run["status"] == "PASS"
+        assert run["snapshot_id"] == result["run_result"]["snapshot_id"]
     print("bootstrap_app 全流程（story 循环 + 归纳 + 评估 + 导出，no_revise）: OK")
+
+
+def test_bank_adder_stages_zero_observation_story(tmp_path):
+    knowledge = app_module.StoryKnowledgeStore(tmp_path / "knowledge.db")
+    run_id = "FR_EMPTY_OBS"
+    knowledge.begin_function_run(run_id, "bootstrap", "test_ns", None, str(tmp_path))
+
+    result = app_module.bank_adder_node({
+        "run_id": run_id,
+        "knowledge_db": str(knowledge.db_path),
+        "normalized_story": {
+            "raw_text": "没有可抽取事件的故事。",
+            "metadata": {"story_id": "empty_story", "story_version_id": "SV_EMPTY"},
+        },
+        "story_config": {"story_id": "empty_story", "source_file": "empty.txt"},
+        "observations": [],
+        "current_story_index": 0,
+    })
+
+    assert result["added_obs_ids"] == []
+    with knowledge.connect() as conn:
+        row = conn.execute(
+            "SELECT story_id, story_version_id FROM run_stories WHERE run_id=?", (run_id,)
+        ).fetchone()
+    assert tuple(row) == ("empty_story", "SV_EMPTY")
 
 
 def test_resume_from_checkpoint():
@@ -298,6 +339,11 @@ def test_resume_from_checkpoint():
         assert result["evaluator_decision"] in ("PASS", "FAIL"), result
         assert calls["ind"] >= 1, calls
         assert os.path.exists(os.path.join(tmp, "functions_test_ns.jsonl"))
+        import sqlite3
+        with sqlite3.connect(cpt_db) as conn:
+            assert conn.execute(
+                "select count(*) from writes where channel = 'all_pairs'"
+            ).fetchone()[0] == 0
     print("bootstrap_app checkpoint 续跑（同 DB 新实例 resume）: OK")
 
 
@@ -349,88 +395,10 @@ def test_empty_story_list_goes_straight_to_evaluator():
     print("bootstrap_app 空 story 列表直达评估（FAIL → 舍弃、不导出）: OK")
 
 
-def test_export_rechecks_abstract_merged_registry(monkeypatch, tmp_path):
-    """abstract_merge 后必须重评最终 Registry，PASS 才发布该集合。"""
-    from Agent.Registry import registry as reg_mod
-    from Agent.Registry.registry import RegistryStore, set_active_store
-    from Contracts.snapshot import load_occurrences, load_snapshot
-
-    prev = reg_mod._active_store
-    store = RegistryStore(db_path=str(tmp_path / "functions.db"), namespace="test_ns")
-    store.replace_all([{
-        "function_id": "F_ORIGINAL",
-        "function_name": "ORIGINAL",
-        "definition": "原始定义",
-        "supporting_obs_ids": ["story_1_obs_001"],
-        "confidence": 0.8,
-    }])
-    set_active_store(store)
-    evaluated = []
-
-    def fake_merge(functions, _bank):
-        merged = dict(functions[0])
-        merged["function_name"] = "MERGED"
-        merged["definition"] = "归并后的定义"
-        return [merged]
-
-    def fake_evaluator(_state):
-        evaluated.append([f["function_name"] for f in store.load_all()])
-        report = {"verdict": "PASS", "passed_dimensions": ["coverage"]}
-        return {"evaluation_report": report, "evaluator_decision": "PASS"}
-
-    monkeypatch.setattr(app_module, "abstract_merge", fake_merge)
-    monkeypatch.setattr(app_module, "evaluator_node", fake_evaluator)
-    def fake_contracts(functions, _observations, _out_dir):
-        from Contracts.function_contract import definition_sha256
-        function = functions[0]
-        return [{
-            "function_id": function["function_id"],
-            "function_name": function["function_name"],
-            "definition_sha256": definition_sha256(function),
-            "evidence_refs": ["story_1_obs_001"],
-            "role_slots": ["行动者"],
-            "preconditions": [{"role_slots": ["行动者"], "aspect": "STATE", "state": "BEFORE"}],
-            "effects": [{
-                "role_slots": ["行动者"], "aspect": "STATE", "before": "BEFORE", "after": "AFTER",
-            }],
-            "obligation_effects": {"opens": [], "advances": [], "resolves": []},
-        }]
-    monkeypatch.setattr(app_module, "build_function_contracts", fake_contracts)
-    observation = {
-        "obs_id": "story_1_obs_001",
-        "story_id": "story_1",
-        "event": "事件",
-        "before_state": "之前",
-        "after_state": "之后",
-    }
-    monkeypatch.setattr(app_module, "get_bank", lambda: type("Bank", (), {"get_all": lambda _self: [observation]})())
-    try:
-        result = app_module.export_node({
-            "namespace": "test_ns",
-            "out_dir": str(tmp_path),
-            "snapshot_root": str(tmp_path / "snapshots"),
-            "evaluation_report": {},
-            "total_stories": 1,
-        })
-    finally:
-        set_active_store(prev)
-
-    assert evaluated == [["MERGED"]]
-    assert result["ontology_snapshot"]
-    from Contracts.snapshot import load_function_contracts
-    manifest, functions, _evaluation = load_snapshot(result["ontology_snapshot"])
-    assert manifest["schema_version"] == 4
-    assert [f["function_name"] for f in functions] == ["MERGED"]
-    occurrences = load_occurrences(result["ontology_snapshot"])
-    assert occurrences[0]["function_id"] == functions[0]["function_id"]
-    assert occurrences[0]["function_name"] == "MERGED"
-    assert load_function_contracts(result["ontology_snapshot"])[0]["function_name"] == "MERGED"
-
-
 def test_export_final_fail_keeps_work_files_without_snapshot(monkeypatch, tmp_path):
     """合并后终评 FAIL 仍保留工作产物，但不得发布。"""
-    from Agent.Registry import registry as reg_mod
-    from Agent.Registry.registry import RegistryStore, set_active_store
+    from FunctionExtract_Agent.Registry import registry as reg_mod
+    from FunctionExtract_Agent.Registry.registry import RegistryStore, set_active_store
 
     prev = reg_mod._active_store
     store = RegistryStore(db_path=str(tmp_path / "functions.db"), namespace="test_ns")

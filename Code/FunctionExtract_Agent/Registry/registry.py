@@ -3,7 +3,7 @@ RegistryStore - Function Registry 持久化存储（SQLite，命名空间隔离�
 
 每批（题材）写入独立 namespace，互不清除；payload 整存完整 JSON（字段无损，
 未来加 function_id/status/version_history 无需迁移存储层）。JSONL 仍是快照/交换格式，
-由 export_jsonl / import_jsonl 负责与 Agent.app（bootstrap_app 导出）快照对接。
+由 export_jsonl / import_jsonl 负责与 FunctionExtract_Agent.app（bootstrap_app 导出）快照对接。
 """
 
 import json
@@ -134,7 +134,7 @@ class RegistryStore:
         return len(funcs)
 
 
-# ---------- 模块级活跃 store（Agent.app 启动时 set，Inducer/Evaluator/Revise 读写） ----------
+# ---------- 模块级活跃 store（FunctionExtract_Agent.app 启动时 set，Inducer/Evaluator/Revise 读写） ----------
 
 _active_store: RegistryStore | None = None
 
@@ -178,3 +178,16 @@ def _with_card_fields(func: dict, previous: dict | None = None) -> dict:
                 "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
             }]
     return f
+
+
+def append_version_event(func: dict, action: str, **payload) -> None:
+    """追加一次 Function 版本事件；payload 用于记录演化关系等附加事实。"""
+    history = list(func.get("version_history", []))
+    event = {
+        "version": len(history) + 1,
+        "action": action,
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    event.update({key: value for key, value in payload.items() if value is not None})
+    history.append(event)
+    func["version_history"] = history

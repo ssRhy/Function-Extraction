@@ -8,11 +8,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from Agent.Curator import curator as cu
-from Agent.Curator.curator import curator_node
-from Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
-from Agent.Evaluator import revise as rev
-from Prompt.Abstract_merge_prompt import AbstractMergeResponse
+from FunctionExtract_Agent.Curator import curator as cu
+from FunctionExtract_Agent.Curator.curator import curator_node
+from FunctionExtract_Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
+from FunctionExtract_Agent.Evaluator import revise as rev
+from FunctionExtract_Agent.Prompt.Abstract_merge_prompt import AbstractMergeResponse
 
 
 class FakeEmbedder:
@@ -80,7 +80,7 @@ def _occ(oid, label="NOVEL"):
 
 
 def _setup(tmp, funcs):
-    from Agent.app import get_bank
+    from FunctionExtract_Agent.app import get_bank
     bank = get_bank()
     bank.clear()
     bank.embedder = FakeEmbedder()
@@ -92,7 +92,7 @@ def _setup(tmp, funcs):
 
 
 def _teardown(prev):
-    from Agent.app import get_bank
+    from FunctionExtract_Agent.app import get_bank
     set_active_store(prev)
     get_bank().clear()
 
@@ -238,6 +238,11 @@ def test_merge_near_dups_prescreen(tmp_path):
     orig = (cu.chat_structured, rev._llm_merge)
     cu.chat_structured = lambda messages, schema, **kw: AbstractMergeResponse(merge_groups=[["F_A", "F_B"]])
     rev._llm_merge = lambda members, obs_by_id: (dict(merged), None)
+    source_ids = {
+        f["function_name"]: f["function_id"]
+        for f in store.load_all()
+        if f["function_name"] in {"F_A", "F_B"}
+    }
     try:
         plan = []
         changed = cu._revise_from_report({}, store, bank, plan)  # 无报告也跑预筛
@@ -248,6 +253,10 @@ def test_merge_near_dups_prescreen(tmp_path):
     names = {f["function_name"] for f in store.load_all()}
     assert "F_AB" in names and "F_A" not in names and "F_B" not in names
     assert "F_C" in names
+    merged_func = next(f for f in store.load_all() if f["function_name"] == "F_AB")
+    merge_event = next(e for e in merged_func["version_history"] if e["action"] == "MERGE")
+    assert set(merge_event["source_function_ids"]) == set(source_ids.values())
+    assert merge_event["target_function_ids"] == [merged_func["function_id"]]
     assert any(p["action"] == "MERGE" and p.get("source") == "agglomerative+confirm" for p in plan)
     print("近义预筛合并: OK")
 

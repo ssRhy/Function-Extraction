@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from Agent.Contract import contract as contract_module
+from FunctionExtract_Agent.Contract import contract as contract_module
 from Contracts.function_contract import (
     FunctionContractBody,
     ObligationEffects,

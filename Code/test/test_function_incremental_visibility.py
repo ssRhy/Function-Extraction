@@ -80,6 +80,9 @@ def test_run_overlay_snapshot_immutability_and_failure_cleanup(tmp_path):
         assert conn.execute(
             "SELECT COUNT(*) FROM story_versions WHERE created_by_run_id='R3'"
         ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM observations WHERE obs_id='story_obs_001'"
+        ).fetchone()[0] == 1
 
 
 def test_new_run_recovers_interrupted_unpublished_run(tmp_path):
@@ -106,5 +109,8 @@ def test_new_run_recovers_interrupted_unpublished_run(tmp_path):
         ).fetchone()[0] == 0
         assert conn.execute(
             "SELECT COUNT(*) FROM observation_versions WHERE created_by_run_id='R1'"
+        ).fetchone()[0] == 0
+        assert conn.execute(
+            "SELECT COUNT(*) FROM observations"
         ).fetchone()[0] == 0
         assert conn.execute("SELECT status FROM pipeline_runs WHERE run_id='R2'").fetchone()[0] == "RUNNING"

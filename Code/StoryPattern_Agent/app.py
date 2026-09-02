@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 import json
+import time
 from collections import Counter, defaultdict
 
 from langgraph.graph import END, START, StateGraph
@@ -17,12 +18,23 @@ from .summaries import summarize_story_patterns
 from .variants import retrieve_motif_variants
 
 
+PATTERN_STAGE_TIMEOUT_SECONDS = 15 * 60
+
+
 def _json(value) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def _digest(*values) -> str:
     return hashlib.sha256("|".join(str(value) for value in values).encode("utf-8")).hexdigest()
+
+
+def _check_stage_timeout(stage: str, deadline: float, completed: int) -> None:
+    if time.monotonic() >= deadline:
+        raise TimeoutError(
+            f"Pattern {stage} 阶段超时：已完成 {completed} 条，"
+            f"预算 {PATTERN_STAGE_TIMEOUT_SECONDS}s"
+        )
 
 
 def _occurrence_signature(items: list[dict]) -> str:
@@ -36,6 +48,33 @@ def _occurrence_signature(items: list[dict]) -> str:
         "status": item["status"],
         "source_sentence_indices": item.get("source_sentence_indices") or [],
     } for item in ordered]))
+
+
+def _summary_input_signature(state: StoryPatternState, cluster: dict) -> str:
+    """只绑定该 Cluster 摘要实际使用的 Function 定义与 Contract。"""
+    candidate_by_id = {item["motif_id"]: item for item in state["motif_candidates"]}
+    function_names = {
+        function_id: function_name
+        for candidate in candidate_by_id.values()
+        for function_id, function_name in zip(
+            candidate["function_ids"], candidate.get("function_names", []),
+        )
+    }
+    function_ids = sorted({
+        function_id
+        for motif_id in cluster["member_motif_ids"]
+        for function_id in candidate_by_id[motif_id]["function_ids"]
+    })
+    payload = []
+    for function_id in function_ids:
+        function = state.get("function_by_id", {}).get(function_id, {})
+        payload.append({
+            "function_id": function_id,
+            "function_name": function.get("function_name") or function_names.get(function_id, ""),
+            "definition": function.get("definition", ""),
+            "contract": state.get("function_contract_by_id", {}).get(function_id),
+        })
+    return _digest(_json(payload))
 
 
 def load_pattern_delta(state: StoryPatternState) -> dict:
@@ -261,18 +300,36 @@ def retrieve_variant_pairs(state: StoryPatternState) -> dict:
             "role": "system", "content": "[Pattern.retrieve_variant_pairs] pairs=0",
         }]}
     result = retrieve_motif_variants(state)
-    pairs = []
+    candidate_by_id = {item["motif_id"]: item for item in state["motif_candidates"]}
+    review_pairs = []
     for item in result["motif_variant_pairs"]:
+        members = item["member_motif_ids"]
+        ranks = {selected["motif_id"]: selected["rank"] for selected in item["selected_by"]}
+        if (
+            item["recall_tier"] != "HIGH"
+            or max(candidate_by_id[motif_id]["length"] for motif_id in members) < 4
+            or set(ranks) != set(members)
+            or max(ranks.values()) > 2
+        ):
+            continue
         pair = dict(item)
         pair["input_signature"] = _pair_input_signature(state, pair)
-        pairs.append(pair)
-    return {"motif_variant_pairs": pairs, "messages": result["messages"]}
+        review_pairs.append(pair)
+    return {
+        "motif_variant_pairs": review_pairs,
+        "messages": result["messages"] + [{
+            "role": "system",
+            "content": f"[Pattern.retrieve_variant_pairs] review_pairs={len(review_pairs)}",
+        }],
+    }
 
 
 def _review_selected(state: StoryPatternState, selected: list[dict]) -> list[dict]:
     store = StoryKnowledgeStore(state["knowledge_db"])
     reviews = list(state.get("motif_pair_reviews", []))
-    for pair in selected:
+    deadline = time.monotonic() + PATTERN_STAGE_TIMEOUT_SECONDS
+    for index, pair in enumerate(selected, 1):
+        _check_stage_timeout("Motif Review", deadline, index - 1)
         cached = store.load_motif_pair_review(pair["variant_pair_id"], pair["input_signature"])
         if cached:
             review = dict(cached)
@@ -289,81 +346,18 @@ def _review_selected(state: StoryPatternState, selected: list[dict]) -> list[dic
         review["embedding_similarity"] = pair["similarity"]
         review["recall_tier"] = pair["recall_tier"]
         reviews.append(review)
+        _check_stage_timeout("Motif Review", deadline, index)
     return reviews
 
 
 def review_changed_pairs(state: StoryPatternState) -> dict:
-    selected = [item for item in state["motif_variant_pairs"] if item["recall_tier"] == "HIGH"]
+    selected = state["motif_variant_pairs"]
     reviews = _review_selected(state, selected)
     return {
         "motif_pair_reviews": reviews,
         "messages": [{
             "role": "system",
             "content": f"[Pattern.review_changed_pairs] high={len(selected)}, reviewed={len(reviews)}",
-        }],
-    }
-
-
-def _same_components(motif_ids: list[str], reviews: list[dict]) -> dict[str, set[str]]:
-    adjacency = {motif_id: set() for motif_id in motif_ids}
-    for review in reviews:
-        if review["verdict"] == "SAME_PATTERN":
-            left, right = review["member_motif_ids"]
-            adjacency[left].add(right)
-            adjacency[right].add(left)
-    components = {}
-    for motif_id in motif_ids:
-        if motif_id in components:
-            continue
-        members, stack = set(), [motif_id]
-        while stack:
-            current = stack.pop()
-            if current in members:
-                continue
-            members.add(current)
-            stack.extend(adjacency[current] - members)
-        for member in members:
-            components[member] = members
-    return components
-
-
-def review_internal_bridges(state: StoryPatternState) -> dict:
-    """只补审会影响已形成 Cluster 或重复 Motif 的 EXPANDED 边。"""
-    reviews = list(state.get("motif_pair_reviews", []))
-    reviewed = {tuple(sorted(item["member_motif_ids"])) for item in reviews}
-    candidate_by_id = {item["motif_id"]: item for item in state["motif_candidates"]}
-    expanded = [item for item in state["motif_variant_pairs"] if item["recall_tier"] == "EXPANDED"]
-    reviewed_count = 0
-    while True:
-        components = _same_components(list(candidate_by_id), reviews)
-        selected = []
-        for pair in expanded:
-            key = tuple(sorted(pair["member_motif_ids"]))
-            if key in reviewed:
-                continue
-            left, right = pair["member_motif_ids"]
-            left_component, right_component = components[left], components[right]
-            internal = left_component == right_component
-            bridge = (
-                len(left_component) > 1 or len(right_component) > 1
-                or (
-                    candidate_by_id[left]["story_support"] >= 2
-                    and candidate_by_id[right]["story_support"] >= 2
-                )
-            )
-            if internal or bridge:
-                selected.append(pair)
-        if not selected:
-            break
-        additions = _review_selected({**state, "motif_pair_reviews": reviews}, selected)
-        reviews = additions
-        reviewed.update(tuple(sorted(item["member_motif_ids"])) for item in selected)
-        reviewed_count += len(selected)
-    return {
-        "motif_pair_reviews": reviews,
-        "messages": [{
-            "role": "system",
-            "content": f"[Pattern.review_internal_bridges] expanded_reviewed={reviewed_count}",
         }],
     }
 
@@ -401,13 +395,18 @@ def rebuild_clusters(state: StoryPatternState) -> dict:
             item for item in state["motif_candidates"]
             if item["motif_id"] in cluster["member_motif_ids"]
         ]
-        anchor = sorted(candidates, key=lambda item: (
+        anchor_candidates = [
+            item for item in candidates
+            if len(item.get("function_ids", [])) >= 4
+        ] or candidates
+        anchor = sorted(anchor_candidates, key=lambda item: (
             -item["story_support"], -item["length"], item["motif_id"],
         ))[0]
         cluster["anchor_motif_id"] = anchor["motif_id"]
         cluster["structure_signature"] = _digest(_json(sorted(
             (item["motif_id"], item["function_ids"]) for item in candidates
         )))
+        cluster["summary_input_signature"] = _summary_input_signature(state, cluster)
         eligible = (
             cluster["review_status"] == "CLEAN"
             and cluster["story_support"] >= 2
@@ -455,6 +454,7 @@ def rebuild_clusters(state: StoryPatternState) -> dict:
         if not cluster["parent_cluster_ids"]
         or len(cluster["parent_cluster_ids"]) != 1
         or parent_by_id[cluster["parent_cluster_ids"][0]].get("structure_signature") != cluster["structure_signature"]
+        or parent_by_id[cluster["parent_cluster_ids"][0]].get("summary_input_signature") != cluster["summary_input_signature"]
         or parent_by_id[cluster["parent_cluster_ids"][0]].get("story_ids") != cluster["story_ids"]
     ]
     retired = [
@@ -478,9 +478,15 @@ def rebuild_clusters(state: StoryPatternState) -> dict:
 
 def summarize_changed_clusters(state: StoryPatternState) -> dict:
     parent_patterns = {item["pattern_id"]: item for item in state.get("parent_patterns", [])}
+    parent_clusters = {
+        item.get("pattern_id"): item
+        for item in state.get("parent_clusters", [])
+        if item.get("pattern_id")
+    }
     pattern_records = []
     new_pattern_ids = []
     summary_count = 0
+    summary_deadline = time.monotonic() + PATTERN_STAGE_TIMEOUT_SECONDS
     for cluster in state["motif_clusters"]:
         pattern_id = cluster.get("pattern_id")
         if not pattern_id or cluster["status"] == "candidate":
@@ -502,7 +508,12 @@ def summarize_changed_clusters(state: StoryPatternState) -> dict:
             continue
 
         same_structure = bool(parent and parent["structure_signature"] == cluster["structure_signature"])
-        if same_structure:
+        parent_cluster = parent_clusters.get(pattern_id)
+        same_summary_input = bool(
+            parent and parent_cluster
+            and parent_cluster.get("summary_input_signature") == cluster["summary_input_signature"]
+        )
+        if same_structure and same_summary_input:
             pattern = dict(parent["pattern"])
             pattern.update({
                 "snapshot_id": state["snapshot_id"],
@@ -516,6 +527,7 @@ def summarize_changed_clusters(state: StoryPatternState) -> dict:
                 "publication_status": "PUBLISHED",
             })
         else:
+            _check_stage_timeout("Pattern Summary", summary_deadline, summary_count)
             summary_state = {
                 **state,
                 "motif_clusters": [cluster],
@@ -527,19 +539,22 @@ def summarize_changed_clusters(state: StoryPatternState) -> dict:
             pattern = summaries[0]
             pattern["publication_status"] = "PUBLISHED"
             summary_count += 1
+            _check_stage_timeout("Pattern Summary", summary_deadline, summary_count)
 
         evidence_changed = not parent or sorted(parent["pattern"].get("story_ids") or []) != cluster["story_ids"]
-        if parent and same_structure and not evidence_changed:
+        if parent and same_structure and same_summary_input and not evidence_changed:
             version_id = parent["pattern_version_id"]
             version = None
         else:
             action = (
                 "CREATE" if not parent else
-                "EVIDENCE_EXTENDED" if same_structure else "STRUCTURE_EXTENDED"
+                "STRUCTURE_EXTENDED" if not same_structure else
+                "SEMANTICS_REVISED" if not same_summary_input else "EVIDENCE_EXTENDED"
             )
             version_id = "PV_" + _digest(
                 pattern_id, state["snapshot_id"], action,
-                cluster["structure_signature"], _json(cluster["story_ids"]),
+                cluster["structure_signature"], cluster["summary_input_signature"],
+                _json(cluster["story_ids"]),
             )[:16]
             version = {
                 "pattern_version_id": version_id,
@@ -548,6 +563,7 @@ def summarize_changed_clusters(state: StoryPatternState) -> dict:
                 "parent_version_id": parent["pattern_version_id"] if parent else None,
                 "action": action,
                 "structure_signature": cluster["structure_signature"],
+                "summary_input_signature": cluster["summary_input_signature"],
                 "pattern": pattern,
             }
         is_new = parent is None
@@ -559,6 +575,7 @@ def summarize_changed_clusters(state: StoryPatternState) -> dict:
             "status": "published",
             "is_new": is_new,
             "structure_signature": cluster["structure_signature"],
+            "summary_input_signature": cluster["summary_input_signature"],
             "pattern": pattern,
             "version": version,
         })
@@ -654,7 +671,6 @@ def _build_graph() -> StateGraph:
     graph.add_node("update_motif_evidence", update_motif_evidence)
     graph.add_node("retrieve_variant_pairs", retrieve_variant_pairs)
     graph.add_node("review_changed_pairs", review_changed_pairs)
-    graph.add_node("review_internal_bridges", review_internal_bridges)
     graph.add_node("rebuild_clusters", rebuild_clusters)
     graph.add_node("summarize_changed_clusters", summarize_changed_clusters)
     graph.add_node("publish_pattern_set", publish_pattern_set)
@@ -663,8 +679,7 @@ def _build_graph() -> StateGraph:
     graph.add_edge("update_story_sequences", "update_motif_evidence")
     graph.add_edge("update_motif_evidence", "retrieve_variant_pairs")
     graph.add_edge("retrieve_variant_pairs", "review_changed_pairs")
-    graph.add_edge("review_changed_pairs", "review_internal_bridges")
-    graph.add_edge("review_internal_bridges", "rebuild_clusters")
+    graph.add_edge("review_changed_pairs", "rebuild_clusters")
     graph.add_edge("rebuild_clusters", "summarize_changed_clusters")
     graph.add_edge("summarize_changed_clusters", "publish_pattern_set")
     graph.add_edge("publish_pattern_set", END)
@@ -686,16 +701,17 @@ def run_pattern_evolve(
             "SELECT parent_snapshot_id FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
         ).fetchone()
     input_signature = _digest(snapshot_id, row["parent_snapshot_id"], _json(manifest))
-    store.begin_pattern_run(snapshot_id, input_signature)
     try:
+        store.begin_pattern_run(snapshot_id, input_signature)
         result = _build_graph().compile().invoke({
             "messages": [],
             "knowledge_db": str(knowledge_db),
             "snapshot_id": snapshot_id,
         })
         return result["pattern_result"]
-    except Exception as exc:
-        store.fail_pattern_run(snapshot_id, str(exc))
+    except BaseException as exc:
+        error = str(exc) or type(exc).__name__
+        store.fail_pattern_run(snapshot_id, error)
         raise
 
 
@@ -707,7 +723,7 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
     try:
         result = run_pattern_evolve(args.snapshot, args.knowledge_db, args.rebuild)
-        print(json.dumps(result, ensure_ascii=False, indent=2))
+        print(json.dumps({"run_result": result}, ensure_ascii=False))
         return 0
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"[StoryPattern] error: {exc}")

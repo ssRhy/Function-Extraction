@@ -887,3 +887,159 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - 用户指出，进程被强杀、断电或宿主退出会绕过 Python 异常处理，留下 `RUNNING` 的 Function Run 及其暂存 Story/ObservationVersion；它们虽不进入正式 Snapshot，却会污染审计状态并占用暂存数据。
 - 在当前单写入流程中，最小策略是在下一次 Bootstrap/Evolve 创建新 Run 前，把所有遗留 `RUNNING` Run 复用既有失败清理语义：删除其 `run_*` 成员和该 Run 创建的暂存版本，状态改为 `FAIL`，报告标明“启动时发现上次强制中断、未发布 Snapshot”。不引入超时、第二数据库或恢复执行。
 - Snapshot 提交与 `pipeline_runs.status='PASS'` 已处于同一 SQLite 事务；因此恢复只处理没有 Snapshot 的 `RUNNING` Run，不会回滚已发布知识。
+
+## 128. 正式库必须先重建才能进入新 Observation 身份链（2026-09-01）
+
+- 用户确认清空并重跑同一批 10 + 5 + 15 篇故事，用于把正式数据库从旧数字型 Observation 身份切换到原文锚点哈希身份，同时保留可比较的语料基线；验证完成后旧数据库与旧 Snapshot 已删除。
+- 实际重跑证明，Bootstrap 根 Snapshot 与两轮 Evolve 子 Snapshot 可以在同一个 SQLite DB 中连续发布；每轮只新增当前批次知识，但正式 Snapshot 是完整的累计知识边界。
+- 最终库包含 287 个新格式 Observation，0 个旧 `_obs_001`，所有 ObservationVersion 都有 `source_text`，Occurrence 全部绑定当前 Snapshot 的版本映射。说明身份迁移不需要兼容层，但必须通过显式重建完成。
+- Pattern 在最新 Snapshot 上成功发布 1 个 Pattern；本轮重点是恢复可信增量基线，不等同于已经解决 Function 新增反向重解释旧 Observation、StateVocabulary 和 Function 语义版本失效等后续结构问题。
+
+## 129. Function 演化只回看父 Snapshot 未决 Observation（2026-09-01）
+
+- 用户认为“新增/修订/拆分 Function → 只召回父 Snapshot 的 UNCERTAIN/OTHER → 只对高相似候选重新匹配 → 生成当前 Snapshot Occurrence”已经足够，不需要额外的 Function 语义签名或复杂边界系统。
+- 按此决定，Evolve 只增加一个轻量 `rematch_unresolved` 节点，复用 Matcher；不重跑全部 Observation，不新增数据库表，也不修改父 Snapshot。
+
+## 130. 语义 coverage 与正式 assignment 必须并列呈现（2026-09-01）
+
+- 用户确认不应把 Evaluator 的“与 Function 定义相似即可解释”误读为 Pattern 可用输入覆盖；正式 Snapshot 应同时展示从最终 FunctionOccurrence 得到的硬分配率、未决率和 OTHER 率。
+- 最小实现是保留 Evaluator 的语义 coverage 与既有 PASS 门槛，并在 Snapshot 发布前附加 assignment 指标；这不引入 LLM 调用或新的拒绝门槛。
+
+## 131. Pattern 摘要失效应按 Cluster 语义输入，而非全量 FunctionVersion（2026-09-01）
+
+- 用户要求只解决旧摘要错误继承，不让一次 Function 修订导致所有故事 sequence 和 Pattern 全量重算。
+- 正确失效单元是 Cluster 摘要的真实输入：结构相同但涉及 Function 的定义或 Contract 变化时，仅重跑该 Cluster 摘要，生成 `SEMANTICS_REVISED`；未受影响 Cluster 继承旧摘要。
+- 不应把完整 FunctionVersion 哈希进入故事 occurrence signature，因为支持证据或置信度等非摘要语义变化会制造不必要重算。
+
+## 132. 50+50 真实重建暴露了增量后处理与 Pattern 超时问题（2026-09-01）
+
+- 用户要求清空正式库并用同一语料重跑 50 篇 Bootstrap、50 篇 Evolve；结果证明同一 SQLite 上的根 Snapshot → 子 Snapshot 链路成立，新 Observation 身份与 `source_text` 已完整进入正式数据。
+- 首次 Evolve 在 RetroMatch 阶段因 `encode_observations` 逐字段单条调用模型而长时间停滞；最小修复是一次批量编码，未改变字段权重或匹配逻辑。修复后 50 篇 Evolve 成功，回看父 Snapshot 的 313 个未决项，选中 136 个并新增 112 条归属。
+- Pattern 子 Run 运行约 36 分钟后仍未完成，只能停止并标记 `FAILED`；后续只读复算证明它不是卡在单个请求，而是 370 个 Motif 产生了 1390 对语义变体，其中 754 对 HIGH 需要串行 LLM 审查。Pattern 的主要问题是候选对规模与串行执行策略，不能把失败 Run 解释成“100 篇仍无可发布 Pattern”。
+- 真实数据再次显示 Pattern 输入覆盖不是故事总数：子 Snapshot 有 100 篇故事和 880 个 Observation，但根 Pattern 已出现 50 篇故事仅生成 49 条序列，因为零 Observation 故事被 `load_pattern_delta` 过滤掉。后续应决定是写入空序列还是明确报告缺失，而不能静默丢失。
+- 真实 LLM 输出仍会把 Function 名称写入 Matcher 的 `label`、返回未声明的 `SEMI_SAME`，或产生非法 Contract 字段；结构化重试能恢复本轮，但这应作为输入约束/提示词稳定性问题单独处理。
+
+## 133. Pattern 审查应先缩小候选，再验证端到端产物（2026-09-01）
+
+- 用户要求精简 Pattern 审查。采用 `HIGH + Motif 长度至少 4 + 双方互相 Top-2` 后，子 Snapshot 的 Pair Review 缩小到 90 条，最终成功发布 26 个 Pattern。
+- 这说明此前 `published_patterns=0` 的直接原因包含审查规模和执行时间，而不是“没有足够文本”；但该筛选是保守召回策略，不能把 26 个发布数当作完整候选覆盖率。
+- 用同一子 Snapshot 生成 1 个 Outline 和 1 篇正文，证明当前链路已经实际贯通：Snapshot → Pattern → Outline → Story。后续性能优化应继续保持这个最小可验证闭环。
+- 直接运行 Function Evolve 不会生成 StoryCLI 运行清单，导致文章入口需要补写 manifest；这暴露出 CLI 编排和 Agent 直调用两套流程的产物契约不一致，应统一产物生成位置。
+
+## 134. Pattern 阶段超时应收口 Run，而不是引入复杂恢复层（2026-09-01）
+
+- 用户要求先解决 Pattern 阶段长时间 `RUNNING` 和失败不可见问题。当前最小闭环是：Motif Review 和 Pattern Summary 阶段设置总预算，超时抛错；外层把异常/中断写为 `FAILED`；未到提交节点的数据不进入正式 Pattern 表。
+- 这保留了现有“一个 Snapshot 对应一个 Pattern Run、成功才原子发布”的模型，也避免为了恢复单条 Review 而新增队列、分布式锁或第二数据库。
+- 15 分钟预算足以覆盖本轮精简后的 90 条候选 Review，但仍保留保守失败语义：超时会丢弃本次未提交的 Pattern 派生结果，下一次可用 `rebuild` 重试。
+
+## 135. Function lineage 只补现有事件 payload（2026-09-01）
+
+- 用户要求先解决 Function 演化 lineage 不完整问题，并保持精简。
+- 采用既有 `function_evolution_events.payload_json`：MERGE/SPLIT 事件写入稳定的 `source_function_ids` / `target_function_ids`，不增加 lineage 表、数据库或复杂迁移。
+- 不生成父 Function 的额外反向事件；通过新 Function 事件中的 source/target 集合即可反查 `F_PARENT → F_C/F_D`，同时避免 Bootstrap 根 Snapshot 中父 Function 尚未进入知识库时的外键问题。
+
+## 136. 清理旧 MERGE 事件而不修改不可变 Snapshot（2026-09-01）
+
+- 用户要求删除 3 条旧代码生成的 MERGE 记录，避免旧事件影响当前系统。
+- 只删除正式 SQLite `function_evolution_events` 中精确匹配的 3 行；不改已发布 Snapshot 文件或 FunctionVersion，避免破坏 Snapshot 哈希和不可变边界。
+- 删除后旧格式 MERGE 事件为 0，外键检查通过；新 MERGE/SPLIT 事件由当前代码写入 source/target Function ID。
+
+## 137. checkpoint 膨胀应移出累计工作集，而不是重设计知识库（2026-09-01）
+
+- 用户要求解决 Bootstrap checkpoint 膨胀，同时保持当前精简架构、不新增数据库边界。
+- 结论：`all_pairs` 的问题不是单条记录格式，而是累计列表被每个 checkpoint 重复保存；因此将它改为 `out_dir/pairs_<namespace>.jsonl` 工作文件，图状态只保留现阶段游标和 pair 引用型归纳分量。
+- 这样仍支持中断后从同一工作文件进入 `cluster`，知识库和 Snapshot 数据流不变；fresh 重跑时清理工作文件并压缩 checkpoint 文件的空闲页。
+
+## 138. Pattern 的故事覆盖应包含空结构，而不是静默丢失（2026-09-02）
+
+- 用户要求先解决 Pattern 输入覆盖和失败 Run 残留两个结构性问题。
+- 零 Observation 故事仍是真实输入的一部分，因此应保留为显式空 sequence；它不参与 Motif/Cluster，但必须出现在 Pattern story sequence 和运行统计中。
+- 失败 Run 的清理边界可以保持简单：删除该 Run 产生的版本后，清掉没有任何版本归属的 Observation；不新增 `created_by_run_id` 或复杂孤儿状态表。
+
+## 139. Snapshot 完整性保护先保持轻量，不立即增加数据库硬约束（2026-09-02）
+
+- 用户指出，复合外键和多组不可变 trigger 可能使当前代码变得冗杂，因此决定先不执行。
+- 当前单写入架构下，文件哈希、统一提交 API 和现有外键已经足以支撑当前增量验证；下一步若需要加强，只增加集中式完整性检查，不先扩展数据库结构。
+- 数据库级不可变保护保留为后续优化，触发条件是多进程/外部写入或论文级约束证明，而不是当前功能链路的必要条件。
+
+## 140. Outline 外部输入版本固定延后到复现性阶段（2026-09-02）
+
+- 用户决定暂不固定 Function Card 和 Transition Index 的内容版本。
+- 当前按 `snapshot_id` 分目录已经满足单机运行的基本隔离；真正需要严格固定的是 A/B 实验、跨批次比较和论文级复现。
+- 后续采用 Outline 产物记录外部文件 SHA-256 的轻量方式，不新增数据库版本表，也不改变当前 Snapshot 数据流。
+
+## 141. 删除 Agent 兼容 shim 后必须迁移隐藏的内部顶层导入（2026-09-02）
+
+- 用户要求先清理无用硬编码和冗余入口，决定删除 `Code/Agent` 兼容命名空间，不保留旧导入兼容。
+- 实际验证发现，旧 shim 不只提供 `Agent.*`，还把 `FunctionExtract_Agent` 内部目录注入 `sys.path`，使 `from Prompt`、`from Embedding`、`from Retrieval` 等隐式导入能够工作。
+- 因此清理不能只删 shim；必须把这些内部导入一并改为 `FunctionExtract_Agent.*`，否则表面迁移完成、实际运行仍会在动态导入处失败。
+- 删除失效 Snapshot 默认值后，入口暂时改为显式 Snapshot，避免在下一阶段上下文解析实现前引入全局最新 Snapshot 的隐式行为。
+
+## 142. 先统一 Run 控制面，再引入最小协调 Agent（2026-09-02）
+
+- 用户确认当前 Bootstrap、Evolve、Pattern 的衔接主要由 Codex 判断和执行，因此要求先完成前三项自动化基础：Bootstrap 提前登记 Run、Pattern 启动恢复悬挂 Run、入口返回机器可读结果；同时保持代码精简。
+- 这三项的目标不是增加新的编排系统，而是使 SQLite 的 Run 与正式 Snapshot 成为协调器唯一需要读取的状态。后续协调 Agent 可据此决定 Bootstrap、Evolve、Pattern、重试或停止。
+- 当前仍采用单机串行写入假设；不提前加入分布式锁、消息队列、心跳或第二数据库。多 Worker 并发成为真实需求时，再单独设计租约/互斥策略。
+
+## 143. 真实单篇增量验证应以父 Snapshot 为起点（2026-09-02）
+
+- 用户要求启动真实 LLM 并选一篇验证全流程接口。单篇不能形成有意义的 Bootstrap 根 Function，因此采用已发布的 100 篇 Function Snapshot 作为父，对一篇新故事执行真实 Evolve，再执行 Pattern；这既保持增量语义，也能验证 Run、Snapshot 和 Pattern 的真实衔接。
+- 真实 Evolve 成功证明单篇批次可安全成为完整子 Snapshot；真实 Pattern 失败则表明现有摘要 LLM 仍可能不严格复用输入 Function 名称。该失败应由 Pattern Run 记录并保持 Pattern 表为空，不能回滚或否定已成功发布的 Function Snapshot。
+
+## 144. Pattern Summary 不应让 LLM 负责 Function 身份选择（2026-09-02）
+
+- 用户要求最小修复目标是让 Pattern Summary 不再依赖 LLM 精确复述 Function 名称。先改为让 LLM 返回 Function 索引仍会失败，因为索引同样要求模型稳定输出结构化选择。
+- 最简且可追溯的方案是完全移除 Summary 的 Function 选择字段：Cluster 的 anchor motif 已经携带稳定 Function ID，系统直接绑定该链，并从当前 Snapshot 回填名称、定义和 Contract。
+- 真实重试成功，说明该修复解决的是身份绑定边界问题，而不是增加 LLM 重试或名称模糊匹配；数据库结构和增量 Pattern 流程均无需扩展。
+
+## 145. 单篇真实 Bootstrap 只能验证抽取与失败收口（2026-09-02）
+
+- 用户要求只跑一篇真实 Bootstrap。实际结果是 Observer 产出 9 个 Observation，但因 Bootstrap 会清空 Bank 且 Induction 需要跨故事相似对，单篇没有可归纳分量，最终无 Function、无 Snapshot。
+- 因此单篇可以证明真实 LLM、Run 登记、失败收口和机器可读结果通路，但不能证明 Bootstrap 成功发布分支；成功分支至少需要两篇故事。
+- 为避免一次验证改写正式 Bank/Registry，使用隔离的真实验证目录和数据库；当前正式知识库和共享 Bank 不受影响。
+
+## 146. 现有 Pipeline_Agent 不是 Function 协调 Agent（2026-09-02）
+
+- 用户询问现有 `Pipeline_Agent` 是否已经承担最小协调职责。实际代码只固定编排 `Outline_Agent → Story_Agent`，生成内容侧 manifest，不读取 Function Run、Pattern Run 或 Snapshot 状态。
+- 因此它不能直接作为 `Bootstrap → Evolve → Pattern` 的控制面；后者需要一个更上层但同样轻量的协调入口，复用三个 Agent 的现有接口和 `run_result`，按成功状态决定下一步，失败即停止并返回机器可读结果。
+- 不应为了协调职责改造现有 `Pipeline_Agent` 使其同时承担两条不同的数据流；当前最小方案是不新增表、不引入队列，只增加 Function 流程的薄协调层。
+
+## 147. Function 调度 Agent 采用 LangGraph 外层状态图，但不增加第二套持久状态（2026-09-02）
+
+- 用户要求使用 LangGraph 范式或项目现有规则设计调度 Agent。结论是采用 LangGraph 的条件边表达 `Bootstrap/Evolve → Pattern`，但调度器本身不调用 LLM，也不新建 Run/Snapshot 表。
+- 调度器状态只保留本次输入、Function `run_result`、Pattern `run_result` 和最终状态；正式 Run、Snapshot 与失败记录仍由各子 Agent 的 SQLite 控制面负责，避免 LangGraph checkpoint 与 KnowledgeBase 形成两套真相。
+- Function 阶段只有 `status=PASS` 且存在 `snapshot_id` 才进入 Pattern；Pattern 只有 `status=SUCCESS` 才完成。Function 失败或 Pattern 失败都停止并返回结果，不回滚已经成功发布的 Function Snapshot。
+- 现有 `Pipeline_Agent` 继续负责 `Outline → Story`；新的调度入口应作为独立的 Function Coordinator，复用可调用的 Bootstrap/Evolve/Pattern 接口，而不是混合两个职责。
+
+## 148. 无 Codex 中间干预需要失败策略，不只是节点串联（2026-09-02）
+
+- 用户明确希望以后由自动化 Agent 独立完成中间流程。仅有 `Bootstrap/Evolve → Pattern` 的 LangGraph 条件边只能自动衔接，不能处理失败后的判断与修复。
+- Coordinator 需要把失败分为可安全重试的暂时错误、可自动修复的输入/格式错误、业务质量失败和不可安全推断的结构错误；前两类有限重试或重跑，质量失败停止并报告，不让 Agent 随意改 Function 或 Snapshot。
+- 正式 Run/Snapshot 仍是恢复依据，Coordinator 不另建持久状态；只有节点返回机器可读 `run_result`、失败原因和可重试性后，才可能在不依赖 Codex 的情况下稳定运行。
+
+## 149. 调度中枢不等于必须使用 LLM 的 Supervisor（2026-09-02）
+
+- 用户从 Multi-Agent 架构询问 Coordinator 是否相当于大脑。它更准确地是调度中枢/指挥器：负责读取状态、路由专家 Agent 和收口结果；Observer、Matcher、Inducer、Evaluator、Pattern 才负责语义理解与生成。
+- 当前 Function 流程的下一步由明确事实决定：`PASS + snapshot_id` 才能进入 Pattern，`FAILED` 停止，暂时错误有限重试。这类控制不需要 LLM；使用 LLM 反而会增加成本、非确定性和越权修改 Snapshot 的风险。
+- 后续若出现无法用规则分类的异常，可采用混合模式：规则层先拦截和保护数据库，LLM 只在候选动作集合中提出 `RETRY/RESUME/STOP` 等建议，最终仍由规则验证和执行，而不是让 LLM 直接写库。
+
+## 150. Coordinator 第一版应复用 CLI 的机器结果，暂不重构三个 Agent（2026-09-02）
+
+- 用户要求按 LangGraph 方案增加调度 Agent。当前 Bootstrap/Evolve 的完整生命周期仍封装在 CLI 主流程，Pattern 已有可调用入口；为保持改动最小，Coordinator 通过子进程调用现有 CLI，并解析其最终 `run_result`，不复制任何业务节点。
+- 该边界保留各子 Agent 的独立 checkpoint、Run 和失败收口，同时让 Coordinator 能实时转发阶段日志、按规则做成功/失败路由和有限重试。
+- 如果后续需要同进程调用、细粒度恢复或多任务并发，再把 Bootstrap/Evolve 生命周期提取为公共函数；当前不提前引入这一层重构。
+
+## 151. Coordinator 测试通过不代表真实子进程闭环已覆盖（2026-09-02）
+
+- 检查发现新增 5 项测试主要 mock `_run_stage`，覆盖了 LangGraph 路由，却没有覆盖真实 CLI 启动、stdout `run_result` 协议、子进程退出码、Pattern 失败回写和 Coordinator 被中断后的恢复。
+- 复核后确认 `_run_stage` 已在解析结果后检查子进程退出码：成功状态配合非 0 退出码会被改为 `FAILED`，因此该边界当前没有实际漏洞。
+- 现有 Pattern CLI 在异常时只打印错误、不打印 `run_result`，虽然 `pattern_runs` 已写入 SQLite，但 Coordinator 只能返回 `MISSING_RUN_RESULT`，无法直接带出精确的 Pattern 失败原因。
+- Coordinator 被中断时没有显式终止子进程，也没有阶段级 watchdog；重新启动时可能重复执行已经成功的 Function 阶段，增加成本，虽不会直接覆盖正式 Snapshot。
+- 下一步应补一个不调用 LLM 的真实子进程协议测试、Evolve 参数传递测试和中断/重启策略；在此之前，`299 passed` 只能证明当前规则路由，不代表无人值守闭环已经完全验收。
+
+## 152. 更适合本项目的是分层中枢，而不是单一 LLM 大脑（2026-09-02）
+
+- 用户提出让调度 Agent 作为大脑统一处理整个自动化流程错误。结合 Snapshot 不可变、Run 可追溯和 Function 质量修订边界，不能让一个 LLM 直接决定任意修复；更合适的是“确定性 Coordinator 内核 + 受约束 LLM Supervisor + SQLite/Snapshot 黑板”。
+- Coordinator 内核负责状态路由、恢复、重试上限、预算、Snapshot 完整性和停止；现有 Evaluator/Curator 负责 Function 语义修订，Pattern/Outline/Story 负责各自领域，避免总 Agent 越权修改专家产物。
+- LLM Supervisor 只在错误无法由规则分类时工作，并只能从 `RETRY_STAGE`、`RESUME_RUN`、`REBUILD_PATTERN`、`STOP` 等有限动作中提出建议；规则层校验目标 Run、父 Snapshot、尝试次数和数据边界后才执行。
+- 这样正常路径无需额外 LLM，已知错误可自动处理，未知错误可自动暂停并保留证据；正式知识边界始终由 SQLite Run 和不可变 Snapshot 决定。

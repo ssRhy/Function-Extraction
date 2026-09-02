@@ -44,7 +44,7 @@ def _function(definition="结构变化", version=1):
     }
 
 
-def _snapshot(tmp_path, function, contracts=None, parent=None):
+def _snapshot(tmp_path, function, contracts=None, parent=None, workflow="evolve", namespace="test_namespace"):
     observation = _observation()
     occurrence = {
         "occurrence_id": "story_obs_001",
@@ -59,8 +59,8 @@ def _snapshot(tmp_path, function, contracts=None, parent=None):
     return publish_snapshot(
         [function],
         {"verdict": "PASS"},
-        "evolve",
-        "test_namespace",
+        workflow,
+        namespace,
         str(tmp_path / "snapshots"),
         [occurrence],
         contracts,
@@ -74,6 +74,36 @@ def _corpus(tmp_path):
     (corpus / "story.txt").write_text(STORY_TEXT, encoding="utf-8")
     meta = {"story.txt": {"txt_file": "story.txt", "category": "测试"}}
     return corpus, meta, [_observation()]
+
+
+def _commit_function_snapshot(store, snapshot, corpus, story_meta, observations):
+    with open(os.path.join(snapshot, "manifest.json"), encoding="utf-8") as f:
+        manifest = json.load(f)
+    existing = store.load_function_run(manifest["run_id"])
+    if existing and existing["status"] == "PASS":
+        return manifest
+    store.begin_function_run(
+        manifest["run_id"], manifest["source_workflow"], manifest["namespace"],
+        manifest.get("parent_snapshot_id"), str(corpus),
+    )
+    by_story = {}
+    for observation in observations:
+        by_story.setdefault(observation["story_id"], []).append(observation)
+    for position, filename in enumerate(story_meta, 1):
+        meta = story_meta[filename]
+        story_id = meta.get("story_id") or os.path.splitext(filename)[0]
+        text = (corpus / filename).read_text(encoding="utf-8")
+        version_id = story_version_id(story_id, text)
+        store.stage_story_observations(
+            manifest["run_id"],
+            {"raw_text": text, "metadata": {
+                "story_id": story_id,
+                "story_version_id": version_id,
+            }},
+            {**meta, "source_file": filename},
+            by_story.get(story_id, []), position,
+        )
+    return store.commit_function_run(snapshot, manifest["run_id"])
 
 
 def _insert_pattern(store, snapshot_id):
@@ -106,7 +136,7 @@ def test_function_run_records_story_to_occurrence_chain(tmp_path):
     corpus, meta, observations = _corpus(tmp_path)
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
 
-    store.record_function_run(snapshot, corpus, ["story.txt"], meta, observations)
+    _commit_function_snapshot(store, snapshot, corpus, meta, observations)
 
     status = store.status()
     assert status["counts"]["story_versions"] == 1
@@ -126,15 +156,15 @@ def test_snapshot_versions_accumulate_and_link_parent(tmp_path):
     first = _snapshot(tmp_path, _function())
     corpus, meta, observations = _corpus(tmp_path)
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
-    store.record_function_run(first, corpus, ["story.txt"], meta, observations)
+    _commit_function_snapshot(store, first, corpus, meta, observations)
 
     second = _snapshot(
         tmp_path, _function("修订后的结构变化", 2),
         parent=os.path.basename(first),
     )
-    store.record_function_run(second, corpus, ["story.txt"], meta, observations)
-    store.record_function_run(second, corpus, ["story.txt"], meta, observations)
-    store.record_function_run(first, corpus, ["story.txt"], meta, observations)
+    _commit_function_snapshot(store, second, corpus, meta, observations)
+    _commit_function_snapshot(store, second, corpus, meta, observations)
+    _commit_function_snapshot(store, first, corpus, meta, observations)
 
     status = store.status()
     assert status["counts"]["snapshots"] == 2
@@ -149,11 +179,57 @@ def test_snapshot_versions_accumulate_and_link_parent(tmp_path):
         assert conn.execute("SELECT definition FROM functions").fetchone()[0] == "修订后的结构变化"
 
 
+def test_lineage_event_payload_round_trip(tmp_path):
+    function = _function()
+    function["version_history"].append({
+        "version": 2,
+        "action": "MERGE",
+        "source_function_ids": ["F_A", "F_B"],
+        "target_function_ids": ["F_TEST"],
+        "ts": "2026-01-02",
+    })
+    snapshot = _snapshot(tmp_path, function)
+    corpus, meta, observations = _corpus(tmp_path)
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    _commit_function_snapshot(store, snapshot, corpus, meta, observations)
+
+    with store.connect() as conn:
+        row = conn.execute(
+            "SELECT payload_json FROM function_evolution_events WHERE action='MERGE'"
+        ).fetchone()
+    payload = json.loads(row[0])
+    assert payload["source_function_ids"] == ["F_A", "F_B"]
+    assert payload["target_function_ids"] == ["F_TEST"]
+
+
+def test_pattern_start_recovers_interrupted_run(tmp_path):
+    first = _snapshot(
+        tmp_path, _function(), workflow="bootstrap", namespace="pattern_first",
+    )
+    second = _snapshot(
+        tmp_path, _function("另一种结构变化"), workflow="bootstrap", namespace="pattern_second",
+    )
+    corpus, meta, observations = _corpus(tmp_path)
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    _commit_function_snapshot(store, first, corpus, meta, observations)
+    _commit_function_snapshot(store, second, corpus, meta, observations)
+
+    first_id = os.path.basename(first)
+    second_id = os.path.basename(second)
+    store.begin_pattern_run(first_id, "first")
+    store.begin_pattern_run(second_id, "second")
+
+    recovered = store.load_pattern_run(first_id)
+    assert recovered["status"] == "FAILED"
+    assert recovered["payload"]["error"] == "interrupted_before_pattern_commit"
+    assert store.load_pattern_run(second_id)["status"] == "RUNNING"
+
+
 def test_outline_round_trip_is_idempotent(tmp_path):
     snapshot = _snapshot(tmp_path, _function())
     corpus, meta, observations = _corpus(tmp_path)
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
-    store.record_function_run(snapshot, corpus, ["story.txt"], meta, observations)
+    _commit_function_snapshot(store, snapshot, corpus, meta, observations)
     snapshot_id = os.path.basename(snapshot)
     _insert_pattern(store, snapshot_id)
     outline = {
@@ -173,7 +249,7 @@ def test_pattern_claim_is_global_and_idempotency_is_rejected(tmp_path):
     snapshot = _snapshot(tmp_path, _function())
     corpus, meta, observations = _corpus(tmp_path)
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
-    store.record_function_run(snapshot, corpus, ["story.txt"], meta, observations)
+    _commit_function_snapshot(store, snapshot, corpus, meta, observations)
     snapshot_id = os.path.basename(snapshot)
     _insert_pattern(store, snapshot_id)
 
@@ -191,7 +267,7 @@ def test_failed_outline_consumes_pattern(tmp_path):
     snapshot = _snapshot(tmp_path, _function())
     corpus, meta, observations = _corpus(tmp_path)
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
-    store.record_function_run(snapshot, corpus, ["story.txt"], meta, observations)
+    _commit_function_snapshot(store, snapshot, corpus, meta, observations)
     snapshot_id = os.path.basename(snapshot)
     _insert_pattern(store, snapshot_id)
     outline = {

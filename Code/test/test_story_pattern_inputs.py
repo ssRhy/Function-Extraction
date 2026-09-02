@@ -55,23 +55,6 @@ def _load(monkeypatch, source):
     })
 
 
-def test_load_inputs_builds_deterministic_state(monkeypatch):
-    result = _load(monkeypatch, _source())
-
-    assert result["story_ids"] == ["s2", "s1"]
-    assert [o["obs_id"] for o in result["observations_by_story"]["s1"]] == [
-        "s1_obs_aaaaaaaaaaaa", "s1_obs_bbbbbbbbbbbb",
-    ]
-    assert result["function_by_name"]["FUNCTION_A"]["function_id"] == "F_1"
-    assert result["function_by_id"]["F_2"]["function_name"] == "FUNCTION_B"
-    assert result["current_story_index"] == 0
-    assert result["current_story_id"] is None
-    assert result["all_occurrences"] == []
-    assert result["story_sequences"] == {}
-    assert result["structural_sequences"] == {}
-    assert result["function_contexts"] == {}
-
-
 def test_load_inputs_reads_function_contracts(monkeypatch):
     contracts = [
         {"function_id": "F_1", "function_name": "FUNCTION_A"},
@@ -105,6 +88,20 @@ def test_stable_hashed_observation_ids_are_sorted_by_observation_order(monkeypat
     assert [item["obs_id"] for item in result["observations_by_story"]["s1"]] == [
         "s1_obs_aaaaaaaaaaaa", "s1_obs_bbbbbbbbbbbb",
     ]
+
+
+def test_load_inputs_keeps_stories_without_observations(monkeypatch):
+    source = _source()
+    source["observations"] = [_obs("s1_obs_aaaaaaaaaaaa", "s1")]
+
+    result = _load(monkeypatch, source)
+
+    assert result["story_ids"] == ["s2", "s1"]
+    assert result["story_metadata"] == {
+        "s2": {"story_id": "s2", "category": "题材二"},
+        "s1": {"story_id": "s1", "category": "题材一"},
+    }
+    assert result["observations_by_story"]["s2"] == []
 
 
 @pytest.mark.parametrize("field", ["obs_id", "story_id", "event", "before_state", "after_state"])

@@ -20,7 +20,7 @@ if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
 
 from langgraph.graph import StateGraph, START, END
 
-from Agent.llm import chat_structured
+from FunctionExtract_Agent.llm import chat_structured
 from Contracts.ledger import build_contract_ledger
 from KnowledgeBase import DEFAULT_DB_PATH, StoryKnowledgeStore
 
@@ -43,14 +43,13 @@ from Outline_Agent.Prompt.Outline_prompt import (
 )
 
 
-DEFAULT_SNAPSHOT_ID = "evolve_250_20260822T063550401096Z_13b1bbda248f"
 _DATA = os.path.join(_ROOT, "data")
 _GENRE_KEYS = ["01_悬疑惊悚", "02_古风仙侠", "03_现代情感", "04_末世科幻", "05_现实家庭职场"]
 
 
 # ---------- 输入加载 ----------
 
-def load_catalog(snapshot_id=DEFAULT_SNAPSHOT_ID, knowledge_db=DEFAULT_DB_PATH):
+def load_catalog(snapshot_id, knowledge_db=DEFAULT_DB_PATH):
     return StoryKnowledgeStore(knowledge_db).load_pattern_catalog(snapshot_id)
 
 
@@ -499,7 +498,7 @@ def main():
     parser.add_argument("--genre", required=True, help="题材（如 悬疑惊悚 或 01_悬疑惊悚）")
     parser.add_argument("--pattern", default=None, help="指定 pattern 名称（题材内，配合 --list-patterns 查看）")
     parser.add_argument("--list-patterns", action="store_true", help="列出题材下的候选 pattern 后退出")
-    parser.add_argument("--snapshot-id", default=DEFAULT_SNAPSHOT_ID)
+    parser.add_argument("--snapshot-id", required=True)
     parser.add_argument("--knowledge-db", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--request", default=None, help="用户故事要求")
     parser.add_argument("--out-dir", default=None)

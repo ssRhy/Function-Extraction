@@ -7,10 +7,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from Agent.Evaluator import abstract_merge as am
-from Agent.Evaluator import revise as revise_module
-from Agent.Evaluator.abstract_merge import MAX_MERGE_OBS
-from Prompt.Abstract_merge_prompt import AbstractMergeResponse
+from FunctionExtract_Agent.Evaluator import abstract_merge as am
+from FunctionExtract_Agent.Evaluator import revise as revise_module
+from FunctionExtract_Agent.Evaluator.abstract_merge import MAX_MERGE_OBS
+from FunctionExtract_Agent.Prompt.Abstract_merge_prompt import AbstractMergeResponse
 
 
 def _func(name, supporting, definition="角色获得关键资源或信息"):

@@ -3,13 +3,13 @@
 import json
 import os
 
-from Agent.llm import chat_structured
+from FunctionExtract_Agent.llm import chat_structured
 from Contracts.function_contract import (
     FunctionContractBody,
     definition_sha256,
     validate_function_contracts,
 )
-from Prompt.Contract_prompt import CONTRACT_SYSTEM_PROMPT
+from FunctionExtract_Agent.Prompt.Contract_prompt import CONTRACT_SYSTEM_PROMPT
 
 
 def _select_evidence(function: dict, bank: dict[str, dict], limit: int = 12) -> list[dict]:

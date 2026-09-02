@@ -8,7 +8,7 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from Agent.llm import chat_structured
+from FunctionExtract_Agent.llm import chat_structured
 from Story_Agent.Prompt.Story_prompt import STORY_PROMPT
 from Story_Agent.state import StoryDraft
 

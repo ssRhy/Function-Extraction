@@ -4,7 +4,7 @@ Retrieval 模块 - 向量检索接口
 """
 
 from typing import Optional
-from Bank.bank import ObservationBank
+from FunctionExtract_Agent.Bank.bank import ObservationBank
 
 
 class RetrievedObservation:

@@ -4,10 +4,10 @@
 
 import json
 
-from Agent.llm import chat_structured
-from Agent.Inducer.confidence import calculate_confidence_detailed
-from Agent.Evaluator import revise as revise_module
-from Prompt.Abstract_merge_prompt import (
+from FunctionExtract_Agent.llm import chat_structured
+from FunctionExtract_Agent.Inducer.confidence import calculate_confidence_detailed
+from FunctionExtract_Agent.Evaluator import revise as revise_module
+from FunctionExtract_Agent.Prompt.Abstract_merge_prompt import (
     ABSTRACT_MERGE_SYSTEM_PROMPT,
     AbstractMergeResponse,
 )

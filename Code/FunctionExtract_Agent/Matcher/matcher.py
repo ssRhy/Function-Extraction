@@ -9,10 +9,10 @@ import time
 
 import numpy as np
 
-from Agent.llm import chat_structured
-from Agent.Registry.registry import get_active_store
-from Agent.Inducer.confidence import calculate_confidence_detailed
-from Prompt.Matcher_prompt import MATCHER_SYSTEM_PROMPT, MatchResponse, MatchDecision
+from FunctionExtract_Agent.llm import chat_structured
+from FunctionExtract_Agent.Registry.registry import get_active_store
+from FunctionExtract_Agent.Inducer.confidence import calculate_confidence_detailed
+from FunctionExtract_Agent.Prompt.Matcher_prompt import MATCHER_SYSTEM_PROMPT, MatchResponse, MatchDecision
 
 MATCH_BATCH_SIZE = 10
 TOP_K = 5
@@ -117,8 +117,59 @@ def _build_batch_input(batch: list[dict], candidates: list[list[dict]]) -> str:
     return "\n".join(lines)
 
 
+def match_observations(
+    observations: list[dict],
+    funcs: list[dict],
+    embedder,
+    candidates: list[list[dict]] | None = None,
+) -> tuple[list[MatchDecision], list[list[dict]], list[str]]:
+    """对一批 Observation 做召回和五分类，供新故事与旧未决回看共用。"""
+    if not observations:
+        return [], [], []
+    if not funcs:
+        return [
+            MatchDecision(obs_id=o.get("obs_id", ""), label="NOVEL", reason="函数库为空，无候选可匹配")
+            for o in observations
+        ], [[] for _ in observations], []
+
+    candidates = candidates if candidates is not None else recall_candidates(observations, funcs, embedder)
+    cards = [{
+        "function_name": f["function_name"],
+        "definition": f.get("definition", ""),
+        "realization_patterns": f.get("realization_patterns", []),
+    } for f in funcs]
+    system = MATCHER_SYSTEM_PROMPT + "\n\n## 现有 Function 卡片\n" + json.dumps(cards, ensure_ascii=False, indent=1)
+    decisions, errors = [], []
+    for start in range(0, len(observations), MATCH_BATCH_SIZE):
+        batch = observations[start:start + MATCH_BATCH_SIZE]
+        user = "请对以下 Observations 做五分类判定：\n" + _build_batch_input(
+            batch, candidates[start:start + MATCH_BATCH_SIZE]
+        )
+        try:
+            result = chat_structured([
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ], MatchResponse)
+            decisions.extend(result.decisions)
+        except Exception as e:
+            errors.append(f"batch@{start}: {e}")
+            decisions.extend(
+                MatchDecision(obs_id=o.get("obs_id", ""), label="UNCERTAIN", reason=f"LLM 判定失败：{e}")
+                for o in batch
+            )
+    # 按 obs_id 对齐（LLM 可能乱序/漏项），缺失项补 UNCERTAIN。
+    by_id = {d.obs_id: d for d in decisions if d.obs_id}
+    decisions = [
+        by_id.get(o.get("obs_id", "")) or MatchDecision(
+            obs_id=o.get("obs_id", ""), label="UNCERTAIN", reason="LLM 未返回该 obs 判定"
+        )
+        for o in observations
+    ]
+    return decisions, candidates, errors
+
+
 def matcher_node(state: dict) -> dict:
-    """对当前故事新增 obs：召回 top-k → LLM 五分类 → MATCH/EXTEND 直写 → 生成 occurrences。"""
+    """对当前故事新增 obs：召回 top-k → LLM 五分类 → 生成 occurrences。"""
     observations = state.get("observations", [])
     if not observations:
         return {
@@ -128,52 +179,10 @@ def matcher_node(state: dict) -> dict:
             "messages": [{"role": "system", "content": "[Matcher] 无 observations，跳过"}],
         }
 
-    from Agent.app import get_bank
+    from FunctionExtract_Agent.app import get_bank
     bank = get_bank()
     funcs = get_active_store().load_all()
-    embedder = bank.embedder
-
-    if not funcs:
-        decisions = [
-            MatchDecision(obs_id=o.get("obs_id", ""), label="NOVEL", reason="函数库为空，无候选可匹配")
-            for o in observations
-        ]
-        candidates = [[] for _ in observations]
-        errors = []
-    else:
-        candidates = recall_candidates(observations, funcs, embedder)
-        cards = [{
-            "function_name": f["function_name"],
-            "definition": f.get("definition", ""),
-            "realization_patterns": f.get("realization_patterns", []),
-        } for f in funcs]
-        system = MATCHER_SYSTEM_PROMPT + "\n\n## 现有 Function 卡片\n" + json.dumps(cards, ensure_ascii=False, indent=1)
-        decisions, errors = [], []
-        for start in range(0, len(observations), MATCH_BATCH_SIZE):
-            batch = observations[start:start + MATCH_BATCH_SIZE]
-            user = "请对以下 Observations 做五分类判定：\n" + _build_batch_input(
-                batch, candidates[start:start + MATCH_BATCH_SIZE]
-            )
-            try:
-                result = chat_structured([
-                    {"role": "system", "content": system},
-                    {"role": "user", "content": user},
-                ], MatchResponse)
-                decisions.extend(result.decisions)
-            except Exception as e:
-                errors.append(f"batch@{start}: {e}")
-                decisions.extend(
-                    MatchDecision(obs_id=o.get("obs_id", ""), label="UNCERTAIN", reason=f"LLM 判定失败：{e}")
-                    for o in batch
-                )
-        # 按 obs_id 对齐（LLM 可能乱序/漏项），缺失项补 UNCERTAIN（送挑战池复检）
-        by_id = {d.obs_id: d for d in decisions if d.obs_id}
-        decisions = [
-            by_id.get(o.get("obs_id", "")) or MatchDecision(
-                obs_id=o.get("obs_id", ""), label="UNCERTAIN", reason="LLM 未返回该 obs 判定"
-            )
-            for o in observations
-        ]
+    decisions, candidates, errors = match_observations(observations, funcs, bank.embedder)
 
     # MATCH/EXTEND 证据进待应用区（不直写 Registry，由 Curator 统一应用 exemplars）
     match_pending = [

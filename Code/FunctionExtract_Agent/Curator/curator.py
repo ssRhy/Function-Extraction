@@ -14,14 +14,14 @@ import numpy as np
 from scipy.cluster.hierarchy import linkage, fcluster
 from scipy.spatial.distance import pdist
 
-from Agent.app import get_bank
-from Agent.Registry.registry import get_active_store
-from Agent.Matcher.matcher import _apply_evidence
-from Agent.Inducer.cluster import cluster_similar_pairs
-from Agent.Inducer.inducer import inducer_node
-from Agent.Evaluator import revise as rev
-from Agent.llm import chat_structured
-from Prompt.Abstract_merge_prompt import ABSTRACT_MERGE_SYSTEM_PROMPT, AbstractMergeResponse
+from FunctionExtract_Agent.app import get_bank
+from FunctionExtract_Agent.Registry.registry import append_version_event, get_active_store, _with_card_fields
+from FunctionExtract_Agent.Matcher.matcher import _apply_evidence
+from FunctionExtract_Agent.Inducer.cluster import cluster_similar_pairs
+from FunctionExtract_Agent.Inducer.inducer import inducer_node
+from FunctionExtract_Agent.Evaluator import revise as rev
+from FunctionExtract_Agent.llm import chat_structured
+from FunctionExtract_Agent.Prompt.Abstract_merge_prompt import ABSTRACT_MERGE_SYSTEM_PROMPT, AbstractMergeResponse
 
 # ---- 动作分门槛（可调）----
 ADD_MIN_NOVEL = 3            # 归纳新函数的最小 novel obs 数（另需跨故事 >= 2，文档 §9）
@@ -40,10 +40,8 @@ def _cosine(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b) / (na * nb))
 
 
-def _bump_version(func: dict, action: str) -> None:
-    vh = list(func.get("version_history", []))
-    vh.append({"version": len(vh) + 1, "action": action, "ts": time.strftime("%Y-%m-%dT%H:%M:%S")})
-    func["version_history"] = vh
+def _bump_version(func: dict, action: str, **payload) -> None:
+    append_version_event(func, action, **payload)
 
 
 def _plan_record(action, target, **extra):
@@ -181,7 +179,13 @@ def _full_merge_scan(funcs_by_name: dict, obs_by_id: dict, embedder, plan: list[
             plan.append(_plan_record("SKIP_SMALL_SAMPLE", "+".join(valid), reason=f"近义合并失败：{err}"))
             continue
         rev._recalc_confidence(merged, obs_by_id, embedder)
-        _bump_version(merged, "MERGE")
+        merged = _with_card_fields(merged)
+        source_ids = [funcs_by_name[m]["function_id"] for m in valid]
+        _bump_version(
+            merged, "MERGE",
+            source_function_ids=source_ids,
+            target_function_ids=[merged["function_id"]],
+        )
         for m in valid:
             consumed.add(m)
             del funcs_by_name[m]
@@ -220,7 +224,13 @@ def _revise_from_report(report: dict, store, bank, plan: list[dict]) -> bool:
                                      reason=f"合并失败：{err}"))
             continue
         rev._recalc_confidence(merged, obs_by_id, embedder)
-        _bump_version(merged, "MERGE")
+        merged = _with_card_fields(merged)
+        source_ids = [item["function_id"] for item in members]
+        _bump_version(
+            merged, "MERGE",
+            source_function_ids=source_ids,
+            target_function_ids=[merged["function_id"]],
+        )
         for m in members:
             consumed.add(m["function_name"])
             del by_name[m["function_name"]]
@@ -263,8 +273,15 @@ def _revise_from_report(report: dict, store, bank, plan: list[dict]) -> bool:
             if not kept:
                 plan.append(_plan_record("SKIP_SMALL_SAMPLE", name, reason="SPLIT 子函数均无匹配 obs"))
                 continue
+            kept = [_with_card_fields(sub) for sub in kept]
+            source_id = f["function_id"]
+            target_ids = [sub["function_id"] for sub in kept]
             for sub in kept:
-                _bump_version(sub, "SPLIT")
+                _bump_version(
+                    sub, "SPLIT",
+                    source_function_ids=[source_id],
+                    target_function_ids=target_ids,
+                )
                 by_name[sub["function_name"]] = sub
             del by_name[name]
             consumed.add(name)

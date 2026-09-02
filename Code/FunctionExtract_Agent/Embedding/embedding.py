@@ -94,7 +94,7 @@ class Embedder:
         for field, weight in OBS_FIELD_WEIGHTS:
             text = (obs or {}).get(field, "")
             if text and text.strip():
-                vecs.append(self.encode_single(text))
+                vecs.append(self.encode_cached([text])[0])
                 weights.append(weight)
         if not vecs:
             return np.zeros(self._dim)
@@ -106,7 +106,26 @@ class Embedder:
         """批量结构化编码（供 bank.add / evaluator 全量用）。"""
         if not observations:
             return np.zeros((0, self._dim))
-        return np.array([self.encode_observation(o) for o in observations])
+        fields = [
+            [(o or {}).get(field, "").strip() for field, _ in OBS_FIELD_WEIGHTS]
+            for o in observations
+        ]
+        texts = list(dict.fromkeys(text for row in fields for text in row if text))
+        self.encode_cached(texts)
+        result = []
+        for row in fields:
+            vecs, weights = [], []
+            for text, (_, weight) in zip(row, OBS_FIELD_WEIGHTS):
+                if text:
+                    vecs.append(self._text_cache[text])
+                    weights.append(weight)
+            if not vecs:
+                result.append(np.zeros(self._dim))
+                continue
+            pooled = np.average(np.array(vecs), axis=0, weights=np.array(weights))
+            norm = np.linalg.norm(pooled)
+            result.append(pooled / norm if norm > 0 else pooled)
+        return np.array(result)
 
     def encode_cached(self, texts) -> np.ndarray:
         """批量 encode，命中 self._text_cache 的文本直接复用（函数定义等固定文本）。

@@ -6,8 +6,8 @@ LangGraph 范式
 from typing import TypedDict
 from pydantic import BaseModel, Field
 
-from Agent.llm import chat_structured
-from Prompt.Observer_prompt import OBSERVATION_SYSTEM_PROMPT
+from FunctionExtract_Agent.llm import chat_structured
+from FunctionExtract_Agent.Prompt.Observer_prompt import OBSERVATION_SYSTEM_PROMPT
 from Contracts.versioning import observation_id, observation_version_id
 
 
@@ -51,7 +51,7 @@ class NarrativeObservation(TypedDict):
 # ============================================================
 # 从 pre_processor 导入统一 State
 # ============================================================
-from Agent.state import NarrativePipelineState
+from FunctionExtract_Agent.state import NarrativePipelineState
 
 
 def observer_node(state: NarrativePipelineState) -> NarrativePipelineState:

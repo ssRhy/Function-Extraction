@@ -3,10 +3,10 @@
 import sys, os, json, tempfile
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from Agent.Evaluator import dimensions as dim
-from Agent.Evaluator.evaluator import evaluator_node
-from Agent.Evaluator import evaluator as ev_module
-from Prompt.Evaluator_prompt import EvaluatorReviewResponse, FunctionQualityReview
+from FunctionExtract_Agent.Evaluator import dimensions as dim
+from FunctionExtract_Agent.Evaluator.evaluator import evaluator_node
+from FunctionExtract_Agent.Evaluator import evaluator as ev_module
+from FunctionExtract_Agent.Prompt.Evaluator_prompt import EvaluatorReviewResponse, FunctionQualityReview
 
 _embedder = None
 
@@ -14,7 +14,7 @@ _embedder = None
 def get_embedder():
     global _embedder
     if _embedder is None:
-        from Embedding.embedding import Embedder
+        from FunctionExtract_Agent.Embedding.embedding import Embedder
         _embedder = Embedder()
     return _embedder
 

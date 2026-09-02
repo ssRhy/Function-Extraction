@@ -5,7 +5,7 @@ from itertools import combinations
 
 import numpy as np
 
-from Agent.Embedding.embedding import Embedder
+from FunctionExtract_Agent.Embedding.embedding import Embedder
 from .state import StoryPatternState
 
 

@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+import argparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -28,9 +29,9 @@ def _invoke(graph, payload):
     raise last_error
 
 
-def _new_outline(graph, genre, pattern, out_dir):
+def _new_outline(graph, genre, pattern, out_dir, snapshot_id):
     return _invoke(graph, {
-        "snapshot_id": outline_app.DEFAULT_SNAPSHOT_ID,
+        "snapshot_id": snapshot_id,
         "knowledge_db": str(outline_app.DEFAULT_DB_PATH),
         "genre": outline_app.normalize_genre(genre),
         "out_dir": out_dir,
@@ -67,6 +68,9 @@ def _story_payload(outline_id, out_dir):
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--snapshot-id", required=True)
+    snapshot_id = parser.parse_args().snapshot_id
     timestamp = time.strftime("%Y%m%dT%H%M%S")
     batch = f"stability_{timestamp}"
     root = os.path.join(story_app._DATA, "story_stability", batch)
@@ -75,7 +79,7 @@ def main():
     os.makedirs(outline_dir, exist_ok=True)
     os.makedirs(story_dir, exist_ok=True)
 
-    catalog = outline_app.load_catalog()
+    catalog = outline_app.load_catalog(snapshot_id)
     outline_graph = outline_app._build_graph()
     story_graph = story_app._build_graph()
     outlines = []
@@ -93,7 +97,9 @@ def main():
                 "pattern_name": pattern["pattern_name"],
             }
             try:
-                state = _new_outline(outline_graph, genre, pattern["pattern_name"], outline_dir)
+                state = _new_outline(
+                    outline_graph, genre, pattern["pattern_name"], outline_dir, snapshot_id,
+                )
             except Exception as exc:
                 outline_item.update({"status": "error", "error": str(exc)})
                 outlines.append(outline_item)
@@ -176,7 +182,7 @@ def main():
 
     report = {
         "batch": batch,
-        "snapshot_id": outline_app.DEFAULT_SNAPSHOT_ID,
+        "snapshot_id": snapshot_id,
         "protocol": (
             f"{len(GENRES)} genres × {PATTERNS_PER_GENRE} outlines per genre "
             f"× {STORIES_PER_OUTLINE} story samples per outline"

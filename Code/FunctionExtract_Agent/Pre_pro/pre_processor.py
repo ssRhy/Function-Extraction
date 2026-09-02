@@ -13,9 +13,9 @@ import hashlib
 from datetime import datetime
 from pydantic import BaseModel, Field
 
-from Agent.state import NarrativePipelineState
-from Agent.llm import chat_structured
-from Prompt.Pre_prompt import PRE_HYBRID_SYSTEM_PROMPT
+from FunctionExtract_Agent.state import NarrativePipelineState
+from FunctionExtract_Agent.llm import chat_structured
+from FunctionExtract_Agent.Prompt.Pre_prompt import PRE_HYBRID_SYSTEM_PROMPT
 from Contracts.versioning import story_version_id
 
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[。！？])")

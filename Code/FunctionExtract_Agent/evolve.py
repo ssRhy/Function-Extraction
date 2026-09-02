@@ -1,13 +1,13 @@
-"""Evolve App - evolve_app 单图 + CLI（python -m Agent.evolve）
+"""Evolve App - evolve_app 单图 + CLI（python -m FunctionExtract_Agent.evolve）
 
 新文本目录 → 复用 story_loader/preprocessor/observer/bank_adder 提取并写入 Bank
 → Matcher（top-k 召回 + LLM 五分类）→ MATCH/EXTEND 直写 Registry exemplars、
 NOVEL→novelty_pool、CONFLICT/UNCERTAIN→challenge_pool → FunctionOccurrence + 匹配报告。
 
 用法:
-    python -m Agent.evolve --corpus <新文本目录>
-    python -m Agent.evolve --corpus <dir> --namespace smoke --out-dir data/evolve_smoke
-    python -m Agent.evolve --corpus <dir> --stories "a.txt,b.txt" --limit 5
+    python -m FunctionExtract_Agent.evolve --corpus <新文本目录>
+    python -m FunctionExtract_Agent.evolve --corpus <dir> --namespace smoke --out-dir data/evolve_smoke
+    python -m FunctionExtract_Agent.evolve --corpus <dir> --stories "a.txt,b.txt" --limit 5
 """
 
 import argparse
@@ -21,26 +21,27 @@ from collections import Counter
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_OUT_DIR = os.path.join(_ROOT, "data", "evolve")
 MID_OBS_THRESHOLD = 20  # 累计处理多少个新 obs 触发一次 Evaluator_mid 周期体检（滚动重置）
+RETRO_SIM_THRESHOLD = 0.60  # 只有与本轮变化 Function 高相似的旧未决 obs 才回看
 _VENDOR = os.path.join(_ROOT, "vendor")
 if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
     sys.path.insert(0, _VENDOR)
 
 from langgraph.graph import StateGraph, START, END
 
-from Agent.state import NarrativePipelineState
-from Agent.app import story_loader_node, natural_key, get_bank, set_bank
-from Bank.bank import ScopedObservationBank
-from Agent.Pre_pro.pre_processor import preprocessor_node
-from Agent.Observer.observer import observer_node
-from Agent.Matcher import matcher as matcher_module
-from Agent.Matcher.matcher import matcher_node
-from Agent.Registry.registry import RegistryStore, set_active_store, get_active_store
-from Agent.Evaluator.evaluator import evaluator_node
-from Agent.Critic.critic import critic_node
-from Agent.Curator.curator import curator_node
-from Agent.Contract.contract import build_function_contracts
+from FunctionExtract_Agent.state import NarrativePipelineState
+from FunctionExtract_Agent.app import story_loader_node, natural_key, get_bank, set_bank
+from FunctionExtract_Agent.Bank.bank import ScopedObservationBank
+from FunctionExtract_Agent.Pre_pro.pre_processor import preprocessor_node
+from FunctionExtract_Agent.Observer.observer import observer_node
+from FunctionExtract_Agent.Matcher import matcher as matcher_module
+from FunctionExtract_Agent.Matcher.matcher import matcher_node
+from FunctionExtract_Agent.Registry.registry import RegistryStore, set_active_store, get_active_store
+from FunctionExtract_Agent.Evaluator.evaluator import evaluator_node
+from FunctionExtract_Agent.Critic.critic import critic_node
+from FunctionExtract_Agent.Curator.curator import curator_node, _bump_version
+from FunctionExtract_Agent.Contract.contract import build_function_contracts
 from Contracts.snapshot import DEFAULT_SNAPSHOT_ROOT, publish_snapshot
-from Contracts.occurrence import align_occurrences
+from Contracts.occurrence import align_occurrences, assignment_metrics
 from KnowledgeBase import DEFAULT_DB_PATH, StoryKnowledgeStore
 
 
@@ -241,6 +242,98 @@ def report_node(state: NarrativePipelineState) -> dict:
     return {"match_report": report}
 
 
+def rematch_unresolved_node(state: dict) -> dict:
+    """新 Function 只回看父 Snapshot 中仍未解决的 Observation。"""
+    empty = {
+        "changed_functions": 0,
+        "parent_unresolved": 0,
+        "candidates": 0,
+        "rematched": 0,
+        "newly_matched": 0,
+        "errors": 0,
+    }
+    base_snapshot_id = state.get("base_snapshot_id")
+    knowledge_db = state.get("knowledge_db")
+    if not base_snapshot_id or not knowledge_db:
+        return {"retro_match_report": empty}
+
+    changed_actions = {"ADD_FUNCTION", "REVISE", "SPLIT", "MERGE"}
+    changed_names = set()
+    for item in state.get("curator_plan", []):
+        if item.get("action") not in changed_actions:
+            continue
+        if item.get("target"):
+            changed_names.add(item["target"])
+        changed_names.update(item.get("split_into") or [])
+    if not changed_names:
+        return {"retro_match_report": empty}
+
+    knowledge = StoryKnowledgeStore(knowledge_db)
+    parent_occurrences = knowledge.load_occurrences(base_snapshot_id)
+    bank = get_bank()
+    unresolved = [
+        bank.get(occurrence.get("obs_id"))
+        for occurrence in parent_occurrences
+        if occurrence.get("status") in {"UNCERTAIN", "OTHER"}
+    ]
+    unresolved = [observation for observation in unresolved if observation]
+    funcs = get_active_store().load_all()
+    changed_names &= {function["function_name"] for function in funcs}
+    if not changed_names:
+        return {"retro_match_report": empty}
+    candidates = matcher_module.recall_candidates(unresolved, funcs, bank.embedder)
+    selected = [
+        (observation, candidate)
+        for observation, candidate in zip(unresolved, candidates)
+        if any(
+            item.get("function_name") in changed_names
+            and item.get("similarity", 0) >= RETRO_SIM_THRESHOLD
+            for item in candidate
+        )
+    ]
+    selected_observations = [item[0] for item in selected]
+    selected_candidates = [item[1] for item in selected]
+    decisions, _unused, errors = matcher_module.match_observations(
+        selected_observations, funcs, bank.embedder, candidates=selected_candidates,
+    )
+
+    func_map = {function["function_name"]: dict(function) for function in funcs}
+    matched = [
+        (decision.matched_function, observation)
+        for observation, decision in zip(selected_observations, decisions)
+        if decision.label in {"MATCH", "EXTEND"}
+        and decision.matched_function in func_map
+    ]
+    applied = matcher_module._apply_evidence(func_map, matched, bank)
+    for name in set(applied):
+        _bump_version(func_map[name], "RETRO_MATCH")
+    if applied:
+        get_active_store().replace_all(list(func_map.values()))
+
+    report = {
+        "changed_functions": len(changed_names),
+        "parent_unresolved": len(unresolved),
+        "candidates": len(selected_observations),
+        "rematched": len(decisions),
+        "newly_matched": len(applied),
+        "errors": len(errors),
+    }
+    print(f"  [RetroMatch] 旧未决 {report['parent_unresolved']} → 高相似候选 {report['candidates']}，"
+          f"重新匹配 {report['rematched']}，新增归属 {report['newly_matched']}")
+
+    report_path = os.path.join(state.get("out_dir", DEFAULT_OUT_DIR), "match_report.json")
+    if os.path.exists(report_path):
+        with open(report_path, "r", encoding="utf-8") as f:
+            match_report = json.load(f)
+        match_report["retro_match"] = report
+        with open(report_path, "w", encoding="utf-8") as f:
+            json.dump(match_report, f, ensure_ascii=False, indent=2)
+    return {
+        "retro_match_report": report,
+        "messages": [{"role": "system", "content": f"[RetroMatch] 新增归属 {len(applied)} 条"}],
+    }
+
+
 def _load_jsonl(path: str) -> list[dict]:
     if not os.path.exists(path):
         return []
@@ -319,7 +412,6 @@ def evaluator_final_node(state: dict) -> dict:
     c = comparison
     print(f"  comparison: 基线 {c['baseline_count']} → 最终 {c['final_count']} "
           f"（新增 {len(c['added'])} / 移除 {len(c['removed'])} / 保留 {len(c['kept'])}）")
-    print(f"  Final Report → {report_path}")
 
     mr_path = os.path.join(out_dir, "match_report.json")
     if os.path.exists(mr_path):
@@ -336,6 +428,13 @@ def evaluator_final_node(state: dict) -> dict:
 
     observations = bank.get_all()
     final_occurrences = align_occurrences(final_funcs, observations)
+    final_report["assignment"] = assignment_metrics(final_occurrences)
+    with open(report_path, "w", encoding="utf-8") as f:
+        json.dump(final_report, f, ensure_ascii=False, indent=2)
+    a = final_report["assignment"]
+    print(f"  assignment: MATCHED={a['matched']}/{a['total']} "
+          f"({a['assignment_coverage']:.3f}), UNCERTAIN={a['uncertain_rate']:.3f}, OTHER={a['other_rate']:.3f}")
+    print(f"  Final Report → {report_path}")
     _write_jsonl(os.path.join(out_dir, "occurrences_final.jsonl"), final_occurrences)
     function_contracts = []
     if final_report.get("verdict") == "PASS":
@@ -373,6 +472,15 @@ def evaluator_final_node(state: dict) -> dict:
         "occurrences": final_occurrences,
         "function_contracts": function_contracts,
         "ontology_snapshot": snapshot_path,
+        "run_result": {
+            "run_id": run_id,
+            "status": "PASS" if snapshot_path else "FAIL",
+            "workflow": "evolve",
+            "namespace": ns,
+            "snapshot_id": os.path.basename(snapshot_path) if snapshot_path else None,
+            "parent_snapshot_id": state.get("base_snapshot_id"),
+            "report": final_report,
+        },
         "messages": [{"role": "system", "content": f"[Evaluator_final] {final_report['verdict']}（{len(final_report['passed_dimensions'])}/6）"}],
     }
 
@@ -390,6 +498,7 @@ def _build_evolve_graph() -> StateGraph:
     graph.add_node("evaluator_mid", evaluator_mid_node)
     graph.add_node("report", report_node)
     graph.add_node("curator", curator_node)
+    graph.add_node("rematch_unresolved", rematch_unresolved_node)
     graph.add_node("evaluator_final", evaluator_final_node)
 
     graph.add_edge(START, "story_loader")
@@ -410,7 +519,8 @@ def _build_evolve_graph() -> StateGraph:
     )
     graph.add_edge("evaluator_mid", "story_loader")
     graph.add_edge("report", "curator")
-    graph.add_edge("curator", "evaluator_final")
+    graph.add_edge("curator", "rematch_unresolved")
+    graph.add_edge("rematch_unresolved", "evaluator_final")
     graph.add_edge("evaluator_final", END)
     return graph
 
@@ -424,6 +534,7 @@ def main() -> None:
                         help="基础 Snapshot ID；缺省读取统一库最新正式 Snapshot")
     parser.add_argument("--knowledge-db", type=str, default=str(DEFAULT_DB_PATH))
     parser.add_argument("--out-dir", type=str, default=None, help="输出目录（缺省 data/evolve）")
+    parser.add_argument("--snapshot-root", type=str, default=str(DEFAULT_SNAPSHOT_ROOT))
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 个故事")
     parser.add_argument("--stories", type=str, default=None, help="仅处理指定文件（逗号分隔，优先于 --limit）")
     parser.add_argument("--batch-size", type=int, default=matcher_module.MATCH_BATCH_SIZE, help="Matcher 每批 obs 数")
@@ -500,12 +611,13 @@ def main() -> None:
         "match_occurrences": [],
         "occurrences": [],
         "match_report": None,
+        "retro_match_report": None,
         "obs_since_eval": 0,
         "mid_reports": [],
         "pending_evidence": [],
         "match_pending": [],
         "curator_plan": [],
-        "snapshot_root": DEFAULT_SNAPSHOT_ROOT,
+        "snapshot_root": args.snapshot_root,
         "function_contracts": [],
         "ontology_snapshot": None,
         "knowledge_db": args.knowledge_db,
@@ -527,7 +639,7 @@ def main() -> None:
     start_time = time.time()
     try:
         result = app.invoke(initial)
-    except Exception as exc:
+    except BaseException as exc:
         knowledge.fail_function_run(run_id, {"error": str(exc)})
         raise
     elapsed = time.time() - start_time
@@ -535,8 +647,12 @@ def main() -> None:
     print(f"\n=== Evolve 完成: {elapsed:.1f}s ({elapsed / max(total, 1):.1f}s/篇) ===")
     print(f"  最终: {total} 篇 / {report.get('total_obs', 0)} obs / "
           f"coverage={report.get('coverage')} / novelty_rate={report.get('novelty_rate')}")
+    retro = result.get("retro_match_report") or {}
+    if retro.get("rematched"):
+        print(f"  RetroMatch: 回看 {retro['rematched']} 条，新增归属 {retro['newly_matched']} 条")
     if result.get("errors"):
         print(f"  失败记录 {len(result['errors'])} 条（不中断）")
+    print(json.dumps({"run_result": result.get("run_result")}, ensure_ascii=False))
 
 
 if __name__ == "__main__":

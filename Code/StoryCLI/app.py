@@ -440,7 +440,7 @@ def _add_request_arguments(parser):
 
 
 def _add_outline_arguments(parser, required=False):
-    parser.add_argument("--snapshot-id", default=outline_app.DEFAULT_SNAPSHOT_ID)
+    parser.add_argument("--snapshot-id", required=True)
     parser.add_argument("--knowledge-db", default=str(KNOWLEDGE_DB))
     parser.add_argument("--genre", required=required)
     parser.add_argument("--count", type=int, required=required)

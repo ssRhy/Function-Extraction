@@ -1,5 +1,23 @@
 """将 Observation 对齐到最终 Function 集合。"""
 
+from collections import Counter
+
+
+def assignment_metrics(occurrences: list[dict]) -> dict:
+    """从正式 FunctionOccurrence 计算实际分配率。"""
+    counts = Counter(item.get("status") for item in occurrences)
+    total = len(occurrences)
+    ratio = lambda count: round(count / total, 4) if total else 0.0
+    return {
+        "total": total,
+        "matched": counts.get("MATCHED", 0),
+        "uncertain": counts.get("UNCERTAIN", 0),
+        "other": counts.get("OTHER", 0),
+        "assignment_coverage": ratio(counts.get("MATCHED", 0)),
+        "uncertain_rate": ratio(counts.get("UNCERTAIN", 0)),
+        "other_rate": ratio(counts.get("OTHER", 0)),
+    }
+
 
 def align_occurrences(
     functions: list[dict],

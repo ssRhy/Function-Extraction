@@ -6,9 +6,9 @@ match/extend → 归函数（进 pending_evidence）；novel → novelty_pool；
 
 import json
 
-from Agent.llm import chat_structured
-from Agent.Registry.registry import get_active_store
-from Prompt.Critic_prompt import CRITIC_SYSTEM_PROMPT, CriticResponse, CriticReview
+from FunctionExtract_Agent.llm import chat_structured
+from FunctionExtract_Agent.Registry.registry import get_active_store
+from FunctionExtract_Agent.Prompt.Critic_prompt import CRITIC_SYSTEM_PROMPT, CriticResponse, CriticReview
 
 CRITIC_BATCH_SIZE = 10
 

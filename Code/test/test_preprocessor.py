@@ -5,8 +5,8 @@ import os
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-import Agent.Pre_pro.pre_processor as pp
-from Agent.Pre_pro.pre_processor import (
+import FunctionExtract_Agent.Pre_pro.pre_processor as pp
+from FunctionExtract_Agent.Pre_pro.pre_processor import (
     _clean_lines,
     _join_paragraphs,
     _split_sentences,
@@ -92,7 +92,7 @@ def test_stable_story_id():
 
 
 def test_prompt_import():
-    from Prompt.Pre_prompt import PRE_HYBRID_SYSTEM_PROMPT
+    from FunctionExtract_Agent.Prompt.Pre_prompt import PRE_HYBRID_SYSTEM_PROMPT
     assert "merges" in PRE_HYBRID_SYSTEM_PROMPT and "splits" in PRE_HYBRID_SYSTEM_PROMPT
     print("Pre_prompt 混合提示词可导入: OK")
 

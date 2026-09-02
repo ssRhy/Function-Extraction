@@ -94,17 +94,29 @@ def test_build_story_sequences_orders_source_positions(tmp_path):
     assert result["current_sequence"][0]["order"] == 1
 
 
-def test_load_occurrences_rejects_story_without_records(tmp_path):
+def test_load_occurrences_keeps_story_without_records(tmp_path):
     db, manifest = _commit_snapshot(tmp_path, [_occurrence("s1_obs_001", [1])])
     state = _state(db, manifest["snapshot_id"], [])
     state["story_ids"] = ["s1", "s2"]
-    with pytest.raises(ValueError, match="缺少 FunctionOccurrence"):
-        sequences.load_occurrences_node(state)
+    result = sequences.load_occurrences_node(state)
+
+    assert result["occurrences_by_story"]["s2"] == []
 
 
 def test_build_story_sequences_requires_selected_story():
     with pytest.raises(ValueError, match="current_story_id"):
         sequences.build_story_sequences({"current_story_id": None})
+
+
+def test_build_story_sequences_keeps_empty_story_sequence():
+    result = sequences.build_story_sequences({
+        "current_story_id": "s1",
+        "occurrences_by_story": {"s1": []},
+        "story_sequences": {},
+    })
+
+    assert result["story_sequences"]["s1"] == []
+    assert result["current_sequence"] == []
 
 
 def _sequence_item(order, function_id="F_1", status="MATCHED", name="FUNCTION_A"):
@@ -207,13 +219,20 @@ def test_annotate_repetitions_preserves_raw_sequence_and_singletons():
     assert [run["repeat_count"] for run in result["current_structural_sequence"]] == [1, 1]
 
 
-@pytest.mark.parametrize("state, message", [
-    ({"current_story_id": None, "current_sequence": []}, "current_story_id"),
-    ({"current_story_id": "s1", "current_sequence": []}, "current_sequence"),
-])
-def test_annotate_repetitions_requires_current_sequence(state, message):
-    with pytest.raises(ValueError, match=message):
+def test_annotate_repetitions_requires_selected_story():
+    state = {"current_story_id": None, "current_sequence": []}
+    with pytest.raises(ValueError, match="current_story_id"):
         sequences.annotate_repetitions(state)
+
+
+def test_annotate_repetitions_keeps_empty_story_sequence():
+    result = sequences.annotate_repetitions({
+        "current_story_id": "s1",
+        "current_sequence": [],
+        "structural_sequences": {},
+    })
+
+    assert result["structural_sequences"]["s1"] == []
 
 
 def _run(order, function_id="F_1", name="FUNCTION_A", status="MATCHED", repeat_count=1):

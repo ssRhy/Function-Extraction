@@ -1,5 +1,5 @@
 """
-Bootstrap App - 唯一编译图 bootstrap_app + CLI 入口（python -m Agent.app）
+Bootstrap App - 唯一编译图 bootstrap_app + CLI 入口（python -m FunctionExtract_Agent）
 
 单图全流程：
   START → story_loader →[continue_extraction]→(preprocessor→observer→bank_adder→retrieval→pairs_collector→story_loader 循环)
@@ -10,12 +10,12 @@ Bootstrap App - 唯一编译图 bootstrap_app + CLI 入口（python -m Agent.app
 无 --resume 时 fresh（清空 Bank/Registry/checkpoint）；--resume 跳过清理、从同一 thread 续跑。
 
 用法:
-    python -m Agent.app                                        # 全量（缺省 clean 语料 120 篇）
-    python -m Agent.app --limit 5                              # 试跑前 5 篇
-    python -m Agent.app --stories "01_悬疑惊悚/a.txt,03_现代情感家庭/b.txt"
-    python -m Agent.app --no-revise                            # 仅评估，不进入修订闭环
-    python -m Agent.app --resume                               # 从 checkpoint 续跑（不清空）
-    python -m Agent.app --namespace o0 --out-dir data/o0       # 自定义命名空间/快照目录
+    python -m FunctionExtract_Agent                             # 全量（缺省 clean 语料 120 篇）
+    python -m FunctionExtract_Agent --limit 5                   # 试跑前 5 篇
+    python -m FunctionExtract_Agent --stories "01_悬疑惊悚/a.txt,03_现代情感家庭/b.txt"
+    python -m FunctionExtract_Agent --no-revise                 # 仅评估，不进入修订闭环
+    python -m FunctionExtract_Agent --resume                    # 从 checkpoint 续跑（不清空）
+    python -m FunctionExtract_Agent --namespace o0 --out-dir data/o0  # 自定义命名空间/快照目录
 """
 
 import argparse
@@ -26,6 +26,7 @@ import shutil
 import sqlite3
 import sys
 import time
+import uuid
 
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -36,23 +37,23 @@ if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-from Agent.state import NarrativePipelineState
-from Agent.Pre_pro.pre_processor import preprocessor_node
-from Agent.Observer.observer import observer_node
-from Agent.Inducer.cluster import cluster_similar_pairs, split_oversized
-from Agent.Inducer import inducer as inducer_module
-from Agent.Inducer.inducer import inducer_node
-from Agent.Evaluator.evaluator import evaluator_node
-from Agent.Evaluator import revise as revise_module
-from Agent.Evaluator.revise import revise_node
-from Agent.Evaluator.abstract_merge import abstract_merge
-from Agent.Contract.contract import build_function_contracts
-from Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
+from FunctionExtract_Agent.state import NarrativePipelineState
+from FunctionExtract_Agent.Pre_pro.pre_processor import preprocessor_node
+from FunctionExtract_Agent.Observer.observer import observer_node
+from FunctionExtract_Agent.Inducer.cluster import cluster_similar_pairs, split_oversized
+from FunctionExtract_Agent.Inducer import inducer as inducer_module
+from FunctionExtract_Agent.Inducer.inducer import inducer_node
+from FunctionExtract_Agent.Evaluator.evaluator import evaluator_node
+from FunctionExtract_Agent.Evaluator import revise as revise_module
+from FunctionExtract_Agent.Evaluator.revise import revise_node
+from FunctionExtract_Agent.Evaluator.abstract_merge import abstract_merge
+from FunctionExtract_Agent.Contract.contract import build_function_contracts
+from FunctionExtract_Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
 from Contracts.snapshot import DEFAULT_SNAPSHOT_ROOT, publish_snapshot
-from Contracts.occurrence import align_occurrences
+from Contracts.occurrence import align_occurrences, assignment_metrics
 from KnowledgeBase import DEFAULT_DB_PATH, StoryKnowledgeStore
-from Bank.bank import ObservationBank
-from Retrieval.retrieval import Retriever
+from FunctionExtract_Agent.Bank.bank import ObservationBank
+from FunctionExtract_Agent.Retrieval.retrieval import Retriever
 
 DEFAULT_CORPUS = "zhihu_story_subset_120_20260815_clean"
 CHECKPOINT_DIR = os.path.join(_ROOT, "data", "checkpoints")
@@ -76,6 +77,11 @@ def set_bank(bank) -> None:
 def bank_adder_node(state: NarrativePipelineState) -> dict:
     """将新提取的 Observations 存入 Bank"""
     observations = state.get("observations", [])
+    if state.get("run_id") and state.get("knowledge_db") and state.get("normalized_story"):
+        observations = StoryKnowledgeStore(state["knowledge_db"]).stage_story_observations(
+            state["run_id"], state["normalized_story"], state.get("story_config") or {},
+            observations, state.get("current_story_index", 0) + 1,
+        )
     if not observations:
         return {"added_obs_ids": [], "messages": [{"role": "system", "content": "[BankAdder] 无 observations，跳过"}]}
     added_ids = get_bank().add(observations)
@@ -107,6 +113,14 @@ def retrieval_node(state: NarrativePipelineState) -> dict:
             similar.append({"reference": obs, "retrieved": r.obs, "similarity": r.similarity})
 
     return {"similar_observations": similar, "messages": [{"role": "system", "content": f"[Retrieval] 新增 {len(new_observations)} 条，找到 {len(similar)} 个历史相似对"}]}
+
+
+def _pair_file(state: NarrativePipelineState) -> str:
+    """Bootstrap 的累计相似对工作文件；不进入 LangGraph checkpoint。"""
+    return os.path.join(
+        state.get("out_dir", "data/bootstrap"),
+        f"pairs_{state.get('namespace', 'bootstrap')}.jsonl",
+    )
 
 
 # ========== 阶段 1：逐篇提取（story 循环） ==========
@@ -165,19 +179,22 @@ def continue_extraction(state: NarrativePipelineState) -> str:
 
 
 def pairs_collector_node(state: NarrativePipelineState) -> dict:
-    """累计相似对（存 obs_id 三元组，避免 checkpoint 随全量 obs 膨胀）、打印逐篇摘要、推进 story 下标。"""
-    all_pairs = list(state.get("all_pairs", []))
-    all_pairs.extend({
+    """将相似对追加到工作文件，避免累计列表进入 checkpoint。"""
+    pairs = [{
         "ref_obs_id": p["reference"]["obs_id"],
         "ret_obs_id": p["retrieved"]["obs_id"],
         "similarity": p["similarity"],
-    } for p in state.get("similar_observations", []))
+    } for p in state.get("similar_observations", [])]
+    if pairs:
+        path = _pair_file(state)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write("".join(json.dumps(pair, ensure_ascii=False) + "\n" for pair in pairs))
     ns = state.get("normalized_story") or {}
     print(f"  → 句子={len(ns.get('sentences', []))}, obs={len(state.get('observations', []))}, "
           f"新增={len(state.get('added_obs_ids', []))}, "
           f"相似对={len(state.get('similar_observations', []))}, Function=0")
     return {
-        "all_pairs": all_pairs,
         "current_story_index": state.get("current_story_index", 0) + 1,
         "raw_text": None,
         "story_config": None,
@@ -194,17 +211,30 @@ def cluster_node(state: NarrativePipelineState) -> dict:
     """相似对聚类 → 拆超大分量 → 过滤 <2 故事分量。"""
     bank = get_bank()
     full_pairs = []
-    for pair in state.get("all_pairs", []):
-        ref = bank.get(pair["ref_obs_id"])
-        ret = bank.get(pair["ret_obs_id"])
-        if ref is not None and ret is not None:
-            full_pairs.append({"reference": ref, "retrieved": ret, "similarity": pair["similarity"]})
+    seen_pairs = set()
+    path = _pair_file(state)
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                pair = json.loads(line)
+                key = tuple(sorted((pair["ref_obs_id"], pair["ret_obs_id"])))
+                if key in seen_pairs:
+                    continue
+                seen_pairs.add(key)
+                ref = bank.get(pair["ref_obs_id"])
+                ret = bank.get(pair["ret_obs_id"])
+                if ref is not None and ret is not None:
+                    full_pairs.append({"reference": ref, "retrieved": ret, "similarity": pair["similarity"]})
     components = []
     for component in cluster_similar_pairs(full_pairs):
         for sub in split_oversized(component):
             stories = {p["reference"]["story_id"] for p in sub} | {p["retrieved"]["story_id"] for p in sub}
             if len(stories) >= 2:
-                components.append(sub)
+                components.append([{
+                    "ref_obs_id": p["reference"]["obs_id"],
+                    "ret_obs_id": p["retrieved"]["obs_id"],
+                    "similarity": p["similarity"],
+                } for p in sub])
     print(f"  相似对 {len(full_pairs)} 条 → {len(components)} 个可归纳分量（≥2 故事）")
     return {"induction_components": components, "induction_index": 0}
 
@@ -219,7 +249,12 @@ def continue_induction(state: NarrativePipelineState) -> str:
 def induce_step_node(state: NarrativePipelineState) -> dict:
     """对单个分量调用 inducer_node（复用现有归纳/算分/upsert），推进分量下标。"""
     idx = state.get("induction_index", 0)
-    sub = state["induction_components"][idx]
+    bank = get_bank()
+    sub = [{
+        "reference": bank.get(pair["ref_obs_id"]),
+        "retrieved": bank.get(pair["ret_obs_id"]),
+        "similarity": pair["similarity"],
+    } for pair in state["induction_components"][idx]]
     stories = {p["reference"]["story_id"] for p in sub} | {p["retrieved"]["story_id"] for p in sub}
     n_obs = len({p["reference"]["obs_id"] for p in sub} | {p["retrieved"]["obs_id"] for p in sub})
     print(f"\n[批后归纳] {n_obs} obs / {len(stories)} 故事 / {len(sub)} 对")
@@ -318,6 +353,8 @@ def export_node(state: NarrativePipelineState) -> dict:
     store = get_active_store()
     ns = state.get("namespace", "bootstrap")
     out_dir = state.get("out_dir", "data/bootstrap")
+    run_id = state.get("run_id")
+    knowledge = StoryKnowledgeStore(state["knowledge_db"]) if state.get("knowledge_db") else None
     funcs = store.load_all()
     discard_names = _discard_set(state.get("evaluation_report"), funcs)
     removed = [f for f in funcs if f.get("function_name") in discard_names]
@@ -333,8 +370,20 @@ def export_node(state: NarrativePipelineState) -> dict:
         print(f"  被舍弃函数已留档 → {dst_d}")
     if not survivors:
         print(f"=== 无达标函数，O_0 为空（命名空间 {ns} 已清空，未导出快照）===")
+        report = state.get("evaluation_report") or {}
+        if knowledge and run_id:
+            knowledge.fail_function_run(run_id, report)
         return {
             "discarded": True,
+            "run_result": {
+                "run_id": run_id,
+                "status": "FAIL",
+                "workflow": "bootstrap",
+                "namespace": ns,
+                "snapshot_id": None,
+                "parent_snapshot_id": None,
+                "report": report,
+            },
             "messages": [{"role": "system", "content": "[Finalize] 无达标函数，O_0 为空"}],
         }
     # 全量抽象归并：把同一结构作用的函数合并为更高层类别（1 次 LLM 调用）
@@ -370,6 +419,12 @@ def export_node(state: NarrativePipelineState) -> dict:
     final_result = evaluator_node(final_state)
     final_report = final_result.get("evaluation_report") or {}
     final_occurrences = align_occurrences(store.load_all(), get_bank().get_all())
+    final_report["assignment"] = assignment_metrics(final_occurrences)
+    with open(final_report_path, "w", encoding="utf-8") as f:
+        json.dump(final_report, f, ensure_ascii=False, indent=2)
+    a = final_report["assignment"]
+    print(f"  assignment: MATCHED={a['matched']}/{a['total']} "
+          f"({a['assignment_coverage']:.3f}), UNCERTAIN={a['uncertain_rate']:.3f}, OTHER={a['other_rate']:.3f}")
     with open(os.path.join(out_dir, "occurrences_final.jsonl"), "w", encoding="utf-8") as f:
         for occurrence in final_occurrences:
             f.write(json.dumps(occurrence, ensure_ascii=False) + "\n")
@@ -384,20 +439,16 @@ def export_node(state: NarrativePipelineState) -> dict:
         snapshots_root=state.get("snapshot_root") or DEFAULT_SNAPSHOT_ROOT,
         occurrences=final_occurrences,
         function_contracts=function_contracts,
+        run_id=run_id,
     )
     if snapshot_path:
         print(f"  OntologySnapshot → {snapshot_path}")
-        knowledge_db = state.get("knowledge_db")
-        if knowledge_db:
-            StoryKnowledgeStore(knowledge_db).record_function_run(
-                snapshot_path,
-                state["corpus_dir"],
-                state["story_files"],
-                state.get("story_meta") or {},
-                get_bank().get_all(),
-            )
-            print(f"  KnowledgeBase → {knowledge_db}")
+        if knowledge and run_id:
+            knowledge.commit_function_run(snapshot_path, run_id)
+            print(f"  KnowledgeBase → {state['knowledge_db']}")
     else:
+        if knowledge and run_id:
+            knowledge.fail_function_run(run_id, final_report)
         print("  最终终评未通过，不发布 OntologySnapshot")
     print(f"全部 {state.get('total_stories', 0)} 个故事处理完成")
     return {
@@ -406,6 +457,15 @@ def export_node(state: NarrativePipelineState) -> dict:
         "occurrences": final_occurrences,
         "function_contracts": function_contracts,
         "ontology_snapshot": snapshot_path,
+        "run_result": {
+            "run_id": run_id,
+            "status": "PASS" if snapshot_path else "FAIL",
+            "workflow": "bootstrap",
+            "namespace": ns,
+            "snapshot_id": os.path.basename(snapshot_path) if snapshot_path else None,
+            "parent_snapshot_id": None,
+            "report": final_report,
+        },
     }
 
 
@@ -478,7 +538,7 @@ def _new_app(namespace: str):
     return _build_bootstrap_graph().compile(checkpointer=_make_checkpointer(db_path))
 
 
-# ========== CLI（python -m Agent.app） ==========
+# ========== CLI（python -m FunctionExtract_Agent） ==========
 
 def natural_key(name: str):
     return [int(t) if t.isdigit() else t for t in re.split(r"(\d+)", name)]
@@ -502,6 +562,8 @@ def main() -> None:
     parser.add_argument("--corpus", type=str, default=None, help=f"语料目录（缺省 = 仓库下 {DEFAULT_CORPUS}）")
     parser.add_argument("--namespace", type=str, default="bootstrap", help="Registry 命名空间（缺省 bootstrap）")
     parser.add_argument("--out-dir", type=str, default=None, help="快照输出目录（缺省 data/bootstrap）")
+    parser.add_argument("--knowledge-db", type=str, default=str(DEFAULT_DB_PATH))
+    parser.add_argument("--snapshot-root", type=str, default=str(DEFAULT_SNAPSHOT_ROOT))
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 个故事（未指定 --stories 时生效）")
     parser.add_argument("--stories", type=str, default=None, help="仅处理指定文件（逗号分隔，相对语料路径），优先于 --limit")
     parser.add_argument("--no-revise", action="store_true", help="仅评估，不进入修订闭环")
@@ -552,6 +614,7 @@ def main() -> None:
 
     app = _new_app(args.namespace)
     thread_id = f"bootstrap-{args.namespace}"
+    out_dir = os.path.abspath(args.out_dir) if args.out_dir else os.path.join(_ROOT, "data", "bootstrap")
     if args.resume:
         if app.checkpointer.get_tuple({"configurable": {"thread_id": thread_id}}) is None:
             print(f"--resume：thread {thread_id} 无 checkpoint，请先运行完整流程（不带 --resume）。")
@@ -562,6 +625,10 @@ def main() -> None:
         bank.clear()
         registry_store.clear()
         app.checkpointer.delete_thread(thread_id)
+        app.checkpointer.conn.execute("VACUUM")
+        pair_path = _pair_file({"out_dir": out_dir, "namespace": args.namespace})
+        if os.path.exists(pair_path):
+            os.remove(pair_path)
         print(f"  清空 Registry 命名空间: {args.namespace}（DB: {registry_store.db_path}）")
         print(f"  Bank 已清空 (count={bank.count()})")
     print()
@@ -571,41 +638,55 @@ def main() -> None:
         evaluation_context["manifest_path"] = os.path.abspath(manifest_path)
 
     total = len(story_files)
+    knowledge = StoryKnowledgeStore(args.knowledge_db)
+    if args.resume:
+        run_id = app.get_state({"configurable": {"thread_id": thread_id}}).values.get("run_id")
+        run = knowledge.load_function_run(run_id) if run_id else None
+        if not run or run["status"] != "RUNNING":
+            print("--resume：checkpoint 不存在可恢复的 RUNNING Function Run，请重新开始 Bootstrap。")
+            sys.exit(1)
+    else:
+        run_id = "FR_" + uuid.uuid4().hex[:16]
+        knowledge.begin_function_run(run_id, "bootstrap", args.namespace, None, stories_dir)
     print(f"发现 {total} 个故事文件，开始批量处理...\n")
     start_time = time.time()
-    if args.resume:
-        result = app.invoke({"messages": []}, config={"configurable": {"thread_id": thread_id}})
-    else:
-        initial: NarrativePipelineState = {
-            "messages": [],
-            "raw_text": None,
-            "story_config": None,
-            "normalized_story": None,
-            "observations": [],
-            "added_obs_ids": [],
-            "similar_observations": [],
-            "induced_functions": [],
-            "evaluation_round": 0,
-            "current_story_index": 0,
-            "total_stories": total,
-            "story_files": story_files,
-            "corpus_dir": stories_dir,
-            "story_meta": story_meta,
-            "all_pairs": [],
-            "induction_components": [],
-            "induction_index": 0,
-            "errors": [],
-            "no_revise": args.no_revise,
-            "namespace": args.namespace,
-            "out_dir": os.path.abspath(args.out_dir) if args.out_dir else os.path.join(_ROOT, "data", "bootstrap"),
-            "snapshot_root": DEFAULT_SNAPSHOT_ROOT,
-            "function_contracts": [],
-            "ontology_snapshot": None,
-            "knowledge_db": str(DEFAULT_DB_PATH),
-            "base_snapshot_id": None,
-            "evaluation_context": evaluation_context,
-        }
-        result = app.invoke(initial, config={"configurable": {"thread_id": thread_id}})
+    try:
+        if args.resume:
+            result = app.invoke({"messages": []}, config={"configurable": {"thread_id": thread_id}})
+        else:
+            initial: NarrativePipelineState = {
+                "messages": [],
+                "raw_text": None,
+                "story_config": None,
+                "normalized_story": None,
+                "observations": [],
+                "added_obs_ids": [],
+                "similar_observations": [],
+                "induced_functions": [],
+                "evaluation_round": 0,
+                "current_story_index": 0,
+                "total_stories": total,
+                "story_files": story_files,
+                "corpus_dir": stories_dir,
+                "story_meta": story_meta,
+                "induction_components": [],
+                "induction_index": 0,
+                "errors": [],
+                "no_revise": args.no_revise,
+                "namespace": args.namespace,
+                "out_dir": out_dir,
+                "snapshot_root": args.snapshot_root,
+                "function_contracts": [],
+                "ontology_snapshot": None,
+                "knowledge_db": args.knowledge_db,
+                "base_snapshot_id": None,
+                "run_id": run_id,
+                "evaluation_context": evaluation_context,
+            }
+            result = app.invoke(initial, config={"configurable": {"thread_id": thread_id}})
+    except BaseException as exc:
+        knowledge.fail_function_run(run_id, {"error": str(exc) or type(exc).__name__})
+        raise
     elapsed = time.time() - start_time
 
     decision = result.get("evaluator_decision")
@@ -620,6 +701,7 @@ def main() -> None:
         print(f"修订动作: 合并 {len(rev.get('merged', []))} / 修订 {len(rev.get('revised', []))} "
               f"/ 拆分 {len(rev.get('split', []))} / 移除 {len(rev.get('removed', []))}（备份 {rev.get('backup', 'N/A')}）")
     print(f"=== 运行耗时: {elapsed:.1f} 秒 ({elapsed / max(total, 1):.1f} 秒/篇) ===")
+    print(json.dumps({"run_result": result.get("run_result")}, ensure_ascii=False))
     if result.get("discarded"):
         print("=== 无达标函数，O_0 为空，未导出快照 ===")
         sys.exit(1)

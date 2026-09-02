@@ -185,9 +185,11 @@ def test_main_accepts_short_outline_command(monkeypatch):
 
     monkeypatch.setattr(app, "batch_outlines", fake_batch)
 
-    assert app.main(["outline", "--genre", "现代情感", "--count", "3"]) == 0
+    assert app.main([
+        "outline", "--genre", "现代情感", "--count", "3", "--snapshot-id", "snapshot_x",
+    ]) == 0
     assert calls == [(
-        app.outline_app.DEFAULT_SNAPSHOT_ID,
+        "snapshot_x",
         "现代情感",
         3,
         None,

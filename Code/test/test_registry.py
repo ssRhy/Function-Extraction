@@ -2,7 +2,7 @@
 import sys, os, json
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from Agent.Registry.registry import RegistryStore
+from FunctionExtract_Agent.Registry.registry import RegistryStore
 
 
 def _func(name="F_A", definition="测试定义", **extra):

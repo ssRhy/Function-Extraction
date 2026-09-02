@@ -2,7 +2,7 @@
 
 import json
 
-from Agent.llm import chat_structured
+from FunctionExtract_Agent.llm import chat_structured
 from .Prompt.Review_prompt import MotifPairReview, REVIEW_SYSTEM_PROMPT
 from .state import StoryPatternState
 

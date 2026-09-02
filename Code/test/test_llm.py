@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from pydantic import BaseModel
 
-import Agent.llm as llm
+import FunctionExtract_Agent.llm as llm
 
 
 class _Item(BaseModel):

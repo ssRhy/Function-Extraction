@@ -12,13 +12,13 @@ registry_file / bank_file / manifest_path / report_path 覆盖默认路径，便
 import json
 import os
 
-from Agent.llm import chat_structured
-from Agent.Registry.registry import get_active_store
-from Agent.Evaluator.dimensions import (
+from FunctionExtract_Agent.llm import chat_structured
+from FunctionExtract_Agent.Registry.registry import get_active_store
+from FunctionExtract_Agent.Evaluator.dimensions import (
     evaluate_function_set,
     detect_bidirectional_conflation,
 )
-from Prompt.Evaluator_prompt import (
+from FunctionExtract_Agent.Prompt.Evaluator_prompt import (
     EVALUATOR_SYSTEM_PROMPT,
     EvaluatorReviewResponse,
 )
@@ -53,7 +53,7 @@ def _load_obs(bank_file: str | None) -> list[dict]:
                 if line:
                     obs.append(json.loads(line))
         return obs
-    from Agent.app import get_bank
+    from FunctionExtract_Agent.app import get_bank
     return get_bank().get_all()
 
 
@@ -198,10 +198,10 @@ def evaluator_node(state: dict) -> dict:
         }
 
     if context.get("bank_file"):
-        from Embedding.embedding import Embedder
+        from FunctionExtract_Agent.Embedding.embedding import Embedder
         embedder = Embedder()
     else:
-        from Agent.app import get_bank
+        from FunctionExtract_Agent.app import get_bank
         embedder = get_bank().embedder
 
     story_to_category = _load_story_category_map(context.get("manifest_path"))

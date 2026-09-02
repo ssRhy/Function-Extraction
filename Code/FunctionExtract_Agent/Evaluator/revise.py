@@ -11,13 +11,13 @@ import shutil
 import time
 import types
 
-from Agent.llm import chat_structured
-from Agent.Inducer.confidence import calculate_confidence_detailed
-from Agent.Registry.registry import get_active_store
-from Agent.Evaluator import evaluator as ev
-from Agent.Evaluator.dimensions import _cosine
-from Prompt.Merge_prompt import MERGE_SYSTEM_PROMPT, MergeResponse
-from Prompt.Revise_prompt import REVISE_SYSTEM_PROMPT, ReviseResponse
+from FunctionExtract_Agent.llm import chat_structured
+from FunctionExtract_Agent.Inducer.confidence import calculate_confidence_detailed
+from FunctionExtract_Agent.Registry.registry import append_version_event, get_active_store, _with_card_fields
+from FunctionExtract_Agent.Evaluator import evaluator as ev
+from FunctionExtract_Agent.Evaluator.dimensions import _cosine
+from FunctionExtract_Agent.Prompt.Merge_prompt import MERGE_SYSTEM_PROMPT, MergeResponse
+from FunctionExtract_Agent.Prompt.Revise_prompt import REVISE_SYSTEM_PROMPT, ReviseResponse
 
 MAX_EVAL_ROUNDS = 3        # 最大修订轮数
 SPLIT_OBS_MIN_SIM = 0.40   # SPLIT 分配：obs 与子函数定义余弦低于该值不归属任何子函数
@@ -211,15 +211,15 @@ def revise_node(state: dict) -> dict:
     bank_file = context.get("bank_file")
     report_path = context.get("report_path") or ev._DEFAULT_REPORT_PATH
 
-    functions = ev._load_functions(context.get("registry_file"))
+    functions = [_with_card_fields(f) for f in ev._load_functions(context.get("registry_file"))]
     all_obs = ev._load_obs(bank_file)
     obs_by_id = {o.get("obs_id"): o for o in all_obs}
 
     if bank_file:
-        from Embedding.embedding import Embedder
+        from FunctionExtract_Agent.Embedding.embedding import Embedder
         embedder = Embedder()
     else:
-        from Agent.app import get_bank
+        from FunctionExtract_Agent.app import get_bank
         embedder = get_bank().embedder
 
     report = _load_report(report_path)
@@ -265,7 +265,11 @@ def revise_node(state: dict) -> dict:
         names = [m.get("function_name") for m in members]
         consumed.update(names)
         changed_names.add(merged.get("function_name"))
-        actions["merged"].append({"group": names, "merged_as": merged.get("function_name")})
+        actions["merged"].append({
+            "group": names,
+            "merged_as": merged.get("function_name"),
+            "source_function_ids": [m["function_id"] for m in members],
+        })
 
     # 2) 定义 REVISE / SPLIT（跳过已合并/已移除函数）
     for name, reasons in targets.items():
@@ -301,6 +305,7 @@ def revise_node(state: dict) -> dict:
             actions["split"].append({
                 "function_name": name,
                 "split_into": [f.get("function_name") for f in kept],
+                "source_function_ids": [func["function_id"]],
                 "dropped_obs": dropped,
             })
         consumed.add(name)
@@ -346,6 +351,27 @@ def revise_node(state: dict) -> dict:
         for r in actions["removed"]:
             r["function_name"] = renames.get(r["function_name"], r["function_name"])
         changed_names = {renames.get(n, n) for n in changed_names}
+
+    final_by_name = {f.get("function_name"): f for f in final}
+    for item in actions["merged"]:
+        target = final_by_name[item["merged_as"]]
+        target.update(_with_card_fields(target))
+        append_version_event(
+            target, "MERGE",
+            source_function_ids=item["source_function_ids"],
+            target_function_ids=[target["function_id"]],
+        )
+    for item in actions["split"]:
+        targets = [final_by_name[name] for name in item["split_into"] if name in final_by_name]
+        targets = [_with_card_fields(target) for target in targets]
+        target_ids = [target["function_id"] for target in targets]
+        for target in targets:
+            final_by_name[target["function_name"]].update(target)
+            append_version_event(
+                final_by_name[target["function_name"]], "SPLIT",
+                source_function_ids=item["source_function_ids"],
+                target_function_ids=target_ids,
+            )
     actions["recheck_removed"] = recheck
     actions["changed"] = sorted(changed_names)
     actions["before_count"] = len(functions)

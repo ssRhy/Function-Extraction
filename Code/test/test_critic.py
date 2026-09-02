@@ -5,10 +5,10 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from Agent.Critic import critic as cc
-from Agent.Critic.critic import critic_node
-from Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
-from Prompt.Critic_prompt import CriticResponse, CriticReview
+from FunctionExtract_Agent.Critic import critic as cc
+from FunctionExtract_Agent.Critic.critic import critic_node
+from FunctionExtract_Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
+from FunctionExtract_Agent.Prompt.Critic_prompt import CriticResponse, CriticReview
 
 
 def _occ(oid, label, matched="", candidates=None):

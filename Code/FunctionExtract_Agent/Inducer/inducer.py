@@ -6,15 +6,15 @@ Inducer Node - 从相似 Observations 归纳 Candidate Function
 
 from pydantic import AliasChoices, BaseModel, Field
 
-from Agent.llm import chat_structured
-from Agent.state import NarrativePipelineState
-from Agent.Inducer.confidence import (
+from FunctionExtract_Agent.llm import chat_structured
+from FunctionExtract_Agent.state import NarrativePipelineState
+from FunctionExtract_Agent.Inducer.confidence import (
     calculate_confidence_detailed,
     max_definition_similarity,
     NEAR_DUP_THRESHOLD,
 )
-from Agent.Registry.registry import get_active_store
-from Prompt.Inducer_prompt import INDUCER_SYSTEM_PROMPT
+from FunctionExtract_Agent.Registry.registry import get_active_store
+from FunctionExtract_Agent.Prompt.Inducer_prompt import INDUCER_SYSTEM_PROMPT
 
 
 # ========== Pydantic Schema ==========
@@ -37,7 +37,7 @@ class InducerResponse(BaseModel):
 
 # ========== Registry ==========
 
-# bootstrap 阶段豁免 confusable 软惩罚（Agent.app 启动时置为 False）
+# bootstrap 阶段豁免 confusable 软惩罚（FunctionExtract_Agent 启动时置为 False）
 APPLY_CONFUSABLE = True
 
 
@@ -138,7 +138,7 @@ def inducer_node(state: NarrativePipelineState) -> NarrativePipelineState:
     ], InducerResponse)
 
     # 1) 收集 + 算分
-    from Agent.app import get_bank
+    from FunctionExtract_Agent.app import get_bank
     bank = get_bank()
     scored = []
     for func in result.candidate_functions:

@@ -7,8 +7,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from Embedding.embedding import Embedder
-from Agent.Inducer.confidence import _compute_surface_diversity, calculate_confidence_detailed
+from FunctionExtract_Agent.Embedding.embedding import Embedder
+from FunctionExtract_Agent.Inducer.confidence import _compute_surface_diversity, calculate_confidence_detailed
 
 
 class _VecEmbedder:

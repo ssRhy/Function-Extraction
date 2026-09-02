@@ -2,7 +2,7 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from Agent.Inducer.cluster import (
+from FunctionExtract_Agent.Inducer.cluster import (
     cluster_similar_pairs,
     split_oversized,
     BATCH_EDGE_SIM,

@@ -1,6 +1,6 @@
 """最终 FunctionOccurrence 对齐测试。"""
 
-from Contracts.occurrence import align_occurrences
+from Contracts.occurrence import align_occurrences, assignment_metrics
 
 
 def _observation(obs_id: str) -> dict:
@@ -65,3 +65,22 @@ def test_multiple_final_supports_remain_uncertain():
 
     assert occurrence["status"] == "UNCERTAIN"
     assert occurrence["candidate_functions"] == ["A", "B"]
+
+
+def test_assignment_metrics_uses_final_occurrence_statuses():
+    result = assignment_metrics([
+        {"obs_id": "OBS_a1", "status": "MATCHED"},
+        {"obs_id": "OBS_b2", "status": "MATCHED"},
+        {"obs_id": "OBS_c3", "status": "UNCERTAIN"},
+        {"obs_id": "OBS_d4", "status": "OTHER"},
+    ])
+
+    assert result == {
+        "total": 4,
+        "matched": 2,
+        "uncertain": 1,
+        "other": 1,
+        "assignment_coverage": 0.5,
+        "uncertain_rate": 0.25,
+        "other_rate": 0.25,
+    }

@@ -2,6 +2,7 @@
 
 from copy import deepcopy
 from collections import Counter
+import os
 from pathlib import Path
 
 import pytest
@@ -166,9 +167,12 @@ def test_rejects_invalid_context_or_segment(mutate, message):
 
 def test_real_data_candidate_distribution():
     code_root = Path(__file__).resolve().parents[1]
+    snapshot_id = os.environ.get("FUNCTION_SNAPSHOT_ID")
+    if not snapshot_id:
+        pytest.skip("真实 Snapshot 测试需显式设置 FUNCTION_SNAPSHOT_ID")
     state = {
         "knowledge_db": str(code_root / "data/knowledge/story_knowledge.db"),
-        "snapshot_id": "evolve_250_20260822T063550401096Z_13b1bbda248f",
+        "snapshot_id": snapshot_id,
         "messages": [],
     }
     try:

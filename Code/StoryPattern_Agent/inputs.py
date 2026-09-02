@@ -93,9 +93,13 @@ def load_inputs(state: StoryPatternState) -> dict:
         source["observations"],
         all_metadata,
     )
+    observations_by_story = {
+        story_id: observations_by_story.get(story_id, [])
+        for story_id in manifest_order
+    }
     function_by_name, function_by_id = _function_indices(functions)
     function_contract_by_id = {item["function_id"]: item for item in contracts}
-    story_ids = [story_id for story_id in manifest_order if story_id in observations_by_story]
+    story_ids = manifest_order
     story_metadata = {story_id: all_metadata[story_id] for story_id in story_ids}
 
     return {

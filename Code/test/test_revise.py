@@ -5,11 +5,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import numpy as np
 
-from Agent.Evaluator import revise
-from Agent.Evaluator import evaluator as ev_module
-from Prompt.Merge_prompt import MergeResponse, MergedFunction
-from Prompt.Revise_prompt import ReviseResponse, RevisedFunction
-from Prompt.Evaluator_prompt import EvaluatorReviewResponse, FunctionQualityReview
+from FunctionExtract_Agent.Evaluator import revise
+from FunctionExtract_Agent.Evaluator import evaluator as ev_module
+from FunctionExtract_Agent.Prompt.Merge_prompt import MergeResponse, MergedFunction
+from FunctionExtract_Agent.Prompt.Revise_prompt import ReviseResponse, RevisedFunction
+from FunctionExtract_Agent.Prompt.Evaluator_prompt import EvaluatorReviewResponse, FunctionQualityReview
 
 
 # ---------- Fake Embedder（纯函数测试用） ----------
@@ -245,6 +245,19 @@ def test_revise_node_actions():
         assert any(n.startswith("D_") for n in names), names
         ff = next(w for w in written if w["function_name"] == "F_F")
         assert "f1" not in ff["supporting_obs_ids"], ff
+        from FunctionExtract_Agent.Registry.registry import _with_card_fields
+        split_source_id = next(
+            _with_card_fields(f)["function_id"] for f in funcs
+            if f["function_name"] == "F_D"
+        )
+        split_targets = [w for w in written if w["function_name"].startswith("D_")]
+        assert split_targets
+        for target in split_targets:
+            split_event = next(e for e in target["version_history"] if e["action"] == "SPLIT")
+            assert split_event["source_function_ids"] == [split_source_id]
+            assert set(split_event["target_function_ids"]) == {
+                w["function_id"] for w in split_targets
+            }
         assert os.path.exists(reg + ".pre_revise.jsonl")
         print("revise_node 全动作（合并/修订/拆分/剔除/移除/写回）: OK")
 
@@ -254,7 +267,7 @@ def test_revise_node_actions():
 def _compile_bootstrap():
     """编译 bootstrap_app（临时 in-memory SqliteSaver，无文件副作用）。"""
     import sqlite3
-    from Agent.app import _build_bootstrap_graph
+    from FunctionExtract_Agent.app import _build_bootstrap_graph
     from langgraph.checkpoint.sqlite import SqliteSaver
     saver = SqliteSaver(sqlite3.connect(":memory:", check_same_thread=False))
     saver.setup()
@@ -267,7 +280,7 @@ from contextlib import contextmanager
 @contextmanager
 def _noop_abstract_merge():
     """图/出口测试里 export_node 会调 abstract_merge（真实 LLM），置为原样返回。"""
-    from Agent import app as app_module
+    from FunctionExtract_Agent import app as app_module
     orig = app_module.abstract_merge
     app_module.abstract_merge = lambda funcs, bank: funcs
     try:
@@ -277,8 +290,8 @@ def _noop_abstract_merge():
 
 
 def test_curate_max_rounds():
-    from Agent.Registry import registry as reg_mod
-    from Agent.Registry.registry import RegistryStore, set_active_store
+    from FunctionExtract_Agent.Registry import registry as reg_mod
+    from FunctionExtract_Agent.Registry.registry import RegistryStore, set_active_store
     app = _compile_bootstrap()
     orig = revise.MAX_EVAL_ROUNDS
     revise.MAX_EVAL_ROUNDS = 2
@@ -317,8 +330,8 @@ def test_curate_max_rounds():
 
 def test_curate_merge_fail_removes_flagged():
     """merge 持续失败到 cap → export_node 逐函数舍弃：merge 组保留证据最多者，幸存者导出。"""
-    from Agent.Registry import registry as reg_mod
-    from Agent.Registry.registry import RegistryStore, set_active_store
+    from FunctionExtract_Agent.Registry import registry as reg_mod
+    from FunctionExtract_Agent.Registry.registry import RegistryStore, set_active_store
     app = _compile_bootstrap()
     obs, funcs = make_set()
     orig_rounds = revise.MAX_EVAL_ROUNDS
@@ -379,9 +392,9 @@ def test_curate_merge_fail_removes_flagged():
 
 def _export_with(report, funcs, tmp):
     """在临时活跃 store 上直调 export_node，返回 (result, store)。"""
-    from Agent.Registry import registry as reg_mod
-    from Agent.Registry.registry import RegistryStore, set_active_store
-    from Agent.app import export_node
+    from FunctionExtract_Agent.Registry import registry as reg_mod
+    from FunctionExtract_Agent.Registry.registry import RegistryStore, set_active_store
+    from FunctionExtract_Agent.app import export_node
     prev = reg_mod._active_store
     store = RegistryStore(db_path=os.path.join(tmp, "f.db"), namespace="test_ns")
     store.replace_all(funcs)

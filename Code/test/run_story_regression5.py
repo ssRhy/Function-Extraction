@@ -4,6 +4,7 @@ import json
 import os
 import sys
 import time
+import argparse
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -36,9 +37,9 @@ def _invoke(graph, payload):
     raise last_error
 
 
-def _new_outline(graph, genre, pattern, out_dir):
+def _new_outline(graph, genre, pattern, out_dir, snapshot_id):
     return _invoke(graph, {
-        "snapshot_id": outline_app.DEFAULT_SNAPSHOT_ID,
+        "snapshot_id": snapshot_id,
         "knowledge_db": str(outline_app.DEFAULT_DB_PATH),
         "genre": outline_app.normalize_genre(genre),
         "out_dir": out_dir,
@@ -90,7 +91,7 @@ def _duplicate_check(state):
     return duplicates
 
 
-def main():
+def main(snapshot_id):
     timestamp = time.strftime("%Y%m%dT%H%M%S")
     batch = f"regression_story5_{timestamp}"
     root = os.path.join(story_app._DATA, "story_regression_5", batch)
@@ -111,7 +112,7 @@ def main():
         sample_id = f"sample_{candidate_index:02d}"
         print(f"=== {sample_id} {genre} / {pattern}")
         try:
-            state = _new_outline(outline_graph, genre, pattern, outline_dir)
+            state = _new_outline(outline_graph, genre, pattern, outline_dir, snapshot_id)
         except Exception as exc:
             outline_results.append({
                 "sample_id": sample_id,
@@ -196,4 +197,6 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--snapshot-id", required=True)
+    main(parser.parse_args().snapshot_id)

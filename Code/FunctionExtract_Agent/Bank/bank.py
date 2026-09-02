@@ -8,7 +8,7 @@ import json
 from typing import Optional
 import chromadb
 
-from Embedding.embedding import Embedder
+from FunctionExtract_Agent.Embedding.embedding import Embedder
 
 
 def _observation_to_text(obs: dict) -> str:

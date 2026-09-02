@@ -16,15 +16,6 @@ from collections import Counter, defaultdict
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 
-_DEFAULT_SNAPSHOT = os.path.join(
-    os.path.dirname(__file__), "..", "data", "ontology_snapshots",
-    "evolve_250_20260822T063550401096Z_13b1bbda248f",
-)
-_DEFAULT_BANK = os.path.join(
-    os.path.dirname(__file__), "..", "data", "evolve_250", "bank_evolve_250.jsonl",
-)
-
-
 def _obs_index(occurrence: dict) -> tuple[int, int]:
     order = occurrence.get("observation_order")
     if isinstance(order, int) and order > 0:
@@ -103,8 +94,10 @@ def _load_bank(path: str) -> dict:
 
 
 def main() -> None:
-    snapshot_dir = sys.argv[1] if len(sys.argv) > 1 else _DEFAULT_SNAPSHOT
-    bank_path = sys.argv[2] if len(sys.argv) > 2 else _DEFAULT_BANK
+    if len(sys.argv) < 3:
+        raise SystemExit("用法：build_transition_index.py <snapshot_dir> <bank_file> [out_dir]")
+    snapshot_dir = sys.argv[1]
+    bank_path = sys.argv[2]
     out_dir = sys.argv[3] if len(sys.argv) > 3 else os.path.join(
         os.path.dirname(__file__), "..", "data", "transition_index",
         os.path.basename(snapshot_dir),
