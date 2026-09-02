@@ -1379,3 +1379,10 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Coordinator 的 Evolve 模式现在读取 `base_snapshot_id` 对应 Snapshot manifest，并将其 namespace 作为 Evolve Registry、Function Run 和子 Snapshot 的唯一 namespace；调用者传入的不一致值只作为提示，不再覆盖父 lineage。
 - Bootstrap 仍使用显式 namespace；不新增 namespace 映射表、Run 表或数据库边界。
 - 验证：新增父 Snapshot namespace 继承测试；全套测试 `307 passed, 1 skipped`，共享 Bank 已恢复为 80 行真实基线。
+
+## 本轮（2026-09-02）：真实 Coordinator 全流程复测
+
+- 使用真实 LLM、临时 KnowledgeDB 和 3 篇跨题材故事复测；即使命令传入错误 namespace，Coordinator 也自动继承父 Snapshot 的 `real_50_50_20260901`。
+- Evolve Run `FR_2e754a7cab6f4739` 成功，发布临时子 Snapshot `real_50_50_20260901_20260902T131330691437Z_ba37aa81a6ad`；Snapshot 为 104 篇故事、919 个 Observation、19 个 Function。
+- Pattern Run `PR_de14350298651dae` 在输入一致性检查处失败：`motif candidate Function ID/名称不一致: MC_47c799047da2d87e: F_E7DF0FDE`。该错误被标记为不可重试，Coordinator 正确停止，未完成 Pattern 发布。
+- 正式 KnowledgeDB 最新 Snapshot 仍未改变，Registry 备份恢复后一致；临时验证目录已移入回收站。

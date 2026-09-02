@@ -1067,3 +1067,9 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - 真实 Coordinator 验证发现，使用临时 namespace 会使 Evolve 子 Snapshot 与父 Snapshot namespace 不一致，Pattern 的已有 lineage 检查因此正确拒绝启动。
 - 这不是只针对测试的适配：Evolve 的 namespace 是 Snapshot lineage 的一部分，必须从 `base_snapshot_id` 的 manifest 继承；测试隔离应复制 KnowledgeDB，而不是改 namespace。
 - 最小修复是在 Coordinator 入口读取父 Snapshot manifest并覆盖 Evolve namespace，Bootstrap 继续接受显式 namespace；不放宽 Pattern 的父子一致性检查。
+
+## 157. namespace 修复后真实 Pattern 暴露 Function ID/名称错配（2026-09-02）
+
+- 真实 Coordinator 复测证明 namespace 继承已生效：错误的命令行 namespace 被替换为父 Snapshot namespace，Evolve 成功发布子 Snapshot。
+- Pattern 随后在 motif 输入一致性检查处失败，具体为 `MC_47c799047da2d87e` 携带的 Function ID `F_E7DF0FDE` 与当前 Function 名称映射不一致。这个问题位于 Evolve 产生的 Motif/Function 引用或 Pattern 输入校验，不是 Coordinator 路由问题。
+- 由于该失败不可安全自动推断，Coordinator 正确停止且不重试。下一步应追查 Motif candidate 的 ID/名称来源和 Function lineage 映射，不能用放宽校验或模糊匹配掩盖错配。
