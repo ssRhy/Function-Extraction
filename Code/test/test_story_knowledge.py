@@ -248,6 +248,27 @@ def test_outline_round_trip_is_idempotent(tmp_path):
     assert store.status()["counts"]["outlines"] == 1
 
 
+def test_record_outline_claims_pattern(tmp_path):
+    snapshot = _snapshot(tmp_path, _function())
+    corpus, meta, observations = _corpus(tmp_path)
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    _commit_function_snapshot(store, snapshot, corpus, meta, observations)
+    snapshot_id = os.path.basename(snapshot)
+    _insert_pattern(store, snapshot_id)
+    outline = {
+        "snapshot_id": snapshot_id, "pattern_id": "PAT_1", "pattern_name": "模式一",
+        "genre": "03_现代情感", "generated_at": "2026-08-30T10:00:00",
+        "validation": {"overall_ok": True}, "outline": {"segments": []},
+    }
+
+    outline_id = store.record_outline(outline, "# 大纲\n")
+    with store.connect() as conn:
+        usage = conn.execute(
+            "SELECT outline_id FROM pattern_usage WHERE pattern_id='PAT_1'"
+        ).fetchone()
+    assert usage["outline_id"] == outline_id
+
+
 def test_pattern_claim_is_global_and_idempotency_is_rejected(tmp_path):
     snapshot = _snapshot(tmp_path, _function())
     corpus, meta, observations = _corpus(tmp_path)

@@ -1450,3 +1450,128 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Pattern Run `PR_8c152aa766f1013b` SUCCESS：10 个 Published Pattern，3 个旧 Pattern 更新，未发生合并或阻断。模式仍高度集中于“揭示—威胁—反思/资源”组合，并出现跨题材支持，但重复骨架没有消失。
 - 各题材 assignment coverage 为：悬疑 `66.7%`、古风 `54.4%`、现代 `53.5%`、末世 `62.2%`、家庭职场 `58.7%`。整体仍处于约 59% 的低匹配区间，现代和古风较弱。
 - 本轮没有修改业务代码。当前结论：Pattern 重复和跨题材低匹配已具备多批次证据，下一阶段可以做最小诊断规则；仍不需要增加 Supervisor 或独立 Agent。
+
+## 本轮（2026-09-02）：Pattern → 故事 → Evolve 闭环验证
+
+- 选用当前 Published Pattern `PAT_a8ac650d2929a13f`（`Secret Alliance Under Threat`），在正式 KnowledgeDB 的只读副本上由 Pipeline 真实生成现代情感大纲和正文《裂痕》；大纲校验通过，正文 4322 字、4 个场景。
+- 生成故事通过 Evolve 分析：Function Run `FR_b1de90b70cfb49a4` PASS，12 个 Observation 全部 `MATCHED`，无 `UNCERTAIN`、`NOVEL` 或新增 Function；分析副本 Snapshot 为 `real_coordinator_rebuild_20260902_20260902T162759856082Z_2106c2178daf`。
+- 实际 Function 序列包含预期四个 Function，并保持“关系破裂 → 属性揭示 → 资源/支持 → 威胁”的相对顺序，但增加了重复威胁、联盟、资源获取和个人成长环节；说明 Pattern 是高层结构约束，不是固定脚本。
+- Evolve 最终仍为 `PASS 5/6`，`abstraction_quality=0.75`；再次指出 Alliance/Deal 和 Threat/逃离的语义混合。该结果强化了 Function 边界问题，但没有破坏生成—分析接口。
+- Pattern 在隔离副本中成功完成；验证报告位于 `Code/data/closed_loop_eval_20260902/closed_loop_report.md`。正式 53 篇故事的数据库和 Snapshot 链未改变。
+- 本轮没有修改业务代码；下一步先用另一个 Pattern 做一篇同样的生成验证，不马上调整 Function 或 Pattern 逻辑。
+
+## 本轮（2026-09-02）：第二篇 Pattern 生成—分析闭环验证
+
+- 选用不同的 Published Pattern `PAT_69e6fcd9443f7dc1`（`反思揭示与自立成长`），在正式 Snapshot 的第二个隔离副本中生成现实家庭职场故事《迟到的决定》；大纲校验通过，正文 4175 字、4 个场景。
+- Evolve Run `FR_472b5d06bdf1476e` PASS，5 个 Observation 全部 `MATCHED`，无 `UNCERTAIN`、`NOVEL` 或新增 Function；Pattern Run `PR_0551c30883279167` SUCCESS。
+- 预期链为 `INTERNAL_REFLECTION → HIDDEN_ATTR_REVELATION → PERSONAL_GROWTH_AND_REFORM → RESOURCE_OR_SUPPORT_ACQUISITION`，实际链为 `RELATIONSHIP_BREAKDOWN → HIDDEN_ATTR_REVELATION → HIDDEN_ATTR_REVELATION → STRATEGIC_ALLIANCE_OR_DEAL → PERSONAL_GROWTH_AND_REFORM`。
+- 目标 Function 只出现 2/4；这与第一篇 4/4 的结果不同，说明 Pattern 对生成有方向性影响，但目前不能稳定保持目标 Function 链。`MATCHED` 全部成功也不等于遵循 Pattern。
+- 本轮没有修改正式库或业务代码。第二篇验证报告位于 `Code/data/closed_loop_eval_20260902_b/closed_loop_report.md`。
+
+## 本轮（2026-09-02）：三种 Pattern 生成—分析批次验证
+
+- 选取三个结构不同的 Pattern，分别从正式 Snapshot `real_coordinator_rebuild_20260902_20260902T160122211213Z_8d96cbbc6312` 建立隔离副本，执行三篇真实生成和 Evolve；没有写入正式 KnowledgeDB。
+- `alliance`（现代情感）生成《代号L-7》：目标 Function 出现 `3/4`，Evolve Run `FR_469428f7a4af43ee` PASS，Pattern Run `PR_a23eee13f8fb7fe5` SUCCESS。
+- `crisis`（末世科幻）生成《守望新土》：目标 Function 出现 `4/5`，Evolve Run `FR_d50cf36c72774d2b` PASS，Pattern Run `PR_700267599aa00ba3` SUCCESS。
+- `breakup`（古风仙侠）生成《天衡遗鹤》：预期 Function 链只部分出现；Evolve Run `FR_2c4ad8e06ef84aab` 在发布前的 `RESOURCE_OR_SUPPORT_ACQUISITION` FunctionContract 校验处 FAILED，没有 Snapshot，也没有进入新的 Pattern。
+- 三篇均没有精确复现目标链；两篇成功样本保持了大部分目标方向并加入额外叙事环节，支持 Pattern 为高层约束而非硬模板。第三篇的发布失败是独立的 Contract 问题，不能混入结构保持率统计。
+- 批次报告位于 `Code/data/closed_loop_batch_20260902/closed_loop_batch_report.md`。正式库仍保持 53 篇故事、456 个 Observation。
+
+## 本轮（2026-09-03）：Evolve 复用父 Snapshot 的有效 FunctionContract
+
+- 修复前，Evolve 使用新的 `out_dir` 时会为全部 Function 重新请求 Contract；未变化 Function 也可能因新的 LLM 格式错误阻断发布。之前《天衡遗鹤》正是在发布前因非法 `RESOURCE_OR_SUPPORT_ACQUISITION` Contract 失败。
+- 现在 Evolve 在最终发布前读取父 Snapshot 已校验的 `function_contracts.jsonl`，按 `function_id + definition_sha256` 复用未变化 Contract；新增或定义变化的 Function 仍走原有生成和严格校验。
+- 单元测试 `test_function_contract.py` 全部通过（6 passed）。同一失败故事、同一父 Snapshot、隔离 KnowledgeDB 真实重跑成功：Function Run `FR_3e6119255e5d497e` PASS，子 Snapshot `real_coordinator_rebuild_20260902_20260903T073404224532Z_60980ee958fa` 发布；父子 Contract 文件 SHA-256 相同。
+- Coordinator 随后自动完成 Pattern：Pattern Run `PR_a7344fe56ee77b4b` SUCCESS，13 个 Published Pattern，3 个新建、1 个更新。正式 KnowledgeDB 未修改，仍保持 53 篇/456 个 Observation 的正式基线。
+- 这不是保留非法新 Contract 的回退：定义变化时仍必须重新生成并通过校验；本修复只复用父 Snapshot 中已证明有效且定义未变的 Contract。
+
+## 本轮（2026-09-03）：五领域跨题材可信增量验证
+
+- 以正式 Snapshot `real_coordinator_rebuild_20260902_20260902T160122211213Z_8d96cbbc6312`（53 篇、456 个 Observation）为父版本，从同来源 250 篇五领域真实语料中选取此前未处理的 15 篇，每个领域 3 篇，在同一正式 DB 中运行 Coordinator。
+- Evolve Run `FR_a776252cdc4c44ad` PASS，发布子 Snapshot `real_coordinator_rebuild_20260902_20260903T080910344525Z_0bc8086d7c18`；累计 68 篇、588 个 Observation/FunctionOccurrence，五领域分布为 15/14/13/13/13，`foreign_key_check` 通过。
+- 最终 Evaluator PASS 6/6；assignment coverage `344/588=58.5%`，`MATCHED=344`、`UNCERTAIN=244`、`OTHER=0`。受限 RetroMatch 召回 12 个旧未决项，新增归属 8 个。
+- Pattern Run `PR_83b1ff049c7a8585` SUCCESS：13 个 Published Pattern，11 个新建、8 个退休、0 个阻断/合并；其中 12 个拥有至少两个领域的证据，但仅 3 个包含本次新批次故事。
+- 重要结论：增量数据链路和跨领域证据生成通过第一轮；但 Function 演化使 41 篇旧故事变为 Pattern `changed`，Pattern 变化幅度较大，暂不能宣称稳定。`RELATIONSHIP_NEGOTIATION` 建议修订是语义提示，不影响本轮提交。
+- 完整报告：`Code/data/real_coordinator_rebuild_20260902/cross_topic_validation_20260903.md`。本轮没有修改业务代码。
+
+## 本轮（2026-09-03）：第二批五领域跨题材可信增量验证
+
+- 继续在同一正式 SQLite 和 Snapshot 链上，从 500 篇五领域语料中选择此前未处理的 15 篇，每个领域 3 篇；父 Snapshot 为 `real_coordinator_rebuild_20260902_20260903T080910344525Z_0bc8086d7c18`。
+- Evolve Run `FR_cb37ea8e896f4c16` PASS，发布子 Snapshot `real_coordinator_rebuild_20260902_20260903T082812603975Z_1db1166a208f`；累计 83 篇、716 个 Observation/FunctionOccurrence。Pattern Run `PR_6a8b5abcde77fc63` SUCCESS。
+- 本批最终 assignment coverage `418/716=58.4%`，与上一批 `58.5%` 基本一致；受限 RetroMatch 回看 39 个候选，新增归属 5 个。低匹配率已获得跨批次重复证据。
+- Evaluator 最终为业务 `PASS` 但 5/6 维通过，`separation` 未通过；`RELATIONSHIP_NEGOTIATION` 被拆为 `RELATIONSHIP_FORMATION` / `RELATIONSHIP_DISSOLUTION` 后仍被判定相互接近，关系语义边界问题再次出现。
+- Pattern 结果为 16 个 Published、10 个新建、4 个更新、5 个退休、0 个合并；11/16 个具有至少两个领域证据。Pattern 重复和 churn 仍然存在，但没有破坏 Snapshot 或引用一致性。
+- Evolve 输出中有 1 个同故事重复 `obs_id`，最终 SQLite 以唯一身份幂等收敛为 128 个新增 ObservationVersion；未形成孤立 Occurrence，先记录为输出层轻微问题，不扩大本轮修复。
+- 完整报告：`Code/data/real_coordinator_rebuild_20260902/cross_topic_validation_20260903_batch2.md`。当前不新增 Agent、数据库或运行时边界；下一步可做最小离线诊断和人工抽样。
+## 本轮（2026-09-03）：Pattern 驱动故事生成与结构保持验证
+
+- 基于 Snapshot `real_coordinator_rebuild_20260902_20260903T082812603975Z_1db1166a208f`，选择 3 个不同结构的 Published Pattern，生成悬疑、现代情感、末世科幻各 1 篇真实故事。
+- 三篇均完成 `Pattern → Outline → Story`；随后作为新故事进入同一正式 SQLite 的 `Evolve → Pattern`。
+- Function Run：`FR_e1d387e7196f439a`；Pattern Run：`PR_1d53bb856cfe27ee`；输出 Snapshot：`real_coordinator_rebuild_20260902_20260903T090305538477Z_237159895d81`。
+- Evolve：29 个新 Observation；最终 `MATCHED=443/745`（59.5%），`UNCERTAIN=302`；RetroMatch 18 个候选，新增 3 个归属；Evaluator PASS 6/6。
+- Pattern：19 个 Published，新增 12 个、更新 1 个、退休 9 个；现代情感生成故事进入 4 个 Pattern，末世科幻进入 1 个，悬疑未进入 Published Pattern。
+- 目标链与重新抽取链的诊断 LCS 保留率：悬疑 75%、现代情感 50%、末世科幻 0%。大纲层结构保持，但正文回流后的识别不稳定。
+- 本轮没有修改生产代码，没有新增 Agent 或数据库边界。关系 Function 被回流评估合并为 `RELATIONSHIP_STATUS_CHANGE`，匹配覆盖率约 59.5%，继续作为已知质量指标观察。
+- 详细报告：`Code/data/pattern_generation_validation_20260903/validation_report.md`。
+## 本轮（2026-09-03）：Pattern 应用阶段最小真实验证
+
+- 基于 Snapshot `real_coordinator_rebuild_20260902_20260903T090305538477Z_237159895d81`，尝试用 3 个未使用 Published Pattern 生成悬疑、古风、现实家庭职场各 1 篇故事。
+- 现实家庭职场成功：Pattern `PAT_9bad08925bfbbed0`，Outline `OUT_de6541ca62901c58`，大纲校验通过，正文 7,211 个中文字符。
+- 悬疑失败：`final_ledger` 返回对象而非 Schema 要求的字符串，结构化重试 2 次后失败。
+- 古风失败：生成的伏笔兑现位置不满足顺序规则。
+- 失败尝试产生的两个 Pattern 占用和一个失败大纲记录已清理，避免污染后续 Pattern 选择；历史 Snapshot、Function 和正式 Pattern 未修改。
+- 本轮没有再次进入 Evolve，因此没有新正式 Snapshot。应用阶段成功路径已验证，但 3 次尝试成功率为 1/3，生成稳定性仍需作为质量指标观察。
+- 详细报告：`Code/data/pattern_application_20260903/application_report.md`。
+
+## 本轮（2026-09-03）：Pattern 应用最小修复
+
+- `REALIZE_PROMPT` 明确 `final_ledger` 必须是字符串数组，保持 `OutlineRealization` 原有 schema，不扩展嵌套结构。
+- `scaffold_node` 对非法 `payoff_segment_index` 增加一次受限业务重试；仍失败则直接报错，不引入新的 Agent 或通用校验层。
+- 移除 Planner 阶段的提前 `claim_pattern`；Pattern 使用绑定改在 `record_outline()` 同一 SQLite 事务中创建并绑定。大纲生成中途失败不会留下孤立占用，已有手动领取接口仍可完成绑定。
+- 全部测试通过：311 passed, 1 skipped；定向 Outline/KnowledgeBase 测试 26 passed。
+
+## 本轮（2026-09-03）：最小修复真实验证
+
+- 在正式 Snapshot `real_coordinator_rebuild_20260902_20260903T090305538477Z_237159895d81` 上，用未使用 Pattern `PAT_64daadacc3a5443e` 完成真实 `Pattern → Outline`。
+- 真实 LLM 流程 7 次调用成功，`overall_ok=True`；`final_ledger` 实际元素类型全部为 `str`，所有 `payoff_segment_index` 均指向后续段或 ending。
+- 数据库新增 1 个成功大纲 `OUT_59034cd23c7671bf`，Pattern 使用绑定与大纲一致；Snapshot 数量未增加，Function/Pattern 悬挂 Run 均为 0。
+- 验证输出：`Code/data/minimal_fix_validation_20260903/real_outline/现代情感_20260903T070219.json`。
+
+## 本轮（2026-09-03）：生成—回流—再归纳质量基线
+
+- 在正式 Snapshot `real_coordinator_rebuild_20260902_20260903T090305538477Z_237159895d81` 上，使用 5 个未使用 Pattern 尝试生成悬疑、现代、末世、现实家庭职场、古风 5 个题材样本；3 篇完整生成，2 篇大纲校验失败，最终完整生成率 `3/5=60%`。
+- 3 篇成功正文进入同一正式 SQLite 的 Coordinator `Evolve → Pattern`；Function Run `FR_65cae29d53b344a4` PASS，发布子 Snapshot `real_coordinator_rebuild_20260902_20260903T122259023286Z_5bcfc6f217b0`；Pattern Run `PR_a5656dd5cee16d46` SUCCESS。
+- 新故事 28 个 Observation 中 22 个 MATCHED、6 个 UNCERTAIN；新故事 assignment coverage `78.6%`，全 Snapshot `495/773=64.0%`。RetroMatch 召回 93 个旧未决候选，新增归属 30 个。
+- Pattern 从父版本的 19 个 Published 增至 22 个：新建 15、更新 2、退休 12；没有阻断 Pattern 或合并。Function 从 6 个变为 9 个，关系边界及调查/证据粒度问题再次出现。
+- 三篇成功故事的目标 Function 链 LCS 保留率为悬疑 80%、现代 75%、古风 80%。说明 Pattern 对高层方向有约束，但回流后仍有额外 Function，不能视为固定脚本。
+- 基线报告：`Code/data/closed_loop_regression_20260903/regression_baseline.md`。当前不新增 Agent、数据库或架构边界；后续仅用独立小批次观察失败模式是否重复。
+
+## 阶段决策（2026-09-03）：进入实际使用与数据积累
+
+- 用户确认当前链路“可用即可，后续再优化”。Bootstrap → Evolve → Pattern → Outline → Story → Evolve → Pattern 已有真实成功闭环，Snapshot、Run 和外键检查正常。
+- 下一阶段不再以架构验证或即时修复为主，而是使用当前正式 Snapshot 和 Coordinator 持续生成、回流和积累不同题材数据；生成成功率、assignment coverage、Function 边界和 Pattern churn 作为持续指标保留。
+- 暂不启动 StateVocabulary 全量改造、Best-of-N、Supervisor 或新的数据边界；只有实际使用中出现重复且影响结果的故障时，才做单点最小优化。
+
+## 本轮（2026-09-03）：最小 StateVocabulary
+
+- 新增 `Code/Contracts/state_vocabulary.py`，从当前 FunctionContract 确定性生成 `canonical_id / aliases / raw_evidence`；规范化 Unicode、空白和已有大写标识符，不调用 LLM 推断同义词。
+- `build_contract_ledger()` 使用 canonical ID 比较 aspect、state 和 obligation key，同时保留原始状态文本；账本输出附带词表，Planner/Realizer 可继续消费原有字段。
+- 新发布的 OntologySnapshot 在存在 FunctionContract 时写入并哈希校验 `state_vocabulary.json`；现有不可变 Snapshot 不修改，仍可正常读取。
+- Contract 输出目录同步生成 `state_vocabulary.json`。没有新增 SQLite 表或运行时数据库边界。
+- 定向测试 `25 passed`，全量测试 `313 passed, 1 skipped`；当前正式 Snapshot 的 9 个合同可生成 112 个词表条目。
+- 当前版本只解决确定性规范化和词表追踪，不自动判断中文语义同义词；后续如需语义合并，应基于真实重复案例单独设计。
+
+## 本轮（2026-09-03）：StateVocabulary 进入真实 Evolve 数据流
+
+- 在正式 Snapshot `real_coordinator_rebuild_20260902_20260903T122259023286Z_5bcfc6f217b0` 上处理 1 篇此前未入库的真实末世科幻故事 `2534659706_430078256`。
+- Function Run `FR_62fa2b90d1414ec3` PASS，Pattern Run `PR_a40e9cf6c7add34a` SUCCESS，发布子 Snapshot `real_coordinator_rebuild_20260902_20260903T130418047879Z_b21aaffdc548`。
+- 新 Snapshot 正常携带 `state_vocabulary.json`，文件 SHA-256 与 manifest 一致；词表共 101 条（16 aspect、61 state、24 obligation key）。Snapshot 校验、SQLite 外键检查通过，Function/Pattern 悬挂 Run 均为 0。
+- 本次验证证明 StateVocabulary 已进入真实 Snapshot → Evolve → Pattern 数据流；当前版本证明的是稳定规范化和持久化，不证明中文语义同义词自动合并。
+
+## 架构边界记录（2026-09-03）：StateVocabulary 与 Pattern 去重的职责
+
+- 如果项目只需要发现相似 Pattern，StateVocabulary 不是必需组件；StoryPattern 已能在较高层面对故事结构做相似度归纳和去重。
+- 如果项目还需要判断状态转移、规划 Function 顺序、统计状态或检查义务是否完成，StateVocabulary 才提供底层的统一状态标识。
+- 两者职责不同：StateVocabulary 统一单个状态/aspect/义务字段，StoryPattern 去重一组 Function 形成的故事结构；Pattern 去重不能替代底层状态词汇统一。
+- 当前只保留最小版本：确定性格式统一、稳定 `canonical_id`、保留原始文本证据、随 Snapshot 保存并校验哈希。
+- 暂不引入 LLM 词表本体或自动语义同义词合并；只有真实数据反复出现并影响结果时，才基于具体案例增加离线确认的 alias。

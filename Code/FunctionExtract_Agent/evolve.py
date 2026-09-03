@@ -40,7 +40,7 @@ from FunctionExtract_Agent.Evaluator.evaluator import evaluator_node
 from FunctionExtract_Agent.Critic.critic import critic_node
 from FunctionExtract_Agent.Curator.curator import curator_node, _bump_version
 from FunctionExtract_Agent.Contract.contract import build_function_contracts
-from Contracts.snapshot import DEFAULT_SNAPSHOT_ROOT, publish_snapshot
+from Contracts.snapshot import DEFAULT_SNAPSHOT_ROOT, load_function_contracts, publish_snapshot
 from Contracts.occurrence import align_occurrences, assignment_metrics
 from Contracts.run_result import failed_run_result
 from KnowledgeBase import DEFAULT_DB_PATH, StoryKnowledgeStore
@@ -452,7 +452,18 @@ def evaluator_final_node(state: dict) -> dict:
     _write_jsonl(os.path.join(out_dir, "occurrences_final.jsonl"), final_occurrences)
     function_contracts = []
     if final_report.get("verdict") == "PASS":
-        function_contracts = build_function_contracts(final_funcs, observations, out_dir)
+        inherited_contracts = []
+        base_snapshot_id = state.get("base_snapshot_id")
+        snapshot_root = state.get("snapshot_root") or DEFAULT_SNAPSHOT_ROOT
+        parent_path = os.path.join(snapshot_root, base_snapshot_id) if base_snapshot_id else ""
+        if base_snapshot_id and os.path.isdir(parent_path):
+            inherited_contracts = load_function_contracts(parent_path)
+        function_contracts = build_function_contracts(
+            final_funcs,
+            observations,
+            out_dir,
+            existing_contracts=inherited_contracts,
+        )
 
     run_id = state.get("run_id")
     if not run_id:

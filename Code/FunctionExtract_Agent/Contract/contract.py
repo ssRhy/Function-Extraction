@@ -9,6 +9,7 @@ from Contracts.function_contract import (
     definition_sha256,
     validate_function_contracts,
 )
+from Contracts.state_vocabulary import StateVocabulary
 from FunctionExtract_Agent.Prompt.Contract_prompt import CONTRACT_SYSTEM_PROMPT
 
 
@@ -85,13 +86,26 @@ def _write_contracts(path: str, contracts: list[dict]) -> None:
             handle.write(json.dumps(contract, ensure_ascii=False) + "\n")
 
 
-def build_function_contracts(functions: list[dict], observations: list[dict], out_dir: str) -> list[dict]:
+def _write_vocabulary(path: str, contracts: list[dict]) -> None:
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(StateVocabulary.from_contracts(contracts).to_dict(), handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
+def build_function_contracts(
+    functions: list[dict],
+    observations: list[dict],
+    out_dir: str,
+    existing_contracts: list[dict] | None = None,
+) -> list[dict]:
     """逐 Function 生成契约；定义未变的成功结果可断点复用。"""
     if not functions:
         raise ValueError("空 Function 集不能构建 FunctionContract")
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "function_contracts.jsonl")
     existing = _read_existing(path)
+    for contract in existing_contracts or []:
+        existing.setdefault(contract["function_id"], contract)
     bank = {item.get("obs_id"): item for item in observations if item.get("obs_id")}
     contracts = []
     for function in functions:
@@ -107,4 +121,5 @@ def build_function_contracts(functions: list[dict], observations: list[dict], ou
         _write_contracts(path, contracts)
     validate_function_contracts(functions, contracts)
     _write_contracts(path, contracts)
+    _write_vocabulary(os.path.join(out_dir, "state_vocabulary.json"), contracts)
     return contracts

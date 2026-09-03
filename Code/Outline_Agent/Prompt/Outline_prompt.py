@@ -48,13 +48,14 @@ NARRATIVE_PROMPT = """你是故事大纲的叙事展开设计者。给定 Functi
 4. motivation_setup 只补足 mechanism_plan.why 在情节中需要预先可见的事实、利益、恐惧或代价；已有充分依据时输出空字符串，不创造新目标。
 5. connective_event 只把 mechanism_plan.connects_to_next 变成可观察事件；最后一段应说明如何把已形成的条件交给 ending。没有必要时输出空字符串。
 6. reaction_beat 只用于受伤、背叛、身份揭露、死亡、公开羞辱、关系确认等重大事件后的反应和消化；普通行动输出空字符串，不为每个 Function 强制增加反应。
-7. setup_payoffs 只为后续机制或 ending 已经需要的线索、工具、关系、秘密或能力建立来源。payoff_segment_index 必须大于当前 segment_index；null 表示在独立 ending 中兑现。每项必须说明后续如何实际使用，不得创造新的解决方案。
+7. setup_payoffs 只为后续机制或 ending 已经需要的线索、工具、关系、秘密或能力建立来源。payoff_segment_index 只能填写当前链中大于当前 segment_index 的整数；最后一段只能填 null，表示在独立 ending 中兑现。每项必须说明后续如何实际使用，不得创造新的解决方案。
 8. 若 Function 重复出现，每次 genre_realization 必须按 occurrence_index 通过信息、风险、代价或主动投入递进，不能复制同一事件。叙事支架不能改变 Function 顺序或结构后果。
 9. 动机、伏笔、反应和连接事件只能为已定关系变化提供可观察依据，不能借“铺垫”之名新增 Function 未要求的关系类型、关系阶段或稳定承诺。"""
 
 
 REALIZE_PROMPT = """你是大纲实现者。给定 Function 序列（含唯一 segment_index、FunctionContract、状态前置条件、状态效果、义务效果、occurrence_index/occurrence_total）、模板级 ending_spec、故事种子、结构机制方案和叙事展开方案，写成分段因果大纲，不写场景、不写正文。只输出 JSON，字段名严格如下：
 {"segments": [{"segment_index": 1, "function_name": "函数名", "beats": ["因果要点"], "link": "衔接说明"}], "final_ledger": ["结局前的人物目标/关系/秘密/资源/未解决冲突/世界规则"], "ending": {"resolution_actions": ["具体解决动作"], "conflict_resolution": "核心冲突如何解决", "final_state": "主角或核心关系的稳定终态"}}
+其中 final_ledger 必须是字符串数组；每一项都是一条可读的状态记录，不得输出对象、字典、嵌套数组或额外字段。
 每段写 2-4 个因果要点：先按需落实 narrative_plan.motivation_setup，再让 genre_realization 及其结构行动实际发生，随后按需落实 reaction_beat 和在本段兑现的 setup_payoffs。不得自行创造另一套题材表现、动机、反应或伏笔。link 使用 narrative_plan.connective_event；若该字段为空，只能直接表述 mechanism_plan.connects_to_next 已有的结构条件，最后一段写清它如何把已形成的条件交给独立 ending。人物变化必须落实 mechanism_plan.character_state_changes 中的触发证据，状态结果不得超出 mechanism_plan，不得提前完成下一 Function。单次救援、真相揭露、资源获取、情感表达或共同对抗，只能产生证据直接支持的状态变化。若某 Function 重复出现，每段必须按 narrative_plan 的不同题材实现递进，禁止雷同。ending 是全部 Function 段之后的独立结局收束单元，不占用新的 Function 位置；它必须回收 payoff_segment_index=null 的伏笔，并依据前序形成的证据、资源、选择、对手弱点或关系条件实际完成核心 resolution_actions。ending 只能完成已由 Function 链开启并获得充分条件的变化，不是新的 Function；其关系类型、关系阶段和承诺强度不得超过 mechanism_plan.character_state_changes 已经建立的状态上界。恢复信任、形成合作、解除敌意、承担责任或表达关心只能在各自维度内收束，不得自动推出另一种关系或永久承诺。若 ending_spec 的表述宽泛，必须使用前序已证明的最小终态兑现。若 ending_spec 非 null，ending 必须逐项回应 resolves、must_show、final_state；若为 null，必须解决 seed.core_conflict 并兑现 seed.ending_direction。真正解决核心冲突的行动必须发生；逮捕、晋升、制度变化等解决后的社会结果可以在 final_state 中概述，不要求扩展成新的主要情节。"""
 
 

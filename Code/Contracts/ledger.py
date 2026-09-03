@@ -1,5 +1,7 @@
 """按 FunctionContract 计算故事链的状态与叙事义务账本。"""
 
+from Contracts.state_vocabulary import StateVocabulary
+
 
 def check_contract_chain(chain: list[dict]) -> list[str]:
     """检查相邻 Function 的状态前置条件是否有前序效果支撑。"""
@@ -43,9 +45,13 @@ def build_contract_ledger(
             "transitions": [], "issues": [], "warnings": [],
         }
 
+    vocabulary = StateVocabulary.from_contracts([
+        step["contract"] for step in chain if step.get("contract")
+    ])
     mechanism_by_name = {step.get("function_name"): step for step in mechanism_steps}
     person_ids = {item.get("id") for item in seed.get("characters", [])}
     states = {}
+    state_raw = {}
     obligations = {}
     transitions = []
     issues = []
@@ -56,7 +62,7 @@ def build_contract_ledger(
 
     def obligation_key(item, bindings):
         roles = tuple(bound(role, bindings) for role in item.get("role_slots", []))
-        return (item.get("key"), roles)
+        return (vocabulary.canonical("obligation_key", item.get("key")), roles)
 
     for index, step in enumerate(chain):
         contract = step.get("contract") or {}
@@ -88,32 +94,39 @@ def build_contract_ledger(
         for precondition in contract.get("preconditions", []):
             resolved = []
             for role_slot in precondition.get("role_slots", []):
-                key = (bound(role_slot, bindings), precondition["aspect"])
+                aspect_id = vocabulary.canonical("aspect", precondition["aspect"])
+                state_id = vocabulary.canonical("state", precondition["state"])
+                key = (bound(role_slot, bindings), aspect_id)
                 current = states.get(key)
-                if current is not None and current != precondition["state"]:
+                if current is not None and current != state_id:
                     warnings.append(
                         f"{step['function_name']} 前置状态不匹配: "
-                        f"{key[0]}/{key[1]} 当前={current} "
+                        f"{key[0]}/{precondition['aspect']} 当前={state_raw[key]} "
                         f"需要={precondition['state']}"
                     )
-                states.setdefault(key, precondition["state"])
-                resolved.append({"role": key[0], "aspect": key[1], "state": precondition["state"]})
+                states.setdefault(key, state_id)
+                state_raw.setdefault(key, precondition["state"])
+                resolved.append({"role": key[0], "aspect": precondition["aspect"], "state": precondition["state"]})
             transition["preconditions"].extend(resolved)
 
         for effect in contract.get("effects", []):
             resolved = []
             for role_slot in effect.get("role_slots", []):
-                key = (bound(role_slot, bindings), effect["aspect"])
+                aspect_id = vocabulary.canonical("aspect", effect["aspect"])
+                before_id = vocabulary.canonical("state", effect["before"])
+                after_id = vocabulary.canonical("state", effect["after"])
+                key = (bound(role_slot, bindings), aspect_id)
                 current = states.get(key)
-                if current is not None and current != effect["before"]:
+                if current is not None and current != before_id:
                     warnings.append(
                         f"{step['function_name']} 效果前状态不匹配: "
-                        f"{key[0]}/{key[1]} 当前={current} "
+                        f"{key[0]}/{effect['aspect']} 当前={state_raw[key]} "
                         f"需要={effect['before']}"
                     )
-                states[key] = effect["after"]
+                states[key] = after_id
+                state_raw[key] = effect["after"]
                 resolved.append({
-                    "role": key[0], "aspect": key[1],
+                    "role": key[0], "aspect": effect["aspect"],
                     "before": effect["before"], "after": effect["after"],
                 })
             transition["effects"].extend(resolved)
@@ -137,11 +150,12 @@ def build_contract_ledger(
     return {
         "enabled": True,
         "states": [
-            {"role": role, "aspect": aspect, "state": state}
-            for (role, aspect), state in sorted(states.items())
+            {"role": role, "aspect": aspect, "state": state_raw[(role, aspect)]}
+            for (role, aspect) in sorted(states)
         ],
         "obligations": list(obligations.values()),
         "transitions": transitions,
         "issues": issues,
         "warnings": warnings,
+        "state_vocabulary": vocabulary.to_dict(),
     }

@@ -279,9 +279,6 @@ def planner_node(state):
     pattern_id = pattern.get("pattern_id")
     if not pattern_id:
         raise ValueError(f"Pattern 缺少稳定 ID: {pattern['pattern_name']}")
-    StoryKnowledgeStore(state["knowledge_db"]).claim_pattern(
-        state["snapshot_id"], pattern_id,
-    )
     return {
         "pattern_id": pattern_id,
         "pattern_name": pattern["pattern_name"],
@@ -334,15 +331,26 @@ def scaffold_node(state):
         "reference_mechanisms": hints,
         "ending_spec": state.get("ending_spec"),
     }
-    data = chat_structured([
+    messages = [
         {"role": "system", "content": NARRATIVE_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-    ], NarrativePlan).model_dump()
-    data["steps"] = _align(state["chain"], data["steps"])
-    issues = narrative_plan_issues(state["chain"], data)
-    if issues:
-        raise ValueError("叙事展开方案不合法: " + "；".join(issues))
-    return {"narrative": data}
+    ]
+    for attempt in range(2):
+        data = chat_structured(messages, NarrativePlan).model_dump()
+        data["steps"] = _align(state["chain"], data["steps"])
+        issues = narrative_plan_issues(state["chain"], data)
+        if not issues:
+            return {"narrative": data}
+        if attempt == 0:
+            messages = messages + [{
+                "role": "user",
+                "content": (
+                    "叙事展开方案存在确定性错误：" + "；".join(issues)
+                    + "。请只修正 payoff_segment_index：只能填当前链中后续段的整数，"
+                    "最后一段只能填 null；保持其他内容不变，并重新输出完整 JSON。"
+                ),
+            }]
+    raise ValueError("叙事展开方案不合法: " + "；".join(issues))
 
 
 def realize_node(state):

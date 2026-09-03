@@ -8,6 +8,7 @@ import tempfile
 from datetime import datetime, timezone
 
 from Contracts.function_contract import validate_function_contracts
+from Contracts.state_vocabulary import StateVocabulary
 
 
 _CODE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -157,6 +158,17 @@ def validate_snapshot(snapshot_path: str) -> dict:
         if len(contracts) != manifest.get("function_contract_count"):
             raise ValueError("manifest function_contract_count 与 function_contracts.jsonl 不一致")
         validate_function_contracts(functions, contracts)
+        if manifest.get("state_vocabulary_file"):
+            if manifest["state_vocabulary_file"] != "state_vocabulary.json":
+                raise ValueError("state_vocabulary_file 必须为 state_vocabulary.json")
+            vocabulary_path = os.path.join(snapshot_path, manifest["state_vocabulary_file"])
+            if not os.path.isfile(vocabulary_path):
+                raise ValueError("OntologySnapshot 缺少 state_vocabulary.json")
+            with open(vocabulary_path, "rb") as f:
+                vocabulary_bytes = f.read()
+            if _sha256(vocabulary_bytes) != manifest.get("state_vocabulary_sha256"):
+                raise ValueError("state_vocabulary.json SHA-256 校验失败")
+            StateVocabulary.from_dict(_read_json(vocabulary_path))
     if os.path.basename(os.path.normpath(snapshot_path)) != manifest.get("snapshot_id"):
         raise ValueError("目录名与 manifest snapshot_id 不一致")
     return manifest
@@ -215,10 +227,12 @@ def publish_snapshot(
     functions_bytes = _json_bytes(functions, jsonl=True)
     evaluation_bytes = _json_bytes(evaluation)
     contracts_bytes = _json_bytes(contracts, jsonl=True)
+    vocabulary = StateVocabulary.from_contracts(contracts) if function_contracts is not None else None
+    vocabulary_bytes = _json_bytes(vocabulary.to_dict()) if vocabulary else b""
     functions_sha = _sha256(functions_bytes)
     evaluation_sha = _sha256(evaluation_bytes)
     contracts_sha = _sha256(contracts_bytes)
-    content_sha = _sha256(functions_bytes + contracts_bytes)
+    content_sha = _sha256(functions_bytes + contracts_bytes + vocabulary_bytes)
     effective_run_id = run_id or f"FR_{_sha256((namespace + content_sha).encode('utf-8'))[:16]}"
 
     for entry in os.scandir(root):
@@ -285,6 +299,8 @@ def publish_snapshot(
             "function_contract_count": len(contracts),
             "function_contracts_file": "function_contracts.jsonl",
             "function_contracts_sha256": contracts_sha,
+            "state_vocabulary_file": "state_vocabulary.json",
+            "state_vocabulary_sha256": _sha256(vocabulary_bytes),
         })
 
     with tempfile.TemporaryDirectory(prefix=".snapshot-", dir=root) as tmp:
@@ -297,6 +313,8 @@ def publish_snapshot(
         if function_contracts is not None:
             with open(os.path.join(tmp, "function_contracts.jsonl"), "wb") as f:
                 f.write(contracts_bytes)
+            with open(os.path.join(tmp, "state_vocabulary.json"), "wb") as f:
+                f.write(vocabulary_bytes)
         with open(os.path.join(tmp, "manifest.json"), "wb") as f:
             f.write(_json_bytes(manifest))
         os.replace(tmp, snapshot_path)

@@ -81,6 +81,22 @@ def test_definition_change_invalidates_cache(tmp_path, monkeypatch):
     assert len(calls) == 2
 
 
+def test_reuses_inherited_contract(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        contract_module, "chat_structured",
+        lambda messages, schema: calls.append(messages) or _body(),
+    )
+    functions = [_function()]
+    observations = [_observation()]
+    inherited = contract_module.build_function_contracts(functions, observations, str(tmp_path / "parent"))
+    reused = contract_module.build_function_contracts(
+        functions, observations, str(tmp_path / "child"), existing_contracts=inherited,
+    )
+    assert reused == inherited
+    assert len(calls) == 1
+
+
 def test_contract_requires_resident_evidence(tmp_path):
     with pytest.raises(ValueError, match="没有可驻留证据"):
         contract_module.build_function_contracts([_function()], [], str(tmp_path))

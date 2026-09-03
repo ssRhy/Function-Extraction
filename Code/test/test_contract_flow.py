@@ -7,6 +7,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from Contracts.ledger import build_contract_ledger
+from Contracts.state_vocabulary import StateVocabulary, canonical_id
 from Outline_Agent import app as outline
 from Outline_Agent import state as outline_state
 
@@ -66,6 +67,27 @@ def test_contract_ledger_reports_binding_and_transition_breaks():
 
     assert any("缺少角色绑定" in issue for issue in ledger["issues"])
     assert any("前置状态" in warning for warning in ledger["warnings"])
+
+
+def test_state_vocabulary_is_deterministic_and_keeps_raw_evidence():
+    contracts = [_contract("F1", "OPEN", "关系紧张", "关系缓和")]
+    vocabulary = StateVocabulary.from_contracts(contracts)
+    assert vocabulary.canonical("aspect", " MISSION ") == "MISSION"
+    assert vocabulary.canonical("state", "关系紧张") == canonical_id("state", "关系紧张")
+    entry = next(item for item in vocabulary.entries if item["canonical_id"] == canonical_id("state", "关系紧张"))
+    assert entry["aliases"] == ["关系紧张"]
+    assert entry["raw_evidence"] == ["关系紧张"]
+
+
+def test_contract_ledger_exposes_state_vocabulary_without_changing_raw_states():
+    contract = _contract("F1", "OPEN", "UNKNOWN", "KNOWN")
+    ledger = build_contract_ledger(
+        [{"function_name": "OPEN", "contract": contract}],
+        [_mechanism("OPEN")],
+        {"characters": [{"id": "P1"}]},
+    )
+    assert ledger["states"] == [{"role": "P1", "aspect": "MISSION", "state": "KNOWN"}]
+    assert ledger["state_vocabulary"]["schema_version"] == 1
 
 
 def test_planner_uses_snapshot_contracts_over_function_card():

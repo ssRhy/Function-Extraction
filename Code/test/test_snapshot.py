@@ -96,6 +96,9 @@ def test_publish_v4_with_function_contracts(tmp_path):
     assert manifest["function_contract_count"] == 1
     assert load_function_contracts(path) == _contracts()
     assert "function_contracts.jsonl" in os.listdir(path)
+    vocabulary = json.load(open(os.path.join(path, "state_vocabulary.json"), encoding="utf-8"))
+    assert vocabulary["schema_version"] == 1
+    assert any(item["canonical_id"] == "RESOURCE" for item in vocabulary["entries"])
 
 
 def test_function_contract_tampering_is_detected(tmp_path):

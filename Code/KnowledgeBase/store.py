@@ -990,21 +990,29 @@ class StoryKnowledgeStore:
                 (snapshot_id, pattern_id),
             ).fetchone():
                 raise ValueError(f"大纲来源 Pattern 尚未入库: {pattern_id}")
-            if pattern_id:
-                usage = conn.execute(
-                    "SELECT outline_id FROM pattern_usage WHERE pattern_id=?",
-                    (pattern_id,),
-                ).fetchone()
-                if not usage:
-                    raise ValueError(f"Pattern 尚未领取: {pattern_id}")
-                if usage["outline_id"] and usage["outline_id"] != outline_id:
-                    raise ValueError(f"Pattern 已绑定其他大纲: {pattern_id}")
             existing = conn.execute(
                 "SELECT outline_json, outline_markdown FROM outlines WHERE outline_id=?",
                 (outline_id,),
             ).fetchone()
             if existing and (existing["outline_json"] != payload or existing["outline_markdown"] != markdown_text):
                 raise ValueError(f"大纲 ID 冲突: {outline_id}")
+            if pattern_id and not existing:
+                usage = conn.execute(
+                    "SELECT outline_id FROM pattern_usage WHERE pattern_id=?",
+                    (pattern_id,),
+                ).fetchone()
+                if usage and usage["outline_id"]:
+                    raise ValueError(f"Pattern 已绑定其他大纲: {pattern_id}")
+                if not usage:
+                    try:
+                        conn.execute(
+                            """INSERT INTO pattern_usage
+                               (pattern_id, snapshot_id, claimed_at, outline_id)
+                               VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL)""",
+                            (pattern_id, snapshot_id),
+                        )
+                    except sqlite3.IntegrityError as exc:
+                        raise ValueError(f"Pattern 已使用: {pattern_id}") from exc
             conn.execute(
                 """INSERT OR IGNORE INTO outlines
                    (outline_id, snapshot_id, pattern_id, pattern_name, genre, user_request,

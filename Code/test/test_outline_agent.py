@@ -257,6 +257,43 @@ def test_narrative_payoff_must_point_forward_or_ending():
     assert any("后续段或 ending" in issue for issue in app.narrative_plan_issues(chain, valid))
 
 
+def test_scaffold_retries_invalid_payoff_once(monkeypatch):
+    chain = [
+        {"segment_index": 1, "function_name": "A", "definition": "", "preconditions": [],
+         "role_slots": [], "state_transition": {}, "contract": {}, "occurrence_index": 1, "occurrence_total": 1},
+        {"segment_index": 2, "function_name": "B", "definition": "", "preconditions": [],
+         "role_slots": [], "state_transition": {}, "contract": {}, "occurrence_index": 1, "occurrence_total": 1},
+    ]
+    responses = iter([
+        app.NarrativePlan(steps=[
+            state.NarrativeStep(
+                segment_index=1, function_name="A", genre_realization="a",
+                setup_payoffs=[state.SetupPayoff(content="线索", payoff_segment_index=1, payoff="兑现")],
+            ),
+            state.NarrativeStep(segment_index=2, function_name="B", genre_realization="b"),
+        ]),
+        app.NarrativePlan(steps=[
+            state.NarrativeStep(
+                segment_index=1, function_name="A", genre_realization="a",
+                setup_payoffs=[state.SetupPayoff(content="线索", payoff_segment_index=2, payoff="兑现")],
+            ),
+            state.NarrativeStep(segment_index=2, function_name="B", genre_realization="b"),
+        ]),
+    ])
+
+    def fake_chat(_messages, output_schema, **_kwargs):
+        assert output_schema is app.NarrativePlan
+        return next(responses)
+
+    monkeypatch.setattr(app, "chat_structured", fake_chat)
+    monkeypatch.setattr(app, "load_mechanisms", lambda _snapshot_id: {})
+    result = app.scaffold_node({
+        "snapshot_id": "snapshot_x", "knowledge_db": "knowledge.db",
+        "chain": chain, "seed": {}, "mechanism": {}, "ending_spec": None,
+    })
+    assert result["narrative"]["steps"][0]["setup_payoffs"][0]["payoff_segment_index"] == 2
+
+
 def test_prompts_limit_relationship_state_to_function_evidence():
     assert "题材标签" in app.SEED_PROMPT
     assert "关系类型" in app.SEED_PROMPT

@@ -1128,3 +1128,92 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 - Evaluator 最终连续两批 `abstraction_quality=1.0`，但中期和历史报告仍曾指出 Threat Function 粒度问题；当前更准确的判断是“最终质量门暂时通过，语义边界仍需专项诊断”。
 - 当前 10 个 Published Pattern 仍共享揭示—威胁—反思/资源骨架；本批没有合并或阻断，说明已有 Pattern 合并能力并不能稳定消除相似模式。Pattern 重复已获得多批次证据。
 - 当前决策：数据积累阶段的观察目标基本达到。下一步如果开始改代码，应只增加离线诊断/发布前相似度提示，先不改变 Pattern 生成、不引入新 Agent，也不自动删除 Pattern。
+
+## 166. 生成—分析闭环证明 Pattern 是高层约束而非固定脚本（2026-09-02）
+
+- 用户要求执行“现有 Pattern → 生成大纲 → 生成故事 → Evolve 分析”的实际闭环。为避免污染正式基线，在正式 KnowledgeDB 的副本上完成真实 LLM 生成和真实 Evolve/Pattern。
+- 指定 Pattern 的四个目标 Function 均出现在生成故事的实际序列中，且保持相对顺序；但实际序列包含重复威胁、联盟、资源和个人成长。这说明 Pattern 能约束叙事方向，但不应被当作严格 Function 脚本。
+- 生成故事的 12 个 Observation 全部 `MATCHED`，但 Evaluator 再次指出 Alliance/Deal 和 Threat/逃离的边界混合。生成闭环因此同时验证了当前 Function 可分析性和语义边界问题。
+- 当前决策：不因为单篇生成结果修改代码；再用另一个 Pattern 做一篇验证，若目标结构保持和额外叙事扩展持续出现，则把该行为作为 Pattern 的设计语义，而不是故障。
+
+## 167. 第二篇生成验证显示目标 Function 链尚不稳定（2026-09-02）
+
+- 第二篇使用不同 Pattern `反思揭示与自立成长` 生成现实家庭职场故事，并在隔离副本中完成真实 Evolve → Pattern。
+- 生成故事的 5 个 Observation 全部 `MATCHED`，但目标四步链只出现 2 个 Function；`INTERNAL_REFLECTION` 和 `RESOURCE_OR_SUPPORT_ACQUISITION` 缺失，额外出现 `RELATIONSHIP_BREAKDOWN` 与 `STRATEGIC_ALLIANCE_OR_DEAL`。
+- 与第一篇 4/4 目标 Function 的结果相比，当前只能得出“Pattern 影响方向，但不稳定控制 Function 链”的结论。抽取匹配成功和 Pattern 遵循成功必须分开评估。
+- 当前决策：暂不修改生产代码。若继续验证，应再选一个结构差异更大的 Pattern；只有偏离方向重复出现，才考虑调整生成提示或 Function 定义。
+
+## 168. 三 Pattern 批次验证：方向性成立，精确保持不稳定（2026-09-02）
+
+- 用户要求再用一批 Pattern 验证“目标结构保持、叙事内容扩展”。选择现代情感、末世科幻、古风仙侠三个不同 Pattern，各自使用正式 Snapshot 的隔离副本进行真实生成和 Evolve。
+- 两篇完整成功样本的目标 Function 出现率分别为 `3/4`、`4/5`，都保留了主要方向但加入重复资源、威胁或内省环节；因此 Pattern 的高层约束作用可以复现，精确 Function 链不能复现。
+- 第三篇在 Evolve 发布前因 `RESOURCE_OR_SUPPORT_ACQUISITION` 的 FunctionContract 格式错误失败。该失败没有污染 Snapshot，但说明结构验证必须把“生成偏离”和“发布接口失败”分开统计。
+- 当前结论：不能宣称“目标结构保持”已经稳定，只能宣称“Pattern 对创作方向有稳定影响”。暂不调整生产代码；先处理失败样本的 Contract 发布边界或重新验证，再决定是否修改生成提示。
+
+## 169. Contract 失败应通过父 Snapshot 复用解决，而不是降低校验（2026-09-03）
+
+- 实际检查发现，Evolve 的新输出目录没有父 Snapshot 的 Contract 缓存，所以每轮都会重复生成未变化 Function 的 Contract；一次偶发的 LLM 格式错误即可阻断整轮发布。
+- 采用的边界是：父 Snapshot Contract 已经过 Snapshot 校验，只有当前 Function 的定义哈希仍一致时才可复用；Function 定义变化、新增 Function 或父 Contract 不可用时仍重新生成并严格校验。
+- 真实重跑支持该判断：原失败故事在隔离库成功发布子 Snapshot，并自动进入 Pattern；父子 `function_contracts.jsonl` 完全一致。该修复保持 Evolve 增量，不重跑旧 Observation，也没有增加新的 Agent、数据库或持久化边界。
+
+## 170. 五领域跨题材增量第一轮：链路通过，Pattern 稳定性仍需观察（2026-09-03）
+
+- 用户要求基于已有五领域执行可信增量验证。由于原 60 篇语料只剩 7 篇未处理，改从同来源 250 篇五领域真实语料中选取此前未进入正式 Snapshot 的 15 篇，每领域 3 篇；仍使用同一正式 SQLite 和当前 Snapshot，不清库、不新建库。
+- Evolve Run `FR_a776252cdc4c44ad` PASS，子 Snapshot `real_coordinator_rebuild_20260902_20260903T080910344525Z_0bc8086d7c18` 累计 68 篇、588 个 Observation；五领域均进入子 Snapshot，最终 Evaluator 6/6，assignment coverage `58.5%`。受限 RetroMatch 仅召回 12 个旧未决项并新增 8 个归属，增量边界保持简洁。
+- Pattern Run `PR_83b1ff049c7a8585` SUCCESS，13 个 Published Pattern，其中 12 个具有至少两个领域证据；但 41 篇旧故事被标记为 `changed`，并出现 11 个新建、8 个退休 Pattern。由此区分出两个结论：跨领域 Pattern 证据已经出现；Pattern 对 Function 演化仍敏感，尚不能称为稳定。
+- 本轮真实暴露的语义提示是 `RELATIONSHIP_NEGOTIATION` 同时包含关系建立与破裂方向。该提示先记录，不立即增加 Dedup Agent、Supervisor 或新的持久化边界；下一批独立数据应观察该问题和 Pattern 大幅变化是否重复。
+
+## 171. 第二批独立五领域数据：低匹配和关系边界问题重复（2026-09-03）
+
+- 用户要求继续用下一批独立新数据观察问题是否重复。采用 500 篇五领域语料中尚未处理的 15 篇，每领域 3 篇；同一正式 SQLite、同一 Snapshot 链，由 Coordinator 自动完成 Evolve → Pattern。
+- 本批最终 assignment coverage 为 `58.4%`，上一批为 `58.5%`；不同独立批次稳定落在约 58%～62% 的低匹配区间，不能再视为单批波动。RetroMatch 召回 39 个旧未决候选，新增归属 5 个，说明局部回看有效但收益有限。
+- Function 从 6 个变为 7 个：`RELATIONSHIP_NEGOTIATION` 被拆成 `RELATIONSHIP_FORMATION` 与 `RELATIONSHIP_DISSOLUTION`，但 separation 仍失败并建议合并。这是关系语义边界的重复证据，而非单篇故事误判。
+- Pattern 新建 10、退休 5、更新 4，11/16 个当前 Published Pattern 有多领域证据；共享“关系变化—揭示/威胁—反思或自我重建”骨架仍未消失。Pattern 发布链路正确，但稳定性和去重仍不足。
+- 本批 Evolve 输出出现 1 个同故事重复 `obs_id`，数据库最终按唯一身份收敛，没有外键错误或孤立 Occurrence。暂把它视为输出文件层的轻微重复，不为此引入新的边界或复杂状态。
+- 当前决策：跨批次观察目标基本达到；下一阶段不继续盲目堆数据，也不增加 Supervisor/Dedup Agent。保持生产架构不变，先做最小离线相似度诊断和人工抽样，确认哪些重复会影响 Pattern 发布或故事生成。
+## 172. Pattern 驱动生成的正文回流验证：大纲保持，抽取保持不稳定（2026-09-03）
+
+本轮用正式 Snapshot 的 3 个 Published Pattern 生成悬疑、现代情感、末世科幻各 1 篇故事，并将正文重新送入同一 SQLite 的 Evolve → Pattern。
+
+真实结果：`FR_e1d387e7196f439a`、`PR_1d53bb856cfe27ee`，新 Snapshot 为 `real_coordinator_rebuild_20260902_20260903T090305538477Z_237159895d81`。Evolve 最终硬匹配率 59.5%，RetroMatch 新增 3 个归属；Pattern 产生 19 个 Published Pattern。
+
+目标结构与实际 MATCHED 链的诊断 LCS 保留率为 75%、50%、0%。说明当前 Story/Outline 层能遵循目标 Function 链，但正文经 Observer/Matcher 回流后未必重新识别为同一条链。关系类 Function 在本轮从形成/解除收敛为 `RELATIONSHIP_STATUS_CHANGE`，是结果差异的重要来源。
+
+判断：生成链路已经工程跑通，但结构保持尚未稳定。当前不增加 Supervisor、回流专用 Agent 或复杂校验；继续保留本轮结果作为基线，后续再用少量不同 Pattern 重复验证。
+## 173. Pattern 应用阶段：成功路径可用，但大纲生成稳定性不足（2026-09-03）
+
+基于最新 Snapshot 尝试使用 3 个未使用 Pattern 生成不同题材故事。现实家庭职场成功完成大纲和正文；悬疑因 `final_ledger` Schema 类型错误失败；古风因伏笔兑现位置非法失败。
+
+这次失败没有进入 Evolve，也没有破坏 Snapshot。失败时 `claim_pattern` 会提前占用 Pattern，因此清理了本轮两个失败占用和一个失败大纲，防止测试影响后续应用。
+
+结论：Pattern 应用链路的成功路径存在，但不能把生成层稳定性视为已解决。当前不增加 Supervisor；如果继续推进，最小改进应集中在大纲生成节点的受限重试/纠错，而不是扩展数据库或多 Agent 架构。
+
+## 174. Pattern 应用失败应在节点内收敛，Pattern 占用应与大纲落库原子绑定（2026-09-03）
+
+本轮将应用阶段暴露的两个确定性问题收敛为最小修复：LLM 的 `final_ledger` 只补充明确提示，不改变既有字符串 schema；伏笔位置错误只做一次带错误反馈的局部重试。Pattern 的领取从 Planner 前移状态改为 `record_outline()` 事务内的最终绑定，使生成、校验或导出中途失败不会留下孤立 `pattern_usage`。该方案保持现有单库和线性 LangGraph，不新增 Supervisor、数据库或复杂恢复层。
+
+真实验证表明该修复已作用于正式流程：新 Pattern 成功生成并落库，大纲结构校验通过，`final_ledger` 为纯字符串，兑现位置全部合法；本次真实样本未触发业务级伏笔重试，但确定性测试已覆盖该分支。LLM 仍可能在字段格式上触发既有结构化重试，这属于正常收敛机制，不再扩展架构。
+
+## 175. 生成—回流—再归纳应先建立批次基线（2026-09-03）
+
+用户要求把已跑通的自动化闭环作为稳定使用流程进行真实回归，而不是继续扩展架构。本批用 5 个题材/Pattern 组合尝试生成，3 篇完整进入 Evolve，Coordinator 自动完成 Evolve → Pattern。结果显示链路、Snapshot 和 Run 可见性正常，目标 Function 链保留率为 75%～80%；但大纲最终成功率只有 60%，全 Snapshot assignment coverage 约 64%，且关系 Function 与调查/证据 Function 的粒度问题再次出现。由此确认下一阶段应以独立小批次回归和单指标比较为主，不应把一次成功闭环误判为语义质量稳定，也不需要立即新增 Supervisor 或数据库边界。
+
+## 176. 当前链路可用后进入实际使用阶段（2026-09-03）
+
+用户确认当前系统达到“可用即可，后续再优化”的标准。基于真实回归中 Coordinator 自动闭环成功、父子 Snapshot 正常、失败大纲未污染 Evolve、外键和悬挂 Run 检查通过，项目可以从架构验证切换到实际故事生产与跨题材数据积累。后续优化以真实使用中重复出现的问题为依据，不提前扩展 StateVocabulary、Best-of-N 或 Supervisor。
+
+## 177. StateVocabulary 先做确定性规范化，不做 LLM 同义词推断（2026-09-03）
+
+用户随后要求实现最小 StateVocabulary。为保持成本和架构边界，第一版从当前 FunctionContract 直接生成词表：aspect/key 沿用已有大写 ID，state 对 Unicode/空白/已有标识符做稳定规范化，非标识符使用稳定 canonical ID，并保留 aliases 与 raw_evidence。Ledger 以 canonical ID 做状态和债务比较，原始字段不变；新 Snapshot 保存词表并参与哈希，旧 Snapshot 不回写。该版本解决格式和追踪问题，但不声称能自动合并“关系紧张/关系恶化”等语义近义词，后者留待真实案例重复后再决定。
+
+## 178. StateVocabulary 已通过真实 Evolve 发布验证（2026-09-03）
+
+用户要求用一篇真实新故事验证 StateVocabulary 是否能进入实际数据流。单篇 Evolve 在同一正式 SQLite 上成功发布带 `state_vocabulary.json` 的新子 Snapshot，并自动完成 Pattern；词表哈希、Snapshot、外键和 Run 状态均正常。该结果确认实现可以作为后续增量流程的正式产物使用，但仍保持语义同义词不自动合并的最小边界。
+
+## 179. StateVocabulary 不替代 StoryPattern 去重（2026-09-03）
+
+用户指出 StoryPattern 已经存在相似结构去重，因此需要明确 StateVocabulary 的必要范围。结论是：Pattern 去重处理故事级 Function 结构，StateVocabulary 处理 FunctionContract 中单个状态、aspect 和义务字段的统一；前者可以发现整体相似，但不能保证 `before → after` 状态连接使用同一内部标识。若项目只做 Pattern 相似度分析，StateVocabulary 并非必需；当前保留最小确定性版本，仅服务状态比较、规划、统计和义务检查，不加入每轮 LLM 同义词推断。
+
+## 180. 真实增量与质量基线阶段已完成（2026-09-03）
+
+用户指出“继续真实增量使用与质量基线积累”此前已经反复完成。确认：25 篇故事的真实闭环、跨题材验证、生成—回流—再归纳基线，以及带 StateVocabulary 的真实 Evolve 发布都已完成。后续不应把再次跑一批数据当作新的必经验证阶段；新数据只在实际使用或需要回答具体质量问题时自然进入。当前阶段应转入 Pattern 驱动的实际故事生成/分析应用，架构扩展继续由真实故障触发。
