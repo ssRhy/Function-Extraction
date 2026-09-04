@@ -90,7 +90,7 @@ def test_contract_ledger_exposes_state_vocabulary_without_changing_raw_states():
     assert ledger["state_vocabulary"]["schema_version"] == 1
 
 
-def test_planner_uses_snapshot_contracts_over_function_card():
+def test_planner_uses_snapshot_contracts_over_pattern_contract():
     contract = _contract("F1", "A", "UNKNOWN", "KNOWN")
     catalog = {"published_patterns": [{
         "pattern_id": "PAT_P",
@@ -101,11 +101,6 @@ def test_planner_uses_snapshot_contracts_over_function_card():
     }]}
     pattern, chain = outline.planner(
         catalog,
-        {"A": {"abstraction": {
-            "preconditions": ["旧前置"],
-            "role_slots": ["旧槽位"],
-            "state_transition": {"before": "旧", "after": "旧"},
-        }}},
         "01_悬疑惊悚",
         contracts={"F1": contract},
     )
@@ -125,13 +120,11 @@ def test_outline_graph_consumes_contract_and_exports_closed_ledger(tmp_path, mon
         "category_counts": {"01_悬疑惊悚": 1},
         "core_function_chain": [{"function_id": "F1", "function_name": "A", "definition": "d"}],
     }]}
-    cards = {"A": {"abstraction": {
-        "preconditions": [], "role_slots": [], "state_transition": {},
-    }}}
     monkeypatch.setattr(outline, "load_catalog", lambda *_args: catalog)
-    monkeypatch.setattr(outline, "load_cards", lambda _snapshot_id: cards)
     monkeypatch.setattr(outline, "load_contracts", lambda *_args: {"F1": contract})
-    monkeypatch.setattr(outline, "load_mechanisms", lambda _snapshot_id: {"A": {"mechanisms": []}})
+    monkeypatch.setattr(outline, "load_planner_references", lambda *_args: {
+        "motifs": [], "transitions": {}, "instance_cases": {},
+    })
 
     def fake_chat(_messages, output_schema, **_kwargs):
         if output_schema is outline.StorySeed:

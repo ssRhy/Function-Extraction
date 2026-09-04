@@ -54,6 +54,10 @@ def load_outline_document(knowledge_db, outline_id):
 
 def _scene_plan_issues(source, plan):
     segments = source["outline"]["segments"]
+    character_ids = {
+        item.get("id") for item in (source.get("seed", {}).get("characters") or [])
+        if item.get("id")
+    }
     seen_indices = []
     scene_ids = set()
     issues = []
@@ -68,6 +72,10 @@ def _scene_plan_issues(source, plan):
         expected_names = [segments[index - 1]["function_name"] for index in indices]
         if scene["function_names"] != expected_names:
             issues.append(f"{scene['scene_id']} 的 Function 与来源大纲段不一致")
+        if character_ids:
+            unknown = sorted(set(scene["characters"]) - character_ids)
+            if unknown:
+                issues.append(f"{scene['scene_id']} 引用了未定义人物: {', '.join(unknown)}")
         seen_indices.extend(indices)
     if set(seen_indices) != set(range(1, len(segments) + 1)):
         issues.append("场景计划未覆盖全部大纲段")
@@ -76,6 +84,24 @@ def _scene_plan_issues(source, plan):
     if not plan["scenes"][-1]["resolves_ending"]:
         issues.append("最后场景未承担结局兑现")
     return issues
+
+
+def validate_character_names(source, story):
+    """校验正文输出使用一份覆盖全部 seed 人物的稳定姓名映射。"""
+    expected = {
+        item.get("id") for item in (source.get("seed", {}).get("characters") or [])
+        if item.get("id")
+    }
+    mapping = story.get("character_names") or {}
+    if not expected:
+        return story
+    if set(mapping) != expected:
+        raise ValueError("正文 character_names 必须恰好覆盖 seed.characters 中的人物 ID")
+    names = [str(value).strip() for value in mapping.values()]
+    if any(not name for name in names) or len(set(names)) != len(names):
+        raise ValueError("正文 character_names 必须是非空且互不重复的姓名")
+    story["character_names"] = dict(zip(mapping, names))
+    return story
 
 
 def _align_story_scenes(scene_plan, story):
@@ -233,6 +259,7 @@ def write_story_node(state):
         *([{"role": "user", "content": f"补充创作要求：{state['user_request']}"}]
           if state.get("user_request") else []),
     ], StoryDraft, reasoning_effort="medium").model_dump()
+    story = validate_character_names(source, story)
     return {"story": _align_story_scenes(state["scene_plan"], story)}
 
 

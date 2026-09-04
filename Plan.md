@@ -887,3 +887,63 @@ Pattern 以父 Snapshot 的 PatternSet 为基线，只更新新增或 FunctionOc
 ```
 
 Exact Motif 由有序 Function ID 链确定，不调用 LLM；语义候选只判 `SAME_PATTERN / RELATED / DIFFERENT`。Pattern 的证据扩展和结构扩展分别产生 `EVIDENCE_EXTENDED` 与 `STRUCTURE_EXTENDED` 版本；未变化 PatternVersion 直接继承。正式输入与中间状态只从统一 SQLite 读取，不使用 Catalog 文件、JSON replay 或旧目录 fallback。
+
+## 十五、Planner 阶段收敛与后续改进（2026-09-04）
+
+当前 Planner 暂时完成，不再继续增加 Agent 或抽象层。它的职责已经明确为：
+
+```text
+选择或接收 Pattern
+→ 固定 Pattern 的 Function chain
+→ 绑定 FunctionContract 的前置条件、角色槽位和效果
+→ 查询并传递 transition、局部 motif 和 Occurrence 实例案例
+→ 为 Mechanism / Scaffold 提供可审计的规划上下文
+```
+
+Planner 本身是确定性的结构编排器，不负责创作具体事件，也不直接调用 LLM 改写 Function chain。真实 LLM 的创造性规划位于 Seed、Mechanism、Scaffold 和 Realize 节点。这样可以避免模型在生成过程中擅自删除、重排 Function 或绕过合同约束。
+
+真实 LLM A/B 已确认三类参考能够被查询并进入后续 Prompt，但当前尚不能仅凭输出差异证明模型一定使用了某条参考：调用没有固定采样参数，输出也没有稳定的 motif 或 Occurrence 引用痕迹。因此，Planner 后续只保留以下按需改进项：
+
+1. 增加可复查的引用可观测性，例如记录被注入的参考 ID，以及允许输出标记所采用的参考类型；
+2. 在需要论文级结论时，增加固定采样配置或人工盲评，区分参考带来的收益与 LLM 自身波动；
+3. 当真实案例反复出现链断裂时，再改进链边语义、状态兼容和终态规划；
+4. 当真实案例反复出现人物或角色槽位漂移时，再补充稳定人物绑定和角色约束。
+
+以下内容暂不作为 Planner 的默认工作：让 LLM 自由重排 Function、恢复旧 Function Card 兼容路径、增加 Supervisor、Best-of-N 或完整 Story Profile。
+
+## 十六、Planner 之后的下一阶段：结构层推进
+
+Pattern 驱动的真实故事生成质量已经完成多轮验证，生成失败、结局兑现和正文回流问题暂时作为维护项，不再作为下一阶段主线。下一阶段应集中推进故事结构本身：系统是否学到了跨故事、跨题材仍然成立的 Function 组织规律，以及这些规律能否被 Pattern 和 Planner 稳定表达。
+
+结构层主线是：
+
+```text
+Function 本体边界
+→ Function transition 图
+→ 局部 motif / Pattern 抽象
+→ 跨故事、跨题材结构泛化
+→ 结构性评估
+→ 更新 Pattern / Planner 的结构表示
+```
+
+重点回答以下问题：
+
+1. 当前 Function 是否处在相近粒度，关系变化、信息揭示、威胁和反思等结构作用是否仍有混叠；
+2. transition 是简单频率统计，还是能够表达哪些 Function 在什么叙事条件下可连接；
+3. motif 和 Published Pattern 是否代表可复用的结构，而不是某一题材的表面事件模板；
+4. 同一 Pattern 能否在不同题材中保持 Function 关系和因果方向，同时允许具体实例变化；
+5. Planner 输出的 chain 是否具有完整起承转合、状态推进和终态闭合，而不只是 Function 名称的排列。
+
+下一项建议先做“结构表示与泛化审计”：使用已有 Snapshot、FunctionOccurrence、motif 和 PatternSet，建立 Function—transition—motif—Pattern 的分层对照，找出最影响结构泛化的一个问题；如果需要检查 Pattern 因果衔接，优先复用现有 Contract Ledger/Checker 做只读诊断，而不是新增一套状态/义务系统。这个工作不要求重新生成大量正文，也不要求先修人物、格式重试或单个结局样本。
+
+暂时放下：Story Profile 的具体功能、人物称呼校正、生成格式重试、单个结局案例修补、Best-of-N、Supervisor 和论文级人工评审。它们在结构层结论明确后再按需要恢复。
+
+## 十七、分层结构审计后的任务收敛（2026-09-04）
+
+审计发现的 motif 候选碎片化、Pattern 近邻变体和 Contract 组合不完整，当前都不是核心链路的阻塞项：
+
+- motif 碎片化主要是滑动窗口产生的中间候选，Published cluster 已有故事支持门槛；
+- Pattern 近邻变体目前没有完全重复，可能包含有价值的结构变体；
+- Contract Ledger 已在 Outline 生成阶段追踪状态和义务，StoryPattern 不需要用严格衔接规则阻断真实 Pattern。
+
+因此暂不为这三项新增代码。只有当候选规模影响运行成本、Pattern 近邻影响实际选择，或研究目标要求证明 Pattern 的因果闭合时，才分别启动候选压缩、Pattern 治理或复用 Ledger 的只读诊断。

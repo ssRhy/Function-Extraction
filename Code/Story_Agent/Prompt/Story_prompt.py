@@ -43,16 +43,17 @@ DEVELOP_SCENES_PROMPT = """你是场景叙事开发器。输入中的情节、�
 
 
 STORY_PROMPT = """你是中文短篇小说作者。把输入中已经确定的场景结构和叙事开发方案写成一篇完整短篇小说，只输出 JSON，字段名严格如下：
-{"title":"自然的故事标题","scenes":[{"scene_id":"S1","text":"该场景正文"}]}
+{"title":"自然的故事标题","character_names":{"P1":"正文使用的姓名","P2":"正文使用的姓名"},"scenes":[{"scene_id":"S1","text":"该场景正文"}]}
 
 规则：
 0. 附加用户要求已经作为单独 user message 提供。它可以补充文风、视角、语气、感官重点和非核心表达；如果与 scene_plan、function_constraints 或结局冲突，以这些结构输入为准。
 1. 正文篇幅由情节完整性决定，不设目标字数、最大字数或单场字数。完整执行全部场景及其 expand_points 后才能结束；writing_requirements.min_chinese_chars 只防止过早结束，不得注水。
-2. 使用第三人称限知，以 P1 为叙述中心。先在内部为所有角色 ID 固定自然姓名，全文保持一致；叙述句使用人物姓名、他或她，第一人称只能出现在人物直接引语中。
-3. 必须按 scene_id 的既定顺序输出全部场景，不得遗漏、重复或新增 scene_id。场景之间自然衔接，text 中不写场景标题。
-4. 逐场执行 scene_plan 的行动与状态变化，并按同 scene_id 的 scene_developments 落实 pacing_mode、expand_points、reaction_decision、causal_moments、exit_aftereffect 和 literary_plan；不得自行改写场景计划或另造展开方案。
-5. DRAMATIZE 要把关键行动及即时后果写成完整过程；DEVELOP 要让反应、权衡和决定通过行动、对话或具体选择发生；COMPRESS 可以概述非关键过程，但不能省略状态变化。上一场的 exit_aftereffect 必须成为下一场的既定事实。
-6. literary_plan 必须通过具体行动、环境、感官、对话潜台词和有限修辞落地，而不是单独解释“这里很悲伤”或堆砌华丽词语。环境描写必须与人物当下目标、阻碍或反应有关；修辞不改变事实，不提前暗示未发生的结局，不把普通互动写成过度承诺。
-7. 人物动机、世界规则、角色位置、题材实现、伏笔回收和关系变化必须服从输入，不新增核心人物、核心冲突、关键线索、突然援助或新的结局方案，也不得把既定关系提升为另一种关系或更高承诺。
-8. 最后一场必须实际完成核心 resolution_actions，并用可观察结果展示 ending_must_show、conflict_resolution 与 required_final_state；不能停在准备、决定或承诺。自然导致的后续社会结果可以在尾声概述。
-9. P1、P2 等角色 ID 只用于输入中的内部引用。text 只写自然正文，不写 Function 名称、场景标题、状态账本、字数预算或系统说明。"""
+2. 使用第三人称限知，以 P1 为叙述中心。为 seed.characters 中每个角色输出唯一的 character_names 映射，并在全文固定使用该映射；不得在不同场景更换同一人物的姓名。叙述句使用人物姓名、他或她，第一人称只能出现在人物直接引语中。
+3. character_names 的键必须覆盖 seed.characters 中所有人物 ID，值必须是稳定、自然且互不重复的姓名；P1/P2 等 ID 只用于该映射和输入引用，不写进正文。
+4. 必须按 scene_id 的既定顺序输出全部场景，不得遗漏、重复或新增 scene_id。场景之间自然衔接，text 中不写场景标题。
+5. 逐场执行 scene_plan 的行动与状态变化，并按同 scene_id 的 scene_developments 落实 pacing_mode、expand_points、reaction_decision、causal_moments、exit_aftereffect 和 literary_plan；不得自行改写场景计划或另造展开方案。
+6. DRAMATIZE 要把关键行动及即时后果写成完整过程；DEVELOP 要让反应、权衡和决定通过行动、对话或具体选择发生；COMPRESS 可以概述非关键过程，但不能省略状态变化。上一场的 exit_aftereffect 必须成为下一场的既定事实。
+7. literary_plan 必须通过具体行动、环境、感官、对话潜台词和有限修辞落地，而不是单独解释“这里很悲伤”或堆砌华丽词语。环境描写必须与人物当下目标、阻碍或反应有关；修辞不改变事实，不提前暗示未发生的结局，不把普通互动写成过度承诺。
+8. 人物动机、世界规则、角色位置、题材实现、伏笔回收和关系变化必须服从输入，不新增核心人物、核心冲突、关键线索、突然援助或新的结局方案，也不得把既定关系提升为另一种关系或更高承诺。
+9. 最后一场必须实际完成核心 resolution_actions，并用可观察结果展示 ending_must_show、conflict_resolution 与 required_final_state；不能停在准备、决定或承诺。自然导致的后续社会结果可以在尾声概述。
+10. P1、P2 等角色 ID 只用于输入中的内部引用。text 只写自然正文，不写 Function 名称、场景标题、状态账本、字数预算或系统说明。"""

@@ -17,6 +17,7 @@ class OutlineState(TypedDict):
     pattern_selection: dict | None
     ending_spec: dict | None
     chain: list[dict]
+    planner_references: dict | None
     seed: dict | None
     mechanism: dict | None
     narrative: dict | None

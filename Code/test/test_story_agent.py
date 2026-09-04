@@ -197,6 +197,22 @@ def test_scene_plan_requires_coverage_order_and_ending():
     assert any("覆盖" in issue for issue in app._scene_plan_issues(source, incomplete))
 
 
+def test_scene_plan_rejects_unknown_character_id():
+    source = _source()
+    plan = app.build_scene_plan(source, _scene_plan_draft().model_dump())
+    plan["scenes"][0]["characters"] = ["P9"]
+    assert any("未定义人物" in issue for issue in app._scene_plan_issues(source, plan))
+
+
+def test_character_names_must_cover_seed_characters():
+    source = _source()
+    story = {"title": "标题", "scenes": [{"scene_id": "S1", "text": "正文"}]}
+    with pytest.raises(ValueError, match="恰好覆盖"):
+        app.validate_character_names(source, story)
+    story["character_names"] = {"P1": "林晚"}
+    assert app.validate_character_names(source, story)["character_names"] == {"P1": "林晚"}
+
+
 def test_function_constraints_lock_segment_function():
     source = _source()
     constraints = app.align_function_constraints(source, _function_constraints().model_dump())
@@ -278,7 +294,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             assert payload["writing_requirements"] == {
                 "min_chinese_chars": 3000,
             }
-            return state.StoryDraft(title="雾中灯塔", scenes=[
+            return state.StoryDraft(title="雾中灯塔", character_names={"P1": "林晚"}, scenes=[
                 state.StoryScene(scene_id="S2", text="他在仓库里解决了危险。"),
                 state.StoryScene(scene_id="S1", text="他在街道上发现了危险。"),
             ])
@@ -306,6 +322,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
     assert exported["source_outline"]["contract_ledger"]["enabled"] is False
     assert exported["source_outline"]["validation"]["overall_ok"] is True
     assert exported["source_outline_id"] == "OUT_TEST"
+    assert exported["story"]["character_names"] == {"P1": "林晚"}
     assert os.path.exists(result["result_path"].replace(".json", ".md"))
     markdown = open(result["result_path"].replace(".json", ".md"), encoding="utf-8").read()
     assert "F1" not in markdown and "scene_plan" not in markdown and "P1" not in markdown

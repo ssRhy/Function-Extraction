@@ -43,6 +43,7 @@ class SourceOutlineDocument(BaseModel):
     pattern_name: str
     genre: str
     seed: dict
+    story_profile: dict | None = None  # 预留接口，当前不参与正文生成
     mechanism_plan: MechanismPlan
     narrative_plan: NarrativePlan
     contract_ledger: dict | None = None
@@ -183,3 +184,7 @@ class StoryScene(BaseModel):
 class StoryDraft(BaseModel):
     title: str = Field(min_length=1)
     scenes: list[StoryScene] = Field(min_length=1)
+    character_names: dict[str, str] = Field(
+        default_factory=dict,
+        description="故事内稳定人物 ID -> 正文使用的自然姓名",
+    )

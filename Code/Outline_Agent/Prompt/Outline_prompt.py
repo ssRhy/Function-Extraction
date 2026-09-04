@@ -28,6 +28,7 @@ SEED_PROMPT = """你是网文大纲策划。给定一条包含 FunctionContract 
 MECH_PROMPT = """你是叙事结构机制规划者。给定 Function 序列（含唯一 segment_index、FunctionContract、角色槽位、状态前置条件、状态效果、occurrence_index/occurrence_total）和故事种子人物，为每个 Function 生成最小结构方案。此阶段不设计题材化表面形式、伏笔、反应场景或连接事件。role_bindings 必须覆盖该 FunctionContract 的全部角色槽位。只输出 JSON，字段名严格如下：
 {"steps": [{"segment_index": 1, "function_name": "函数名", "role_bindings": {"角色槽位": "人物ID"}, "who_does_what": "谁对谁做什么", "why": "为何发生", "state_change": "Function造成的总体结构变化", "character_state_changes": {"P1": "变化前状态 → 可观察的触发证据或代价 → 变化后状态"}, "connects_to_next": "怎么连接下一步"}]}
 
+输入中的每个 chain step 可能包含 reference_transitions 和 reference_instance_cases，且输入可能包含 reference_motifs；它们是同一 Snapshot 中真实 Function 链、局部结构和 Occurrence 的参考，不是新增 Function。
 规则：
 1. state_change 必须兑现当前 FunctionContract 的状态效果，但只记录当前 Function 必须造成的最小结构变化，不得提前完成后续 Function、ending_spec 或 seed.ending_direction 的终态。
 2. why 必须从 seed 中对应人物的 goal、motivation、初始 relationships，以及上一步已经产生的事实中推出本步行动，写清人物此刻为什么行动、想得到什么、担心失去什么。不能把态度结论或心理标签本身当作原因，例如只写“因为关心”“出于仇恨”“被打动”“终于明白”。
@@ -35,22 +36,25 @@ MECH_PROMPT = """你是叙事结构机制规划者。给定 Function 序列（�
 4. 涉及人物关系时，关系双方都必须出现在 character_state_changes 中，并分别拥有可解释的认知、情感或选择变化。根据当前故事实际涉及的维度推进，例如熟悉程度、信任、利益立场、权力关系、责任、依赖或亲密程度；每段只完成当前 Function 必需的最小变化，不能只写主角改变，再默认另一方同步接受，也不能一次跳到该关系维度的稳定终态。
 5. who_does_what 只用人物 ID 写当前 Function 必须发生的核心行动，不加入具体地点、道具、技术、职业流程、伏笔、反应或场景调度；connects_to_next 只声明下一步所需的压力、信息、资源、义务或未决问题，不设计具体连接事件，也不得提前执行下一 Function。
 6. 一个动作只解决与其有直接因果关系的问题。击退威胁不能自动建立信任，揭露真相不能自动获得原谅，获得资源不能自动形成联盟，表达立场也不能自动完成另一种关系变化；多个状态维度需要各自的行动和证据。
-7. 若某 Function 重复出现（occurrence_total>1），每次必须通过更高风险、更关键信息、更大代价或更主动投入形成递进，按 occurrence_index 逐次升级；递进不等于一次跨越多个关系阶段。"""
+7. 若某 Function 重复出现（occurrence_total>1），每次必须通过更高风险、更关键信息、更大代价或更主动投入形成递进，按 occurrence_index 逐次升级；递进不等于一次跨越多个关系阶段。
+8. reference_transitions 只用于让 connects_to_next 与真实后继关系保持合理；不得修改既定 Function 顺序。reference_instance_cases 只用于理解可迁移的动作机制，不得照搬其中的人名、地点或题材设定。reference_motifs 只用于校准局部结构，不得新增、删除或重排 Function。"""
 
 
-NARRATIVE_PROMPT = """你是故事大纲的叙事展开设计者。给定 Function 序列、故事种子、结构机制方案、真实参考实现机制和 ending_spec，为每个链位置设计唯一的题材化实现及必要叙事支架。只输出 JSON，字段名严格如下：
+NARRATIVE_PROMPT = """你是故事大纲的叙事展开设计者。给定 Function 序列、故事种子、结构机制方案、真实实例案例、局部 motif 证据和 ending_spec，为每个链位置设计唯一的题材化实现及必要叙事支架。只输出 JSON，字段名严格如下：
 {"steps": [{"segment_index": 1, "function_name": "函数名", "genre_realization": "当前题材中的具体实现", "motivation_setup": "行动前需要建立的动机或空字符串", "connective_event": "实现 connects_to_next 的具体事件或空字符串", "reaction_beat": "重大事件后的必要反应或空字符串", "setup_payoffs": [{"content": "提前建立的线索、资源、关系或能力", "payoff_segment_index": 3, "payoff": "后续如何兑现"}]}]}
 
+输入中的 reference_motifs 是所选 Pattern 的局部 motif 证据；每个 chain step 中的 reference_instance_cases 是 Function 的真实实现参考；二者只用于题材化，不改变既定 Function 链。
 规则：
 1. steps 必须与 Function 链逐项对应，segment_index 和 function_name 原样保留，不新增、删除或重排 Function。
-2. genre_realization 必须使用 seed.world_setting、人物身份、职业、资源和限制，将 mechanism_plan.who_does_what 实现为当前题材中可发生的具体行动；可以参考 reference_mechanisms，但不得照搬与当前题材或人物不符的表面形式。
+2. genre_realization 必须使用 seed.world_setting、人物身份、职业、资源和限制，将 mechanism_plan.who_does_what 实现为当前题材中可发生的具体行动；可以参考 reference_instance_cases，但不得照搬与当前题材或人物不符的表面形式。
 3. genre_realization 必须保持 role_bindings、state_change 和 character_state_changes 的结构后果，不得替换行动主体、改变 Function 含义、提前完成后续 Function 或 ending。
 4. motivation_setup 只补足 mechanism_plan.why 在情节中需要预先可见的事实、利益、恐惧或代价；已有充分依据时输出空字符串，不创造新目标。
 5. connective_event 只把 mechanism_plan.connects_to_next 变成可观察事件；最后一段应说明如何把已形成的条件交给 ending。没有必要时输出空字符串。
 6. reaction_beat 只用于受伤、背叛、身份揭露、死亡、公开羞辱、关系确认等重大事件后的反应和消化；普通行动输出空字符串，不为每个 Function 强制增加反应。
 7. setup_payoffs 只为后续机制或 ending 已经需要的线索、工具、关系、秘密或能力建立来源。payoff_segment_index 只能填写当前链中大于当前 segment_index 的整数；最后一段只能填 null，表示在独立 ending 中兑现。每项必须说明后续如何实际使用，不得创造新的解决方案。
 8. 若 Function 重复出现，每次 genre_realization 必须按 occurrence_index 通过信息、风险、代价或主动投入递进，不能复制同一事件。叙事支架不能改变 Function 顺序或结构后果。
-9. 动机、伏笔、反应和连接事件只能为已定关系变化提供可观察依据，不能借“铺垫”之名新增 Function 未要求的关系类型、关系阶段或稳定承诺。"""
+9. 动机、伏笔、反应和连接事件只能为已定关系变化提供可观察依据，不能借“铺垫”之名新增 Function 未要求的关系类型、关系阶段或稳定承诺。
+10. 优先从 reference_instance_cases 选择与当前人物、世界和限制相容的动作机制；可以改写为当前题材的自然表达，但不得复制样例专名或表层细节。reference_motifs 只作为局部结构证据，不能新增、删除或重排 Function。"""
 
 
 REALIZE_PROMPT = """你是大纲实现者。给定 Function 序列（含唯一 segment_index、FunctionContract、状态前置条件、状态效果、义务效果、occurrence_index/occurrence_total）、模板级 ending_spec、故事种子、结构机制方案和叙事展开方案，写成分段因果大纲，不写场景、不写正文。只输出 JSON，字段名严格如下：

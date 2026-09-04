@@ -12,6 +12,7 @@ import json
 import os
 import sys
 import time
+from collections import Counter, defaultdict
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _VENDOR = os.path.join(_ROOT, "vendor")
@@ -53,16 +54,6 @@ def load_catalog(snapshot_id, knowledge_db=DEFAULT_DB_PATH):
     return StoryKnowledgeStore(knowledge_db).load_pattern_catalog(snapshot_id)
 
 
-def load_cards(snapshot_id):
-    path = os.path.join(_DATA, "function_cards", snapshot_id, "function_cards.jsonl")
-    if not os.path.isfile(path):
-        return {}
-    return {
-        card["function_name"]: card
-        for card in (json.loads(line) for line in open(path, encoding="utf-8") if line.strip())
-    }
-
-
 def load_contracts(snapshot_id, knowledge_db=DEFAULT_DB_PATH):
     return {
         item["function_id"]: item
@@ -70,11 +61,122 @@ def load_contracts(snapshot_id, knowledge_db=DEFAULT_DB_PATH):
     }
 
 
-def load_mechanisms(snapshot_id):
-    path = os.path.join(_DATA, "transition_index", snapshot_id, "transition_index.json")
-    if not os.path.isfile(path):
-        return {}
-    return json.load(open(path, encoding="utf-8"))["mechanisms"]
+def _occurrence_sort_key(occurrence):
+    order = occurrence.get("observation_order")
+    if isinstance(order, int) and order > 0:
+        return order, 0, occurrence.get("occurrence_id", "")
+    indices = occurrence.get("source_sentence_indices") or []
+    return min(indices) if indices else 0, 1, occurrence.get("occurrence_id", "")
+
+
+def build_function_transitions(occurrences):
+    """从冻结 Snapshot 的 MATCHED occurrence 统计 Function 邻接转移。"""
+    by_story = defaultdict(list)
+    for occurrence in occurrences:
+        if occurrence.get("status") == "MATCHED" and occurrence.get("function_name"):
+            by_story[occurrence.get("story_id", "")].append(occurrence)
+
+    counts = Counter()
+    stories = defaultdict(set)
+    for story_id, items in by_story.items():
+        previous = None
+        for occurrence in sorted(items, key=_occurrence_sort_key):
+            current = occurrence["function_name"]
+            if current == previous:
+                continue
+            if previous is not None:
+                counts[(previous, current)] += 1
+                stories[(previous, current)].add(story_id)
+            previous = current
+
+    result = defaultdict(list)
+    for (source, target), count in counts.items():
+        result[source].append({
+            "from": source,
+            "to": target,
+            "count": count,
+            "support_stories": len(stories[(source, target)]),
+        })
+    return {
+        source: sorted(items, key=lambda item: (-item["count"], item["to"]))
+        for source, items in result.items()
+    }
+
+
+def _motif_references(pattern, rows):
+    motif_ids = set(pattern.get("member_motif_ids") or [])
+    references = []
+    for row in rows:
+        if row.get("motif_id") not in motif_ids:
+            continue
+        references.append({
+            "motif_id": row["motif_id"],
+            "function_ids": row.get("function_ids", []),
+            "function_names": row.get("function_names", []),
+            "length": row.get("length", 0),
+            "evidence": row.get("evidence", {}),
+        })
+    return references
+
+
+def _instance_cases(functions, occurrences, chain):
+    occurrences_by_id = {
+        item.get("occurrence_id"): item
+        for item in occurrences
+        if item.get("occurrence_id")
+    }
+    functions_by_id = {
+        item.get("function_id"): item
+        for item in functions
+        if item.get("function_id")
+    }
+    functions_by_name = {item.get("function_name"): item for item in functions}
+    cases = {}
+    for step in chain:
+        name = step["function_name"]
+        function = functions_by_id.get(step.get("function_id")) or functions_by_name.get(name)
+        supporting_ids = (function or {}).get("supporting_obs_ids", [])
+        candidates = [occurrences_by_id[item] for item in supporting_ids if item in occurrences_by_id]
+        if not candidates:
+            candidates = [item for item in occurrences if item.get("function_name") == name]
+        selected = []
+        seen_forms = set()
+        for occurrence in sorted(candidates, key=_occurrence_sort_key):
+            surface_form = str(occurrence.get("surface_form") or "").strip()
+            if not surface_form or surface_form in seen_forms:
+                continue
+            seen_forms.add(surface_form)
+            selected.append({
+                "occurrence_id": occurrence["occurrence_id"],
+                "story_id": occurrence.get("story_id", ""),
+                "surface_form": surface_form,
+                "event": occurrence.get("event", ""),
+                "before_state": occurrence.get("before_state", ""),
+                "after_state": occurrence.get("after_state", ""),
+            })
+            if len(selected) == 3:
+                break
+        cases[name] = selected
+    return cases
+
+
+def load_planner_references(snapshot_id, pattern, chain, knowledge_db=DEFAULT_DB_PATH):
+    """读取 Planner 的三类只读参考：转移、所选 motif 和真实实例。"""
+    store = StoryKnowledgeStore(knowledge_db)
+    functions = store.load_functions(snapshot_id)
+    occurrences = store.load_occurrences(snapshot_id)
+    motifs = _motif_references(pattern, store.load_motif_evidence(snapshot_id))
+    transitions = build_function_transitions(occurrences)
+    names = {step["function_name"] for step in chain}
+    return {
+        "motifs": motifs,
+        "transitions": {
+            name: transitions.get(name, [])[:3]
+            for name in names
+            if transitions.get(name)
+        },
+        "instance_cases": _instance_cases(functions, occurrences, chain),
+    }
 
 
 # ---------- 纯函数 ----------
@@ -120,7 +222,8 @@ def annotate_occurrences(chain):
     return chain
 
 
-def planner(catalog, cards, genre, pattern_name=None, contracts=None):
+def planner(catalog, genre, pattern_name=None, contracts=None, references=None):
+    references = references or {}
     ordered = candidate_patterns(catalog, genre)
     if pattern_name:
         pattern = next((p for p in ordered if p["pattern_name"] == pattern_name), None)
@@ -131,7 +234,6 @@ def planner(catalog, cards, genre, pattern_name=None, contracts=None):
     chain = []
     for index, step in enumerate(pattern["core_function_chain"], 1):
         name = step["function_name"]
-        abstraction = (cards.get(name) or {}).get("abstraction") or {}
         snapshot_contract = (contracts or {}).get(step.get("function_id"))
         pattern_contract = step.get("contract")
         if snapshot_contract and pattern_contract and snapshot_contract != pattern_contract:
@@ -141,28 +243,29 @@ def planner(catalog, cards, genre, pattern_name=None, contracts=None):
             raise ValueError(f"Pattern 缺少 FunctionContract: {name}")
         chain.append({
             "segment_index": index,
+            "function_id": step.get("function_id"),
             "function_name": name,
             "definition": step.get("definition", ""),
-            "preconditions": (
-                contract.get("preconditions", [])
-                if contract else abstraction.get("preconditions", [])
-            ),
-            "role_slots": (
-                contract.get("role_slots", [])
-                if contract else abstraction.get("role_slots", [])
-            ),
-            "state_transition": abstraction.get("state_transition", {}),
+            "preconditions": contract.get("preconditions", []) if contract else [],
+            "role_slots": contract.get("role_slots", []) if contract else [],
             "contract": contract or {},
+            "reference_transitions": references.get("transitions", {}).get(name, []),
+            "reference_instance_cases": references.get("instance_cases", {}).get(name, []),
         })
     return pattern, annotate_occurrences(chain)
 
 
 def _compact_chain(chain):
+    keys = (
+        "segment_index", "function_id", "function_name", "definition", "preconditions", "role_slots",
+        "contract", "reference_transitions", "reference_instance_cases",
+        "occurrence_index", "occurrence_total",
+    )
     return [
-        {k: step[k] for k in (
-            "segment_index", "function_name", "definition", "preconditions", "role_slots", "state_transition",
-            "contract", "occurrence_index", "occurrence_total",
-        )}
+        {
+            k: step.get(k, [] if k in {"reference_transitions", "reference_instance_cases"} else None)
+            for k in keys
+        }
         for step in chain
     ]
 
@@ -270,11 +373,19 @@ def planner_node(state):
         raise ValueError(f"题材 {state['genre']} 没有可用 Pattern")
     catalog = {**catalog, "published_patterns": available}
     contracts = load_contracts(state["snapshot_id"], state["knowledge_db"])
-    cards = load_cards(state["snapshot_id"])
-    if not contracts and not cards:
-        raise ValueError(f"Snapshot {state['snapshot_id']} 没有 FunctionContract 或 Function Card")
+    selected = next(
+        pattern for pattern in available
+        if pattern.get("pattern_name") == pattern_request
+    ) if pattern_request else available[0]
+    base_chain = [
+        {"function_id": step.get("function_id"), "function_name": step["function_name"]}
+        for step in selected["core_function_chain"]
+    ]
+    references = load_planner_references(
+        state["snapshot_id"], selected, base_chain, state["knowledge_db"],
+    )
     pattern, chain = planner(
-        catalog, cards, state["genre"], pattern_request, contracts,
+        catalog, state["genre"], pattern_request, contracts, references,
     )
     pattern_id = pattern.get("pattern_id")
     if not pattern_id:
@@ -284,6 +395,7 @@ def planner_node(state):
         "pattern_name": pattern["pattern_name"],
         "ending_spec": pattern.get("ending_spec"),
         "chain": chain,
+        "planner_references": references,
     }
 
 
@@ -305,6 +417,7 @@ def mechanism_node(state):
     user = {
         "chain": _compact_chain(state["chain"]),
         "seed": state["seed"],
+        "reference_motifs": (state.get("planner_references") or {}).get("motifs", []),
     }
     data = chat_structured([
         {"role": "system", "content": MECH_PROMPT},
@@ -316,19 +429,11 @@ def mechanism_node(state):
 
 
 def scaffold_node(state):
-    mechanisms = load_mechanisms(state["snapshot_id"])
-    hints = {
-        step["function_name"]: [
-            item["surface_form"]
-            for item in mechanisms.get(step["function_name"], {}).get("mechanisms", [])[:3]
-        ]
-        for step in state["chain"]
-    }
     user = {
         "chain": _compact_chain(state["chain"]),
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
-        "reference_mechanisms": hints,
+        "reference_motifs": (state.get("planner_references") or {}).get("motifs", []),
         "ending_spec": state.get("ending_spec"),
     }
     messages = [
@@ -461,6 +566,7 @@ def export_node(state):
         "mechanism_plan": state["mechanism"],
         "narrative_plan": state["narrative"],
         "contract_ledger": state.get("contract_ledger"),
+        "planner_references": state.get("planner_references"),
         "outline": state["outline"],
         "validation": state["validation"],
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -534,6 +640,7 @@ def main():
         "pattern_selection": None,
         "ending_spec": None,
         "chain": [],
+        "planner_references": None,
         "seed": None,
         "mechanism": None,
         "narrative": None,

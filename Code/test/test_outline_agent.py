@@ -12,19 +12,6 @@ import Outline_Agent.app as app
 import Outline_Agent.state as state
 
 
-def _cards(*names):
-    return {
-        name: {
-            "abstraction": {
-                "preconditions": ["p"],
-                "role_slots": ["r"],
-                "state_transition": {"before": "b", "after": "a"},
-            }
-        }
-        for name in names
-    }
-
-
 def _pattern(name, support, categories, functions, ending_spec=None):
     pattern = {
         "pattern_id": f"PAT_{name}",
@@ -57,11 +44,10 @@ def test_planner_genre_match():
         _pattern("C", 5, {"01_悬疑惊悚": 1}, ["F5", "F6"]),
         _pattern("B", 3, {"02_古风仙侠": 1}, ["F3", "F4"]),
     ]}
-    cards = _cards("F1", "F2", "F3", "F4", "F5", "F6")
-    pattern, chain = app.planner(catalog, cards, "01_悬疑惊悚")
+    pattern, chain = app.planner(catalog, "01_悬疑惊悚")
     assert pattern["pattern_name"] == "C"
     assert [step["function_name"] for step in chain] == ["F5", "F6"]
-    assert chain[0]["preconditions"] == ["p"]
+    assert chain[0]["preconditions"] == []
 
 
 def test_planner_fallback():
@@ -69,8 +55,7 @@ def test_planner_fallback():
         _pattern("A", 2, {"01_悬疑惊悚": 1}, ["F1", "F2"]),
         _pattern("B", 9, {"02_古风仙侠": 1}, ["F3", "F4"]),
     ]}
-    cards = _cards("F1", "F2", "F3", "F4")
-    pattern, _ = app.planner(catalog, cards, "03_现代情感")
+    pattern, _ = app.planner(catalog, "03_现代情感")
     assert pattern["pattern_name"] == "B"
 
 
@@ -79,8 +64,7 @@ def test_planner_tie_break():
         _pattern("BBB", 4, {"01_悬疑惊悚": 1}, ["F1"]),
         _pattern("AAA", 4, {"01_悬疑惊悚": 1}, ["F2"]),
     ]}
-    cards = _cards("F1", "F2")
-    pattern, _ = app.planner(catalog, cards, "01_悬疑惊悚")
+    pattern, _ = app.planner(catalog, "01_悬疑惊悚")
     assert pattern["pattern_name"] == "AAA"
 
 
@@ -99,8 +83,7 @@ def test_planner_explicit_pattern():
         _pattern("高支持", 9, {"01_悬疑惊悚": 1}, ["F1"]),
         _pattern("低支持", 2, {"01_悬疑惊悚": 1}, ["F2"]),
     ]}
-    cards = _cards("F1", "F2")
-    pattern, chain = app.planner(catalog, cards, "01_悬疑惊悚", pattern_name="低支持")
+    pattern, chain = app.planner(catalog, "01_悬疑惊悚", pattern_name="低支持")
     assert pattern["pattern_name"] == "低支持"
     assert [step["function_name"] for step in chain] == ["F2"]
 
@@ -108,11 +91,72 @@ def test_planner_explicit_pattern():
 def test_planner_explicit_pattern_missing():
     catalog = {"published_patterns": [_pattern("A", 1, {"01_悬疑惊悚": 1}, ["F1"])]}
     try:
-        app.planner(catalog, _cards("F1"), "01_悬疑惊悚", pattern_name="不存在")
+        app.planner(catalog, "01_悬疑惊悚", pattern_name="不存在")
     except ValueError:
         pass
     else:
         raise AssertionError("缺失 pattern 应抛 ValueError")
+
+
+def test_build_function_transitions_collapses_repeated_functions():
+    occurrences = [
+        {"story_id": "s1", "occurrence_id": "s1-1", "status": "MATCHED", "function_name": "A", "observation_order": 1},
+        {"story_id": "s1", "occurrence_id": "s1-2", "status": "MATCHED", "function_name": "A", "observation_order": 2},
+        {"story_id": "s1", "occurrence_id": "s1-3", "status": "MATCHED", "function_name": "B", "observation_order": 3},
+        {"story_id": "s2", "occurrence_id": "s2-1", "status": "MATCHED", "function_name": "A", "observation_order": 1},
+        {"story_id": "s2", "occurrence_id": "s2-2", "status": "MATCHED", "function_name": "B", "observation_order": 2},
+    ]
+    assert app.build_function_transitions(occurrences)["A"] == [{
+        "from": "A", "to": "B", "count": 2, "support_stories": 2,
+    }]
+
+
+def test_planner_attaches_reference_transitions_and_instance_cases():
+    catalog = {"published_patterns": [_pattern("P", 2, {"01_悬疑惊悚": 1}, ["A"])]}
+    references = {
+        "transitions": {"A": [{"from": "A", "to": "B", "count": 2, "support_stories": 2}]},
+        "instance_cases": {"A": [{"occurrence_id": "o1", "surface_form": "公开对峙"}]},
+    }
+    _, chain = app.planner(catalog, "01_悬疑惊悚", references=references)
+    assert chain[0]["reference_transitions"][0]["to"] == "B"
+    assert chain[0]["reference_instance_cases"][0]["occurrence_id"] == "o1"
+
+
+def test_load_planner_references_filters_selected_motifs_and_projects_occurrences(monkeypatch):
+    class FakeStore:
+        def __init__(self, _path):
+            pass
+
+        def load_functions(self, _snapshot_id):
+            return [{"function_id": "F1", "function_name": "A", "supporting_obs_ids": ["o1"]}]
+
+        def load_occurrences(self, _snapshot_id):
+            return [{
+                "occurrence_id": "o1", "story_id": "s1", "status": "MATCHED",
+                "function_name": "A", "observation_order": 1,
+                "surface_form": "公开对峙", "event": "A行动",
+                "before_state": "受威胁", "after_state": "暂时安全",
+            }]
+
+        def load_motif_evidence(self, _snapshot_id):
+            return [{
+                "motif_id": "MC_KEEP", "function_ids": ["F1"],
+                "function_names": ["A"], "length": 3,
+                "evidence": {"story_id": "s1", "occurrence_ids": ["o1"]},
+            }, {
+                "motif_id": "MC_DROP", "function_ids": ["F1"],
+                "function_names": ["A"], "length": 3, "evidence": {},
+            }]
+
+    monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
+    pattern = _pattern("P", 2, {"01_悬疑惊悚": 1}, ["A"])
+    pattern["member_motif_ids"] = ["MC_KEEP"]
+    references = app.load_planner_references(
+        "snapshot_x", pattern, [{"function_id": "F1", "function_name": "A"}], "knowledge.db",
+    )
+    assert [item["motif_id"] for item in references["motifs"]] == ["MC_KEEP"]
+    assert references["instance_cases"]["A"][0]["surface_form"] == "公开对峙"
+    assert references["transitions"] == {}
 
 
 def test_planner_node_skips_used_pattern(monkeypatch):
@@ -135,7 +179,9 @@ def test_planner_node_skips_used_pattern(monkeypatch):
     monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
     monkeypatch.setattr(app, "load_catalog", lambda *_args: catalog)
     monkeypatch.setattr(app, "load_contracts", lambda *_args: {})
-    monkeypatch.setattr(app, "load_cards", lambda _snapshot_id: _cards("F2"))
+    monkeypatch.setattr(app, "load_planner_references", lambda *_args: {
+        "motifs": [], "transitions": {}, "instance_cases": {},
+    })
 
     result = app.planner_node({
         "snapshot_id": "snapshot_x", "knowledge_db": "knowledge.db",
@@ -158,6 +204,9 @@ def test_planner_node_rejects_explicitly_used_pattern(monkeypatch):
 
     monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
     monkeypatch.setattr(app, "load_catalog", lambda *_args: catalog)
+    monkeypatch.setattr(app, "load_planner_references", lambda *_args: {
+        "motifs": [], "transitions": {}, "instance_cases": {},
+    })
     with pytest.raises(ValueError, match="Pattern 已使用"):
         app.planner_node({
             "snapshot_id": "snapshot_x", "knowledge_db": "knowledge.db",
@@ -260,9 +309,9 @@ def test_narrative_payoff_must_point_forward_or_ending():
 def test_scaffold_retries_invalid_payoff_once(monkeypatch):
     chain = [
         {"segment_index": 1, "function_name": "A", "definition": "", "preconditions": [],
-         "role_slots": [], "state_transition": {}, "contract": {}, "occurrence_index": 1, "occurrence_total": 1},
+         "role_slots": [], "contract": {}, "occurrence_index": 1, "occurrence_total": 1},
         {"segment_index": 2, "function_name": "B", "definition": "", "preconditions": [],
-         "role_slots": [], "state_transition": {}, "contract": {}, "occurrence_index": 1, "occurrence_total": 1},
+         "role_slots": [], "contract": {}, "occurrence_index": 1, "occurrence_total": 1},
     ]
     responses = iter([
         app.NarrativePlan(steps=[
@@ -286,7 +335,6 @@ def test_scaffold_retries_invalid_payoff_once(monkeypatch):
         return next(responses)
 
     monkeypatch.setattr(app, "chat_structured", fake_chat)
-    monkeypatch.setattr(app, "load_mechanisms", lambda _snapshot_id: {})
     result = app.scaffold_node({
         "snapshot_id": "snapshot_x", "knowledge_db": "knowledge.db",
         "chain": chain, "seed": {}, "mechanism": {}, "ending_spec": None,
@@ -318,12 +366,11 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
     catalog = {"published_patterns": [
         _pattern("P", 1, {"01_悬疑惊悚": 1}, functions, ending_spec)
     ]}
-    cards = _cards(*functions)
-    mechanisms = {name: {"mechanisms": [{"surface_form": "m"}]} for name in functions}
     monkeypatch.setattr(app, "load_catalog", lambda *_args: catalog)
     monkeypatch.setattr(app, "load_contracts", lambda *_args: {})
-    monkeypatch.setattr(app, "load_cards", lambda snapshot_id: cards)
-    monkeypatch.setattr(app, "load_mechanisms", lambda snapshot_id: mechanisms)
+    monkeypatch.setattr(app, "load_planner_references", lambda *_args: {
+        "motifs": [], "transitions": {}, "instance_cases": {},
+    })
 
     def fake_chat(messages, output_schema, **kwargs):
         if output_schema is app.StorySeed:
@@ -337,7 +384,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             )
         if output_schema is app.MechanismPlan:
             payload = json.loads(messages[-1]["content"])
-            assert "reference_mechanisms" not in payload
+            assert payload["reference_motifs"] == []
             return app.MechanismPlan(steps=[
                 state.MechanismStep(segment_index=index, function_name=name, role_bindings={}, who_does_what="",
                                   why="", state_change="", character_state_changes={}, connects_to_next="")
@@ -345,7 +392,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             ])
         if output_schema is app.NarrativePlan:
             payload = json.loads(messages[-1]["content"])
-            assert payload["reference_mechanisms"]["A"] == ["m"]
+            assert payload["reference_motifs"] == []
             return app.NarrativePlan(steps=[
                 state.NarrativeStep(
                     segment_index=index,

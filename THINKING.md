@@ -1217,3 +1217,73 @@ egistry_file（快照/并集）模式；revise 写回 store 前自动导出 .pre
 ## 180. 真实增量与质量基线阶段已完成（2026-09-03）
 
 用户指出“继续真实增量使用与质量基线积累”此前已经反复完成。确认：25 篇故事的真实闭环、跨题材验证、生成—回流—再归纳基线，以及带 StateVocabulary 的真实 Evolve 发布都已完成。后续不应把再次跑一批数据当作新的必经验证阶段；新数据只在实际使用或需要回答具体质量问题时自然进入。当前阶段应转入 Pattern 驱动的实际故事生成/分析应用，架构扩展继续由真实故障触发。
+
+## 181. 对 Plan.md 的阶段收敛判断（2026-09-03）
+
+Plan.md 早于当前实现，不能把其中所有“后续计划”继续当作未完成任务。当前核心抽取、Occurrence、FunctionContract、Pattern 增量、Planner/Outline、生成回流、Coordinator 和最小 StateVocabulary 已经真实跑通。若以原计划的完整目标衡量，剩余最必要的能力是：补齐故事级人物/关系上下文（必要时采用轻量 Story Profile）、把高质量 Occurrence 投影为可检索的实例化案例，并确认 Function 转移、motif 和实例检索能被 Planner 实际使用；这些应优先服务生成一致性。Propp 31 项映射、Best-of-N、LLM StateVocabulary 和 Supervisor 都不是当前核心链路的必需项，只有明确的分析需求、生成波动或调度故障出现时再加入。
+
+## 182. Story Profile 应复用 Observer 调用并与抽象参与者分层（2026-09-03）
+
+本轮将故事级人物上下文放进现有 Observer 的结构化输出，而不是增加独立 Profile Agent；这样每篇故事只增加字段，不增加 LLM 调用和运行边界。稳定人物使用故事内 `participant_ids`，原有 `participants` 继续只承担跨故事角色类型抽象，避免具体姓名或人物身份进入 Function 相似度。生成侧则把 `character_names` 作为正文输出的显式合同，并用确定性校验保证覆盖和唯一；这解决的是人物引用稳定，不声称已经解决正文语义中的所有人物一致性问题。
+
+## 183. Story Profile 已通过真实 LLM 隔离 Evolve 验证（2026-09-03）
+
+为验证修改不是只在 mock 测试中成立，使用真实末世科幻故事执行 1 篇隔离 Evolve。Observer 实际返回 `P1/P2` Profile，5 条新 Observation 全部带稳定 `participant_ids`，并在 `story_versions.payload_json` 和临时 Snapshot 中可回读；整条 Evolve 最终 `PASS`，正式 Knowledge DB 未写入本次 Run。
+
+真实输出同时暴露了边界：模型把“森森”写成“森余”。因此当前稳定性保证应理解为“引用同一个 ID 不漂移”，而不是“所有 mentions 字符串都经过事实级校对”。在出现重复的字面实体错误前，不增加额外实体解析 Agent；下一步仍应优先实现 MATCHED Occurrence 的实例案例投影和 Planner 检索消费。
+
+## 184. Story Profile 接入 Story Agent 后，收益首先表现为身份锚定（2026-09-03）
+
+本轮把 Profile 从 Outline 传入 Story Agent，并用同一份大纲、同一套场景计划进行真实 A/B。带 Profile 的正文沿用了 Profile 提供的两个主要人物称呼，未带 Profile 的正文重新生成了另一组姓名；两组都因 `character_names` 合同保持了各自姓名在场景间的一致。带 Profile 的正文更短更集中，但单个样本不能把篇幅或文学质量差异归因于 Profile。
+
+重要边界是：Profile 已经参与生成，但仍不是完全硬约束。A 组把 Profile 中的 `韩主任/韩总` 具体化成 `韩宏`，说明如果要求字面称呼严格继承，应该增加确定性 canonical mention 校验；不应因为一个样本就引入新的 Agent 或 Best-of-N。
+
+## 185. Story Profile 暂不执行具体功能，保留最小接口（2026-09-03）
+
+用户根据真实 A/B 结果判断带 Profile 的正文没有显示出明确优势，Profile 当前与 Outline 信息重复，且只提供软约束。因此撤回其 Observer、Evolve、Outline 和 Story Agent 运行时链路，只在 `SourceOutlineDocument` 保留可选 `story_profile` 字段作为未来接口，不生成、不校验、不持久化，也不注入任何 Prompt。`character_names` 和场景人物 ID 校验属于 Story Agent 独立的一致性合同，继续保留。
+
+## 186. Planner 尚未真正消费 transition、局部 motif 和实例案例（2026-09-03）
+
+用户要求验证已有知识是否真的进入 Planner。对正式 Snapshot `real_coordinator_rebuild_20260902_20260903T130418047879Z_b21aaffdc548` 的只读运行时探针显示：知识库有 30 个 Published Pattern、294 条 motif evidence、193 个 motif cluster、8 个 FunctionContract 和 781 个 FunctionOccurrence，但 `load_cards()` 与 `load_mechanisms()` 均未加载到文件。Planner chain 有 Contract，却没有 motif、实例案例或非空 `state_transition`；Scaffold Prompt 中的 `reference_mechanisms` 键存在但所有值为空。
+
+当前只能做如下区分：motif 已经被 StoryPattern Agent 间接压缩进 Published Pattern 的 `core_function_chain`，但 Planner 没有直接查询 motif；Function 记录中的 `realization_patterns` 尚未被 Planner 加载；`transition_index` 入口只取 `mechanisms`，没有消费独立 `transitions` 列表。因此不能宣称 Planner 已使用三类知识，后续若实现，应先补齐“读取 → Prompt 字段 → 输出可观测引用”这条最小链路。
+
+## 187. Planner 通过同一 Snapshot 的只读投影消费三类参考（2026-09-03）
+
+针对第 186 条审计暴露的缺口，采用最小实现：不另建 Instance Card 表，也不恢复当前数据中不存在的文件索引，而是在 Planner 运行时从同一 Snapshot 读取 `FunctionOccurrence`、Function 记录和所选 Pattern 的 motif evidence。这样 transition 保持真实故事顺序，实例案例保留 `occurrence_id/story_id/surface_form/event/before_state/after_state`，并且所有引用都能回溯到原始记录。
+
+链路现在是：`load_planner_references()` → chain step 的 `reference_transitions/reference_instance_cases` 与顶层 `reference_motifs` → Mechanism/Scaffold Prompt → Outline JSON 的 `planner_references`。motif 不再只通过 `core_function_chain` 间接生效，transition 和 Occurrence 实例也不再停留在离线数据层。
+
+正式 Snapshot 的真实 smoke 查询到 3 条 motif、9 条 transition edge 和 9 条实例案例，并成功进入真实 LLM 的 Mechanism/Scaffold 输入；一次样本足以证明“查询并传入”的运行时事实，但不足以证明生成文本对所有引用都做了高质量语义利用，因此后续质量结论仍需多样本评审。
+
+## 188. 删除 Planner 的旧 Function Card 兼容分支（2026-09-03）
+
+用户要求删除 Planner 中的冗余代码以避免干扰。审计发现正式 Snapshot 没有对应的 Function Card 文件，`state_transition` 也始终为空；而 Planner 已经有 Pattern 合同和 Snapshot FunctionContract，旧 cards 回退不再提供有效信息，反而让接口和 Prompt 携带无意义字段。
+
+因此移除 `load_cards()`、Planner 的 `cards` 参数及 `state_transition` 字段，只保留 Pattern、FunctionContract 和三类真实 Snapshot 参考。这个清理不改变 Planner 的结构职责，也不删除任何真实知识来源；全量测试仍为 `318 passed, 1 skipped`。
+
+## 189. 真实 LLM Planner A/B 的边界（2026-09-04）
+
+用户要求用真实 LLM 验证 Planner 的 transition、局部 motif 和实例案例是否真的被使用。实际运行发现，当前 `planner()` 是确定性的链路编排函数，真正消费这些字段的是后续 Mechanism/Scaffold Prompt。因此实验固定同一 Snapshot、Pattern、Function chain 和 Seed，只对 A 组注入三类参考、对 B 组清空参考。
+
+首轮和两轮复测都显示 A/B 的具体规划明显不同，但这只能证明“带参考的上下文会产生不同结果”，不能证明差异一定来自参考信息：`chat_structured` 当前没有固定 temperature/seed，且模型不会输出 motif/Occurrence ID 作为引用痕迹。故本轮结论是“查询与传入 PASS，语义利用的因果证明 INCONCLUSIVE”。这提示后续应优先补可复查的采样/盲评方法，而不是继续堆 Agent 或字段。
+
+## 190. Planner 阶段收敛后的下一步（2026-09-04）
+
+用户进一步明确希望推进结构性问题，暂时放下生成细节。由此将下一阶段从“生成失败的定向修复”调整为结构层推进：审计 Function 本体边界、transition 图、motif/Pattern 的抽象和跨题材泛化，并检查 Planner chain 是否表达完整结构；人物、格式、单个结局等问题保留为维护项。
+
+## 191. 分层结构审计的核心缺口（2026-09-04）
+
+对正式 Snapshot 的 Function—transition—motif—Pattern 审计显示：Pattern 的证据支持和跨题材分布已经成立，但 Contract 之间尚未形成可验证的状态组合。97 个 Pattern 相邻 Function 对没有精确的 effect-after 到 next-precondition 连接，只有 34 个共享 aspect。下一步结构工作应先定义 transition 兼容语义，再判断 Function 边界和 Pattern 是否需要调整；不能把当前共现频率直接当作因果结构。
+
+## 192. 跨题材 transition 是目标而不是缺陷（2026-09-04）
+
+用户指出项目本身就是跨题材抽取和泛化，因此 transition 跨越多个题材应被视为正向证据。审计中的风险仅指 transition 图较密、弱支持边和语义兼容关系尚未分层；后续应保留跨题材强骨架边，只降低低支持或语义不清边的结构权重，不能为了稀疏化而消除跨题材连接。
+
+## 193. 现有状态/义务代码与 StoryPattern 的边界（2026-09-04）
+
+代码核对发现，`Contracts/ledger.py` 已有 `check_contract_chain()` 和 `build_contract_ledger()`，可以检查前序 effect、当前状态和开放/推进/清偿义务；但它们只在 Outline 生成阶段使用。StoryPattern 会把 Contract 传入摘要 LLM，也会检查 Contract 是否存在，却没有用兼容结果参与 motif/Pattern 发布。因此“补足衔接”不是新增第二套账本，而是复用现有逻辑，把它以诊断方式接入 Pattern 结构评估。
+
+## 194. 三个结构现象暂不升级为开发任务（2026-09-04）
+
+用户追问 motif 候选碎片化、Pattern 近邻变体和 Contract 组合是否仍有必要。结合当前职责判断：三者都是有价值的审计观察，但都不是当前核心链路阻塞项。motif 碎片化主要是滑动窗口中间产物，Pattern 近邻可能包含有价值的变体，Contract 组合已有 Outline Ledger 处理；只有当它们分别影响成本、选择/解释或因果证明时才启动对应治理。
