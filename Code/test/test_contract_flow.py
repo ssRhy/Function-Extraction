@@ -6,7 +6,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from Contracts.ledger import build_contract_ledger
+from Contracts.ledger import build_contract_ledger, normalize_relationship_befores
 from Contracts.state_vocabulary import StateVocabulary, canonical_id
 from Outline_Agent import app as outline
 from Outline_Agent import state as outline_state
@@ -16,10 +16,10 @@ def _contract(function_id, name, before, after, *, opens=None, resolves=None):
     return {
         "function_id": function_id,
         "function_name": name,
-        "role_slots": ["主角"],
-        "preconditions": [{"role_slots": ["主角"], "aspect": "MISSION", "state": before}],
+        "role_slots": ["actor"],
+        "preconditions": [{"role_slots": ["actor"], "aspect": "MISSION", "state": before}],
         "effects": [{
-            "role_slots": ["主角"], "aspect": "MISSION",
+            "role_slots": ["actor"], "aspect": "MISSION",
             "before": before, "after": after,
         }],
         "obligation_effects": {
@@ -31,13 +31,13 @@ def _contract(function_id, name, before, after, *, opens=None, resolves=None):
 def _mechanism(name):
     return {
         "function_name": name,
-        "role_bindings": {"主角": "P1"},
+        "role_bindings": {"actor": "P1"},
         "state_change": "推进状态",
     }
 
 
 def test_contract_ledger_applies_effects_and_resolves_obligation():
-    opening = {"key": "REPAIR_TRUST", "role_slots": ["主角"], "description": "修复信任", "satisfied_when": "信任恢复"}
+    opening = {"key": "REPAIR_TRUST", "role_slots": ["actor"], "description": "修复信任", "satisfied_when": "信任恢复"}
     chain = [
         {"function_name": "OPEN", "contract": _contract("F1", "OPEN", "UNKNOWN", "ACTIVE", opens=[opening])},
         {"function_name": "CLOSE", "contract": _contract("F2", "CLOSE", "ACTIVE", "RESOLVED", resolves=[opening])},
@@ -52,6 +52,77 @@ def test_contract_ledger_applies_effects_and_resolves_obligation():
     assert ledger["issues"] == []
     assert ledger["obligations"] == []
     assert ledger["states"] == [{"role": "P1", "aspect": "MISSION", "state": "RESOLVED"}]
+
+
+def test_contract_ledger_keeps_repeated_function_steps_by_segment_index():
+    contract = _contract("F1", "REPEAT", "UNKNOWN", "KNOWN")
+    chain = [
+        {"segment_index": 1, "function_name": "REPEAT", "contract": contract},
+        {"segment_index": 2, "function_name": "REPEAT", "contract": contract},
+    ]
+    steps = [
+        {
+            "segment_index": 1, "function_name": "REPEAT",
+            "role_bindings": {"actor": "P1"}, "state_change": "P1完成变化",
+        },
+        {
+            "segment_index": 2, "function_name": "REPEAT",
+            "role_bindings": {"actor": "P2"}, "state_change": "P2完成变化",
+        },
+    ]
+
+    ledger = build_contract_ledger(
+        chain, steps, {"characters": [{"id": "P1"}, {"id": "P2"}]},
+    )
+
+    assert [item["segment_index"] for item in ledger["transitions"]] == [1, 2]
+    assert [item["role_bindings"] for item in ledger["transitions"]] == [
+        {"actor": "P1"}, {"actor": "P2"},
+    ]
+
+
+def test_relationship_before_is_inherited_across_repeated_steps():
+    relation_contract = {
+        "role_slots": ["actor", "affected"],
+        "preconditions": [],
+        "effects": [{
+            "aspect": "RELATIONSHIP_STATUS", "role_slots": ["actor", "affected"],
+            "before": "未建立", "after": "已建立",
+        }],
+        "obligation_effects": {},
+    }
+    chain = [
+        {"segment_index": 1, "function_name": "RELATE", "contract": relation_contract},
+        {"segment_index": 2, "function_name": "RELATE", "contract": relation_contract},
+    ]
+    steps = [
+        {
+            "segment_index": 1, "function_name": "RELATE",
+            "role_bindings": {"actor": "P1", "affected": "P2"},
+            "state_change": "建立关系", "character_state_changes": {"P1": "a", "P2": "b"},
+            "relationship_changes": [{
+                "source_id": "P1", "target_id": "P2", "dimension": "trust",
+                "before": "模型猜测", "after": "初步信任", "evidence": "P1承担代价",
+            }],
+        },
+        {
+            "segment_index": 2, "function_name": "RELATE",
+            "role_bindings": {"actor": "P1", "affected": "P2"},
+            "state_change": "加深关系", "character_state_changes": {"P1": "c", "P2": "d"},
+            "relationship_changes": [{
+                "source_id": "P1", "target_id": "P2", "dimension": "trust",
+                "before": "仍然猜测", "after": "稳定信任", "evidence": "P2回报承诺",
+            }],
+        },
+    ]
+    normalized = normalize_relationship_befores(
+        chain, steps, {"characters": [{"id": "P1"}, {"id": "P2"}]},
+    )
+    assert normalized[0]["relationship_changes"][0]["before"] == "未建立"
+    assert normalized[1]["relationship_changes"][0]["before"] == "初步信任"
+    assert build_contract_ledger(
+        chain, normalized, {"characters": [{"id": "P1"}, {"id": "P2"}]},
+    )["relationship_ledger"]["issues"] == []
 
 
 def test_contract_ledger_reports_binding_and_transition_breaks():
@@ -132,13 +203,13 @@ def test_outline_graph_consumes_contract_and_exports_closed_ledger(tmp_path, mon
                 genre="悬疑惊悚", world_setting="w",
                 characters=[outline_state.SeedCharacter(
                     id="P1", label="主角", role="hero", goal="g",
-                    motivation="m", relationships={},
+                    motivation="m", relationships={}, stance_toward_protagonist="self",
                 )],
                 core_conflict="c", ending_direction="e",
             )
         if output_schema is outline.MechanismPlan:
             return outline.MechanismPlan(steps=[outline_state.MechanismStep(
-                segment_index=1, function_name="A", role_bindings={"主角": "P1"},
+                segment_index=1, function_name="A", role_bindings={"actor": "P1"},
                 who_does_what="P1行动", why="c", state_change="UNKNOWN变为KNOWN",
                 character_state_changes={"P1": "未知 → 行动证据 → 已知"}, connects_to_next="结束",
             )])

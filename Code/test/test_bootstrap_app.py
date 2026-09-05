@@ -98,6 +98,20 @@ def _write_story(tmp, name, text="角色发现关键线索。角色决定采取�
         f.write(text)
 
 
+def _profile():
+    return {
+        "world_setting": "测试世界",
+        "protagonist_id": "P1",
+        "characters": [{
+            "id": "P1", "label": "角色", "structural_role": "protagonist",
+            "long_term_goal": "查明真相", "motivation": "避免危险",
+        }],
+        "relationships": [],
+        "core_conflict": "线索不足",
+        "ending_state": "掌握线索",
+    }
+
+
 @contextmanager
 def _setup_env(tmp):
     """真实 Bank（FakeEmbedder 替换模型）+ 临时 Registry 命名空间；退出时恢复全局活跃 store。"""
@@ -125,6 +139,7 @@ def _initial(tmp, story_files, no_revise=True):
         "raw_text": None,
         "story_config": None,
         "normalized_story": None,
+        "story_profile": None,
         "observations": [],
         "added_obs_ids": [],
         "similar_observations": [],
@@ -165,11 +180,13 @@ def _patched_llm(calls):
 
     def fake_obs(messages, schema, **kw):
         calls["obs"] += 1
-        return ObservationResponse(observations=[
+        return ObservationResponse(story_profile=_profile(), observations=[
             ObservationItem(
                 before_state="局面保持平静",
                 event="角色发现关键线索，改变了对局面的认知，决定采取新行动",
                 participants=["角色"],
+                participant_ids=["P1"],
+                role_bindings={"actor": ["P1"]},
                 after_state="角色掌握了关键信息",
                 affected_aspect="认知",
                 narrative_effect="推动后续行动",
@@ -212,12 +229,12 @@ def _patched_llm(calls):
     def fake_contract(messages, schema, **kw):
         calls["contract"] += 1
         return FunctionContractBody(
-            role_slots=["行动者"],
+            role_slots=["actor"],
             preconditions=[StateCondition(
-                role_slots=["行动者"], aspect="KNOWLEDGE", state="UNKNOWN",
+                role_slots=["actor"], aspect="KNOWLEDGE", state="UNKNOWN",
             )],
             effects=[StateEffect(
-                role_slots=["行动者"], aspect="KNOWLEDGE", before="UNKNOWN", after="KNOWN",
+                role_slots=["actor"], aspect="KNOWLEDGE", before="UNKNOWN", after="KNOWN",
             )],
             obligation_effects=ObligationEffects(),
         )
@@ -322,9 +339,14 @@ def test_resume_from_checkpoint():
         with _setup_env(tmp):
             cpt_db = os.path.join(tmp, "cpt.sqlite3")
             app1 = _compile_graph(_make_saver(cpt_db), interrupt_before=["cluster"])
+            knowledge = app_module.StoryKnowledgeStore(os.path.join(tmp, "knowledge.db"))
+            run_id = "FR_RESUME_TEST"
+            knowledge.begin_function_run(run_id, "bootstrap", "test_ns", None, tmp)
+            initial = _initial(tmp, ["s1.txt", "s2.txt"])
+            initial.update({"knowledge_db": str(knowledge.db_path), "run_id": run_id})
             try:
                 with _patched_llm(calls):
-                    partial = app1.invoke(_initial(tmp, ["s1.txt", "s2.txt"]), config=_cfg("t-resume"))
+                    partial = app1.invoke(initial, config=_cfg("t-resume"))
                 assert partial["current_story_index"] == 2, partial["current_story_index"]
                 assert "cluster" in app1.get_state(_cfg("t-resume")).next
                 # 模拟重启：新编译实例 + 同一 checkpoint 文件
@@ -355,9 +377,14 @@ def test_error_story_skipped():
         _write_story(tmp, "s2.txt")  # 与 fake 候选 supporting（s1/s2）对齐，确保归纳出函数
         with _setup_env(tmp):
             app = _compile_graph(_make_saver())
+            knowledge = app_module.StoryKnowledgeStore(os.path.join(tmp, "knowledge.db"))
+            run_id = "FR_ERROR_TEST"
+            knowledge.begin_function_run(run_id, "bootstrap", "test_ns", None, tmp)
+            initial = _initial(tmp, ["s1.txt", "missing.txt", "s2.txt"])
+            initial.update({"knowledge_db": str(knowledge.db_path), "run_id": run_id})
             with _patched_llm(calls):
                 result = app.invoke(
-                    _initial(tmp, ["s1.txt", "missing.txt", "s2.txt"]),
+                    initial,
                     config=_cfg("t-err"),
                 )
         assert result["current_story_index"] == 3, result["current_story_index"]

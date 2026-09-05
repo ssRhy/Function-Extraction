@@ -14,7 +14,6 @@ from pathlib import Path
 from KnowledgeBase import StoryKnowledgeStore
 from Outline_Agent import app as outline_app
 from Story_Agent import app as story_app
-from StoryPattern_Agent.app import run_pattern_evolve
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -188,6 +187,8 @@ def run_function(
     for path in (observations_path, occurrences_path):
         if not path.is_file():
             raise ValueError(f"Function 流程缺少模板所需产物: {path}")
+    from StoryPattern_Agent.app import run_pattern_evolve
+
     pattern_result = run_pattern_evolve(snapshot_id, KNOWLEDGE_DB)
     manifest = {
         "schema_version": 1,
@@ -215,7 +216,7 @@ def run_function(
 
 def _outline_state(
     snapshot_id, genre, out_dir, pattern=None, request=None,
-    knowledge_db=KNOWLEDGE_DB,
+    knowledge_db=KNOWLEDGE_DB, planner_mode="published",
 ):
     return {
         "snapshot_id": snapshot_id,
@@ -224,11 +225,16 @@ def _outline_state(
         "out_dir": str(out_dir),
         "pattern_request": pattern,
         "user_request": request or None,
+        "planner_mode": planner_mode,
         "pattern_id": None,
         "pattern_name": "",
+        "pattern_source": planner_mode,
         "pattern_selection": None,
         "ending_spec": None,
         "chain": [],
+        "planner_references": None,
+        "dynamic_candidates": [],
+        "dynamic_candidate": None,
         "seed": None,
         "mechanism": None,
         "narrative": None,
@@ -242,10 +248,10 @@ def _outline_state(
 
 def _run_outline(
     snapshot_id, genre, out_dir, pattern=None, request=None,
-    knowledge_db=KNOWLEDGE_DB,
+    knowledge_db=KNOWLEDGE_DB, planner_mode="published",
 ):
     result = outline_app._build_graph().invoke(_outline_state(
-        snapshot_id, genre, out_dir, pattern, request, knowledge_db,
+        snapshot_id, genre, out_dir, pattern, request, knowledge_db, planner_mode,
     ))
     validation = result.get("validation") or {}
     if not validation.get("overall_ok"):
@@ -255,11 +261,57 @@ def _run_outline(
 
 def batch_outlines(
     snapshot_id, genre, count, patterns=None, request="", out_dir=None,
-    knowledge_db=KNOWLEDGE_DB,
+    knowledge_db=KNOWLEDGE_DB, planner_mode="published",
 ):
     if count < 1:
         raise ValueError("--count 必须大于 0")
     genre = outline_app.normalize_genre(genre)
+    root = Path(out_dir).resolve() if out_dir else DATA / "story_cli" / "outlines" / time.strftime("%Y%m%dT%H%M%S")
+    graph = outline_app._build_graph()
+    if planner_mode == "dynamic":
+        if patterns:
+            raise ValueError("dynamic Planner 不接受 --pattern")
+        results = []
+        for index in range(1, count + 1):
+            run_dir = root / f"dynamic_{index:02d}"
+            try:
+                result = graph.invoke(_outline_state(
+                    snapshot_id, genre, run_dir, None, request,
+                    knowledge_db, planner_mode,
+                ))
+                validation = result.get("validation") or {}
+                results.append({
+                    "status": "accepted" if validation.get("overall_ok") is True else "blocked",
+                    "pattern_id": None,
+                    "pattern_name": result.get("pattern_name"),
+                    "candidate_id": (result.get("dynamic_candidate") or {}).get("candidate_id"),
+                    "classification": (result.get("dynamic_candidate") or {}).get("classification"),
+                    "outline_id": result.get("outline_id"),
+                    "result_path": result.get("result_path"),
+                    "validation": validation,
+                })
+            except Exception as exc:
+                results.append({
+                    "status": "error", "pattern_id": None,
+                    "pattern_name": None, "error": str(exc),
+                })
+        manifest = {
+            "schema_version": 1,
+            "batch_id": root.name,
+            "snapshot_id": snapshot_id,
+            "genre": genre,
+            "planner_mode": planner_mode,
+            "request": request or None,
+            "requested_count": count,
+            "accepted_count": sum(item["status"] == "accepted" for item in results),
+            "attempted_count": sum(item["status"] in {"accepted", "blocked", "error"} for item in results),
+            "results": results,
+            "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        }
+        path = root / "outline_batch_manifest.json"
+        _write_json(path, manifest)
+        print(f"[StoryCLI] outline_batch={path}")
+        return path
     catalog = outline_app.load_catalog(snapshot_id, knowledge_db)
     all_candidates = outline_app.candidate_patterns(catalog, genre)
     used_ids = StoryKnowledgeStore(knowledge_db).used_pattern_ids()
@@ -271,8 +323,6 @@ def batch_outlines(
     for pattern in available:
         by_name.setdefault(pattern["pattern_name"], []).append(pattern)
     requested_names = patterns or list(by_name)
-    root = Path(out_dir).resolve() if out_dir else DATA / "story_cli" / "outlines" / time.strftime("%Y%m%dT%H%M%S")
-    graph = outline_app._build_graph()
     results = []
     for pattern in all_candidates:
         if pattern.get("pattern_id") in used_ids and (
@@ -326,6 +376,7 @@ def batch_outlines(
         "batch_id": root.name,
         "snapshot_id": snapshot_id,
         "genre": genre,
+        "planner_mode": planner_mode,
         "request": request or None,
         "requested_count": count,
         "accepted_count": sum(item["status"] == "accepted" for item in results),
@@ -445,6 +496,10 @@ def _add_outline_arguments(parser, required=False):
     parser.add_argument("--genre", required=required)
     parser.add_argument("--count", type=int, required=required)
     parser.add_argument("--pattern", action="append", default=None)
+    parser.add_argument(
+        "--planner-mode", choices=("published", "dynamic"), default="published",
+        help="Planner 模式，默认使用已发布 Pattern",
+    )
     _add_request_arguments(parser)
     parser.add_argument("--out-dir", default=None)
 
@@ -522,10 +577,14 @@ def main(argv=None):
         elif args.command == "outline" and args.outline_command in (None, "batch"):
             if not args.genre or args.count is None:
                 raise ValueError("outline 需要 --genre 和 --count")
-            batch_outlines(
+            outline_args = (
                 args.snapshot_id, args.genre, args.count, args.pattern,
                 _request(args), args.out_dir, args.knowledge_db,
             )
+            if args.planner_mode == "published":
+                batch_outlines(*outline_args)
+            else:
+                batch_outlines(*outline_args, planner_mode=args.planner_mode)
         elif args.command == "story" and args.story_command == "write":
             write_story(args.template, _request(args), args.out_dir)
         return 0

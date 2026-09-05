@@ -1,8 +1,8 @@
 """Outline Agent 的 LangGraph 状态与输出 schema。"""
 
-from typing import TypedDict
+from typing import Literal, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 class OutlineState(TypedDict):
@@ -12,18 +12,23 @@ class OutlineState(TypedDict):
     out_dir: str
     pattern_request: str | None
     user_request: str | None
+    planner_mode: Literal["published", "dynamic"]
     pattern_id: str | None
     pattern_name: str
+    pattern_source: Literal["published", "dynamic"]
     pattern_selection: dict | None
     ending_spec: dict | None
     chain: list[dict]
     planner_references: dict | None
+    dynamic_candidates: list[dict]
+    dynamic_candidate: dict | None
     seed: dict | None
     mechanism: dict | None
     narrative: dict | None
     contract_ledger: dict | None
     outline: dict | None
     validation: dict | None
+    realize_retry_count: int
     outline_id: str
     result_path: str
 
@@ -32,6 +37,9 @@ class SeedCharacter(BaseModel):
     id: str = Field(description="稳定人物 ID，如 P1")
     label: str = Field(description="身份标签，如 女主/对立方")
     role: str = Field(description="结构角色，如 hero/opponent/helper/love_interest")
+    stance_toward_protagonist: Literal["self", "support", "obstruct", "mixed", "neutral"] = Field(
+        description="故事开始时对主人公的立场；主人公填 self",
+    )
     goal: str = Field(description="目标")
     motivation: str = Field(description="追求目标并参与核心冲突的内在原因")
     relationships: dict[str, str] = Field(description="其他人物 ID -> 故事开始时的关系与态度")
@@ -43,6 +51,23 @@ class StorySeed(BaseModel):
     characters: list[SeedCharacter]
     core_conflict: str
     ending_direction: str
+
+
+class RelationshipChange(BaseModel):
+    source_id: str = Field(min_length=1)
+    target_id: str = Field(min_length=1)
+    dimension: str = Field(min_length=1)
+    before: str = Field(min_length=1)
+    after: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_pair(self):
+        if self.source_id == self.target_id:
+            raise ValueError("关系变化不能连接同一人物")
+        if self.before == self.after:
+            raise ValueError("关系变化的前后状态不能相同")
+        return self
 
 
 class PatternSelection(BaseModel):
@@ -58,6 +83,10 @@ class MechanismStep(BaseModel):
     why: str
     state_change: str
     character_state_changes: dict[str, str] = Field(description="人物 ID -> 变化前、触发证据、变化后的状态")
+    relationship_changes: list[RelationshipChange] = Field(
+        default_factory=list,
+        description="有证据的关系变化；没有关系变化时为空",
+    )
     connects_to_next: str
 
 

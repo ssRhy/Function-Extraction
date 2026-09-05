@@ -148,6 +148,12 @@ def test_load_planner_references_filters_selected_motifs_and_projects_occurrence
                 "function_names": ["A"], "length": 3, "evidence": {},
             }]
 
+        def load_contracts(self, _snapshot_id):
+            return []
+
+        def load_story_profiles(self, _snapshot_id):
+            return []
+
     monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
     pattern = _pattern("P", 2, {"01_悬疑惊悚": 1}, ["A"])
     pattern["member_motif_ids"] = ["MC_KEEP"]
@@ -226,6 +232,46 @@ def test_annotate_occurrences():
     assert annotated[2]["occurrence_index"] == 2 and annotated[2]["occurrence_total"] == 2
 
 
+def test_seed_character_has_explicit_initial_stance():
+    character = state.SeedCharacter(
+        id="P1", label="主角", role="hero", goal="g", motivation="m",
+        relationships={}, stance_toward_protagonist="self",
+    )
+    assert character.stance_toward_protagonist == "self"
+
+
+def test_build_ending_target_uses_seed_when_pattern_has_no_spec():
+    target = app.build_ending_target(
+        None, {"core_conflict": "解决冲突", "ending_direction": "恢复稳定"},
+    )
+    assert target == {
+        "source": "seed",
+        "resolves": "解决冲突",
+        "must_show": [],
+        "final_state": "恢复稳定",
+    }
+
+
+def test_relationship_constraints_include_effect_bounds():
+    contract = {
+        "role_slots": ["actor", "affected"],
+        "effects": [{
+            "aspect": "RELATIONSHIP_STATUS", "role_slots": ["actor", "affected"],
+            "before": "未建立", "after": "初步合作",
+        }],
+    }
+    constraints = app._relationship_constraints([{
+        "segment_index": 1, "function_name": "RELATE", "contract": contract,
+    }])
+    assert constraints[0]["allowed_role_pairs"] == [["actor", "affected"]]
+    assert constraints[0]["allowed_effects"] == [{
+        "role_slots": ["actor", "affected"],
+        "aspect": "RELATIONSHIP_STATUS",
+        "before": "未建立",
+        "after": "初步合作",
+    }]
+
+
 def test_align():
     chain = [
         {"segment_index": 1, "function_name": "A"},
@@ -240,6 +286,46 @@ def test_align():
     aligned = app._align(chain, items)
     assert [item["function_name"] for item in aligned] == ["A", "B", "A"]
     assert [item["value"] for item in aligned] == ["A1", "B1", "A2"]
+
+
+def test_mechanism_retries_contract_relationship_boundary(monkeypatch):
+    contract = {
+        "role_slots": ["actor", "affected"],
+        "preconditions": [],
+        "effects": [{
+            "aspect": "RELATIONSHIP_STATUS", "role_slots": ["actor", "affected"],
+            "before": "未建立", "after": "已建立",
+        }],
+        "obligation_effects": {},
+    }
+    chain = [{"segment_index": 1, "function_name": "RELATE", "contract": contract}]
+    calls = []
+
+    def fake_chat(_messages, output_schema, **_kwargs):
+        assert output_schema is app.MechanismPlan
+        calls.append(True)
+        target = "P3" if len(calls) == 1 else "P2"
+        return app.MechanismPlan(steps=[state.MechanismStep(
+            segment_index=1, function_name="RELATE",
+            role_bindings={"actor": "P1", "affected": "P2"},
+            who_does_what="P1影响P2", why="目标要求", state_change="关系变化",
+            character_state_changes={"P1": "改变", "P2": "改变"},
+            relationship_changes=[{
+                "source_id": "P1", "target_id": target, "dimension": "trust",
+                "before": "模型填写", "after": "已建立", "evidence": "P1承担代价",
+            }],
+            connects_to_next="继续",
+        )])
+
+    monkeypatch.setattr(app, "chat_structured", fake_chat)
+    result = app.mechanism_node({
+        "chain": chain, "seed": {"characters": [{"id": "P1"}, {"id": "P2"}]},
+        "planner_references": None,
+    })
+
+    assert len(calls) == 2
+    assert result["contract_ledger"]["issues"] == []
+    assert result["mechanism"]["steps"][0]["relationship_changes"][0]["target_id"] == "P2"
 
 
 def test_rule_check():
@@ -342,11 +428,157 @@ def test_scaffold_retries_invalid_payoff_once(monkeypatch):
     assert result["narrative"]["steps"][0]["setup_payoffs"][0]["payoff_segment_index"] == 2
 
 
+def test_validate_distinguishes_seed_ending_target_from_generated_ending(monkeypatch):
+    def fake_chat(messages, output_schema, **_kwargs):
+        assert output_schema is app.OutlineValidation
+        payload = json.loads(messages[-1]["content"])
+        assert "ending_spec" not in payload
+        assert payload["ending_target"] == {
+            "source": "seed",
+            "resolves": "核心冲突",
+            "must_show": [],
+            "final_state": "恢复稳定",
+        }
+        assert payload["generated_ending"]["final_state"] == "恢复稳定"
+        return app.OutlineValidation(
+            segment_checks=[state.SegmentCheck(
+                segment_index=1, function_name="A", recoverable=True, issue="",
+            )],
+            overall_ok=True,
+            issues=[],
+        )
+
+    monkeypatch.setattr(app, "chat_structured", fake_chat)
+    result = app.validate_node({
+        "chain": [{"segment_index": 1, "function_name": "A", "contract": {}}],
+        "ending_spec": None,
+        "seed": {
+            "core_conflict": "核心冲突",
+            "ending_direction": "恢复稳定",
+            "characters": [],
+        },
+        "mechanism": {"steps": []},
+        "narrative": {"steps": []},
+        "outline": {
+            "segments": [{"segment_index": 1, "function_name": "A", "beats": ["x"]}],
+            "ending": {
+                "resolution_actions": ["完成解决"],
+                "conflict_resolution": "核心冲突已解决",
+                "final_state": "恢复稳定",
+            },
+        },
+        "contract_ledger": {},
+    })
+    assert result["validation"]["overall_ok"] is True
+
+
 def test_prompts_limit_relationship_state_to_function_evidence():
     assert "题材标签" in app.SEED_PROMPT
     assert "关系类型" in app.SEED_PROMPT
+    assert "可观察解决动作 → 直接冲突结果 → 稳定终态" in app.SEED_PROMPT
     assert "状态上界" in app.REALIZE_PROMPT
     assert "overall_ok 必须为 false" in app.VALIDATE_PROMPT
+
+
+def _semantic_validation_state(ending, *, final_ledger=None, mechanism_steps=None, validation=None):
+    return {
+        "chain": [{"segment_index": 1, "function_name": "A", "contract": {}}],
+        "ending_spec": None,
+        "seed": {
+            "core_conflict": "核心冲突",
+            "ending_direction": "恢复稳定",
+            "characters": [
+                {"id": "P1", "relationships": {"P2": "低信任"}},
+                {"id": "P2", "relationships": {"P1": "低信任"}},
+                {"id": "P3", "relationships": {}},
+                {"id": "P4", "relationships": {}},
+            ],
+        },
+        "mechanism": {"steps": mechanism_steps or []},
+        "narrative": {"steps": []},
+        "outline": {"segments": [{"segment_index": 1, "function_name": "A", "beats": ["x"]}],
+                    "final_ledger": final_ledger or [], "ending": ending},
+        "contract_ledger": {},
+        "validation": validation,
+        "realize_retry_count": 0,
+    }
+
+
+def test_validate_rejects_ending_identity_conflation(monkeypatch):
+    monkeypatch.setattr(app, "chat_structured", lambda *_args, **_kwargs: app.OutlineValidation(
+        segment_checks=[state.SegmentCheck(segment_index=1, function_name="A", recoverable=True, issue="")],
+        overall_ok=True, issues=[],
+    ))
+    result = app.validate_node(_semantic_validation_state({
+        "resolution_actions": ["P3与P4是同一人，身份合并"],
+        "conflict_resolution": "核心冲突已解决",
+        "final_state": "恢复稳定",
+    }))
+    assert result["validation"]["overall_ok"] is False
+    assert any("合并或互换" in issue for issue in result["validation"]["issues"])
+
+
+def test_validate_rejects_ending_relationship_conflict(monkeypatch):
+    monkeypatch.setattr(app, "chat_structured", lambda *_args, **_kwargs: app.OutlineValidation(
+        segment_checks=[state.SegmentCheck(segment_index=1, function_name="A", recoverable=True, issue="")],
+        overall_ok=True, issues=[],
+    ))
+    result = app.validate_node(_semantic_validation_state(
+        {
+            "resolution_actions": ["P1与P2完全互信并正式结盟"],
+            "conflict_resolution": "核心冲突已解决",
+            "final_state": "恢复稳定",
+        },
+        final_ledger=["P1与P2保持低信任的谨慎合作"],
+        mechanism_steps=[{
+            "segment_index": 1,
+            "relationship_changes": [{
+                "source_id": "P1", "target_id": "P2", "dimension": "信任",
+                "before": "低信任", "after": "谨慎合作", "evidence": "共同承担风险",
+            }],
+        }],
+    ))
+    assert result["validation"]["overall_ok"] is False
+    assert any("超过前序" in issue for issue in result["validation"]["issues"])
+
+
+def test_semantic_failure_retries_realize_once(monkeypatch):
+    calls = []
+
+    def fake_chat(messages, output_schema, **_kwargs):
+        assert output_schema is app.OutlineRealization
+        calls.append(messages)
+        return app.OutlineRealization(
+            segments=[state.OutlineSegment(segment_index=1, function_name="A", beats=["x"])],
+            final_ledger=["ledger"],
+            ending=state.EndingRealization(
+                resolution_actions=["解决"], conflict_resolution="已解决", final_state="稳定",
+            ),
+        )
+
+    monkeypatch.setattr(app, "chat_structured", fake_chat)
+    source = _semantic_validation_state(
+        {"resolution_actions": ["解决"], "conflict_resolution": "已解决", "final_state": "稳定"},
+        validation={"overall_ok": False, "issues": ["结局关系措辞越界"], "rule_issues": [], "contract_issues": []},
+    )
+    result = app.realize_node(source)
+    assert len(calls) == 1
+    assert "结局关系措辞越界" in calls[0][-1]["content"]
+    assert result["realize_retry_count"] == 1
+    assert not app._should_retry_realize({**source, **result, "validation": source["validation"]})
+
+
+def test_contract_or_rule_failure_does_not_retry_realize():
+    base = {"overall_ok": False, "issues": ["x"], "rule_issues": [], "contract_issues": []}
+    assert app._should_retry_realize({"validation": {**base, "contract_issues": ["contract"]}}) is False
+    assert app._should_retry_realize({"validation": {**base, "rule_issues": ["rule"]}}) is False
+
+
+def test_second_semantic_failure_stops_retry():
+    assert app._should_retry_realize({
+        "realize_retry_count": 1,
+        "validation": {"overall_ok": False, "issues": ["仍失败"], "rule_issues": [], "contract_issues": []},
+    }) is False
 
 
 def test_narrative_prompt_does_not_claim_formal_auxiliary_analysis():
@@ -378,7 +610,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
                 genre="悬疑惊悚", world_setting="w",
                 characters=[state.SeedCharacter(
                     id="P1", label="主角", role="hero", goal="g",
-                    motivation="m", relationships={},
+                    motivation="m", relationships={}, stance_toward_protagonist="self",
                 )],
                 core_conflict="c", ending_direction="e",
             )

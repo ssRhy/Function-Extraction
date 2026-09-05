@@ -67,6 +67,26 @@ def test_multiple_final_supports_remain_uncertain():
     assert occurrence["candidate_functions"] == ["A", "B"]
 
 
+def test_missing_contract_role_downgrades_match_to_uncertain():
+    functions = [{
+        "function_id": "F_1",
+        "function_name": "A",
+        "supporting_obs_ids": ["story_1_obs_001"],
+    }]
+    contracts = [{"function_name": "A", "role_slots": ["actor", "affected"]}]
+    observation = {
+        **_observation("story_1_obs_001"),
+        "role_bindings": {"actor": ["P1"], "affected": []},
+    }
+
+    occurrence = align_occurrences(functions, [observation], contracts=contracts)[0]
+
+    assert occurrence["status"] == "UNCERTAIN"
+    assert occurrence["function_id"] is None
+    assert occurrence["function_name"] is None
+    assert occurrence["candidate_functions"] == ["A"]
+
+
 def test_assignment_metrics_uses_final_occurrence_statuses():
     result = assignment_metrics([
         {"obs_id": "OBS_a1", "status": "MATCHED"},

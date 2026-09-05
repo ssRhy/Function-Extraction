@@ -9,6 +9,13 @@ from datetime import datetime, timezone
 
 from Contracts.function_contract import validate_function_contracts
 from Contracts.state_vocabulary import StateVocabulary
+from Contracts.story_profile import (
+    EventRoleBindings,
+    RelationshipDelta,
+    ROLE_POSITION_SET,
+    StoryProfileRecord,
+    validate_event_roles,
+)
 
 
 _CODE_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,8 +55,17 @@ def _validate_occurrences(
     occurrences: list[dict],
     functions: list[dict],
     snapshot_id: str | None = None,
+    story_profiles: list[dict] | None = None,
+    contracts: list[dict] | None = None,
 ) -> None:
     by_id = {f["function_id"]: f for f in functions}
+    profiles = {
+        record["story_id"]: StoryProfileRecord.model_validate(record).profile
+        for record in (story_profiles or [])
+    }
+    contracts_by_name = {
+        item["function_name"]: item for item in (contracts or [])
+    }
     seen = set()
     for index, occurrence in enumerate(occurrences):
         occurrence_id = str(occurrence.get("occurrence_id") or "").strip()
@@ -61,6 +77,28 @@ def _validate_occurrences(
             raise ValueError(f"FunctionOccurrence[{index}] 缺少一致的 occurrence_id/obs_id、observation_version_id 或 story_id")
         if occurrence_id in seen:
             raise ValueError(f"重复 occurrence_id: {occurrence_id}")
+        profile = profiles.get(story_id)
+        if profile is None:
+            raise ValueError(f"FunctionOccurrence[{index}] 没有对应 StoryProfile: {story_id}")
+        if any(field not in occurrence for field in ("participant_ids", "role_bindings", "relationship_deltas")):
+            raise ValueError(
+                f"FunctionOccurrence[{index}] 缺少 participant_ids、role_bindings 或 relationship_deltas"
+            )
+        participant_ids = occurrence.get("participant_ids")
+        if not isinstance(participant_ids, list) or any(not isinstance(item, str) for item in participant_ids):
+            raise ValueError(f"FunctionOccurrence[{index}] participant_ids 格式无效")
+        try:
+            if set((occurrence.get("role_bindings") or {})) != ROLE_POSITION_SET:
+                raise ValueError("role_bindings 必须包含全部标准角色位置")
+            bindings = EventRoleBindings.model_validate(occurrence.get("role_bindings"))
+            deltas = [RelationshipDelta.model_validate(item) for item in occurrence.get("relationship_deltas", [])]
+            validate_event_roles(profile, participant_ids, bindings, deltas)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"FunctionOccurrence[{index}] 人物角色或关系边无效: {exc}") from exc
+        source_indices = set(occurrence.get("source_sentence_indices") or [])
+        for delta in deltas:
+            if not set(delta.evidence_sentence_indices).issubset(source_indices):
+                raise ValueError(f"FunctionOccurrence[{index}] 关系变化缺少对应事件证据")
         if status not in {"MATCHED", "OTHER", "UNCERTAIN"}:
             raise ValueError(f"FunctionOccurrence[{index}] status 无效: {status}")
         if snapshot_id is not None and occurrence.get("snapshot_id") != snapshot_id:
@@ -71,6 +109,16 @@ def _validate_occurrences(
             func = by_id.get(function_id)
             if func is None or func["function_name"] != function_name:
                 raise ValueError(f"FunctionOccurrence[{index}] 引用了未知 Function")
+            contract = contracts_by_name.get(function_name)
+            if contract:
+                missing = [
+                    role for role in contract.get("role_slots", [])
+                    if not bindings.model_dump().get(role)
+                ]
+                if missing:
+                    raise ValueError(
+                        f"FunctionOccurrence[{index}] 缺少 FunctionContract 角色槽位: {', '.join(missing)}"
+                    )
         elif status == "OTHER":
             if function_id is not None or function_name != "OTHER":
                 raise ValueError(f"FunctionOccurrence[{index}] OTHER 绑定无效")
@@ -89,6 +137,21 @@ def _read_jsonl(path: str) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
+def _validate_story_profiles(records: list[dict]) -> None:
+    seen_stories, seen_versions = set(), set()
+    for index, record in enumerate(records):
+        try:
+            parsed = StoryProfileRecord.model_validate(record)
+        except ValueError as exc:
+            raise ValueError(f"StoryProfile[{index}] 无效: {exc}") from exc
+        if parsed.story_id in seen_stories:
+            raise ValueError(f"重复 StoryProfile story_id: {parsed.story_id}")
+        if parsed.story_version_id in seen_versions:
+            raise ValueError(f"重复 StoryProfile story_version_id: {parsed.story_version_id}")
+        seen_stories.add(parsed.story_id)
+        seen_versions.add(parsed.story_version_id)
+
+
 def validate_snapshot(snapshot_path: str) -> dict:
     """校验快照结构、内容约束与哈希，成功时返回 manifest。"""
     manifest_path = os.path.join(snapshot_path, "manifest.json")
@@ -96,7 +159,7 @@ def validate_snapshot(snapshot_path: str) -> dict:
         raise ValueError(f"缺少 manifest.json: {snapshot_path}")
     manifest = _read_json(manifest_path)
     schema_version = manifest.get("schema_version")
-    if schema_version != 4:
+    if schema_version != 5:
         raise ValueError(f"不支持的 snapshot schema_version: {manifest.get('schema_version')}")
     if manifest.get("verdict") != "PASS":
         raise ValueError("OntologySnapshot verdict 必须为 PASS")
@@ -108,6 +171,8 @@ def validate_snapshot(snapshot_path: str) -> dict:
         raise ValueError("evaluation_file 必须为 evaluation.json")
     if manifest.get("occurrences_file") != "occurrences.jsonl":
         raise ValueError("occurrences_file 必须为 occurrences.jsonl")
+    if manifest.get("story_profiles_file") != "story_profiles.jsonl":
+        raise ValueError("story_profiles_file 必须为 story_profiles.jsonl")
     if manifest.get("function_contracts_file") and manifest.get("function_contracts_file") != "function_contracts.jsonl":
         raise ValueError("function_contracts_file 必须为 function_contracts.jsonl")
     if manifest.get("source_workflow") not in {"bootstrap", "evolve"}:
@@ -127,12 +192,23 @@ def validate_snapshot(snapshot_path: str) -> dict:
         raise ValueError("functions.jsonl SHA-256 校验失败")
     if _sha256(evaluation_bytes) != manifest.get("evaluation_sha256"):
         raise ValueError("evaluation.json SHA-256 校验失败")
+    profiles_path = os.path.join(snapshot_path, "story_profiles.jsonl")
+    if not os.path.isfile(profiles_path):
+        raise ValueError("OntologySnapshot 缺少 story_profiles.jsonl")
+    with open(profiles_path, "rb") as f:
+        profiles_bytes = f.read()
+    if _sha256(profiles_bytes) != manifest.get("story_profiles_sha256"):
+        raise ValueError("story_profiles.jsonl SHA-256 校验失败")
 
     functions = _read_jsonl(functions_path)
     evaluation = _read_json(evaluation_path)
+    story_profiles = _read_jsonl(profiles_path)
     _validate_functions(functions)
+    _validate_story_profiles(story_profiles)
     if len(functions) != manifest.get("function_count"):
         raise ValueError("manifest function_count 与 functions.jsonl 不一致")
+    if len(story_profiles) != manifest.get("story_profile_count"):
+        raise ValueError("manifest story_profile_count 与 story_profiles.jsonl 不一致")
     if evaluation.get("verdict") != "PASS":
         raise ValueError("evaluation.json verdict 必须为 PASS")
     occurrences_path = os.path.join(snapshot_path, "occurrences.jsonl")
@@ -145,7 +221,7 @@ def validate_snapshot(snapshot_path: str) -> dict:
     occurrences = _read_jsonl(occurrences_path)
     if len(occurrences) != manifest.get("occurrence_count"):
         raise ValueError("manifest occurrence_count 与 occurrences.jsonl 不一致")
-    _validate_occurrences(occurrences, functions, manifest.get("snapshot_id"))
+    contracts = []
     if manifest.get("function_contracts_file"):
         contracts_path = os.path.join(snapshot_path, "function_contracts.jsonl")
         if not os.path.isfile(contracts_path):
@@ -169,6 +245,9 @@ def validate_snapshot(snapshot_path: str) -> dict:
             if _sha256(vocabulary_bytes) != manifest.get("state_vocabulary_sha256"):
                 raise ValueError("state_vocabulary.json SHA-256 校验失败")
             StateVocabulary.from_dict(_read_json(vocabulary_path))
+    _validate_occurrences(
+        occurrences, functions, manifest.get("snapshot_id"), story_profiles, contracts,
+    )
     if os.path.basename(os.path.normpath(snapshot_path)) != manifest.get("snapshot_id"):
         raise ValueError("目录名与 manifest snapshot_id 不一致")
     return manifest
@@ -188,12 +267,22 @@ def load_occurrences(snapshot_path: str) -> list[dict]:
     return _read_jsonl(os.path.join(snapshot_path, manifest["occurrences_file"]))
 
 
-def load_function_contracts(snapshot_path: str) -> list[dict]:
-    """校验并读取快照中的 FunctionContract。"""
-    manifest = validate_snapshot(snapshot_path)
+def load_function_contracts(snapshot_path: str, *, validate: bool = True) -> list[dict]:
+    """读取快照中的 FunctionContract；迁移父快照时可显式跳过旧数据校验。"""
+    manifest = (
+        validate_snapshot(snapshot_path)
+        if validate
+        else _read_json(os.path.join(snapshot_path, "manifest.json"))
+    )
     if not manifest.get("function_contracts_file"):
         return []
     return _read_jsonl(os.path.join(snapshot_path, manifest["function_contracts_file"]))
+
+
+def load_story_profiles(snapshot_path: str) -> list[dict]:
+    """校验并读取快照中的 StoryProfile。"""
+    manifest = validate_snapshot(snapshot_path)
+    return _read_jsonl(os.path.join(snapshot_path, manifest["story_profiles_file"]))
 
 
 def publish_snapshot(
@@ -206,6 +295,7 @@ def publish_snapshot(
     function_contracts: list[dict] | None = None,
     parent_snapshot_id: str | None = None,
     run_id: str | None = None,
+    story_profiles: list[dict] | None = None,
 ) -> str | None:
     """PASS 时原子发布不可变快照；相同内容重复发布返回已有目录。"""
     if evaluation.get("verdict") != "PASS":
@@ -216,23 +306,38 @@ def publish_snapshot(
     occurrences = [dict(item) for item in (occurrences or [])]
     for item in occurrences:
         item.pop("snapshot_id", None)
-    _validate_occurrences(occurrences, functions)
-    schema_version = 4
+        if any(field not in item for field in ("participant_ids", "role_bindings", "relationship_deltas")):
+            raise ValueError("FunctionOccurrence 缺少 participant_ids、role_bindings 或 relationship_deltas")
+        bindings = EventRoleBindings.model_validate(item.get("role_bindings"))
+        item["participant_ids"] = list(dict.fromkeys(item.get("participant_ids") or []))
+        item["role_bindings"] = bindings.model_dump()
+        item["relationship_deltas"] = [
+            RelationshipDelta.model_validate(delta).model_dump()
+            for delta in (item.get("relationship_deltas") or [])
+        ]
     contracts = [dict(item) for item in (function_contracts or [])]
     if function_contracts is not None:
         validate_function_contracts(functions, contracts)
+    if story_profiles is None:
+        raise ValueError("OntologySnapshot 必须包含 StoryProfile")
+    profiles = [StoryProfileRecord.model_validate(item).model_dump() for item in story_profiles]
+    _validate_story_profiles(profiles)
+    _validate_occurrences(occurrences, functions, story_profiles=profiles, contracts=contracts)
+    schema_version = 5
 
     root = os.path.abspath(snapshots_root or DEFAULT_SNAPSHOT_ROOT)
     os.makedirs(root, exist_ok=True)
     functions_bytes = _json_bytes(functions, jsonl=True)
     evaluation_bytes = _json_bytes(evaluation)
     contracts_bytes = _json_bytes(contracts, jsonl=True)
+    profiles_bytes = _json_bytes(profiles, jsonl=True)
     vocabulary = StateVocabulary.from_contracts(contracts) if function_contracts is not None else None
     vocabulary_bytes = _json_bytes(vocabulary.to_dict()) if vocabulary else b""
     functions_sha = _sha256(functions_bytes)
     evaluation_sha = _sha256(evaluation_bytes)
     contracts_sha = _sha256(contracts_bytes)
-    content_sha = _sha256(functions_bytes + contracts_bytes + vocabulary_bytes)
+    profiles_sha = _sha256(profiles_bytes)
+    content_sha = _sha256(functions_bytes + contracts_bytes + vocabulary_bytes + profiles_bytes)
     effective_run_id = run_id or f"FR_{_sha256((namespace + content_sha).encode('utf-8'))[:16]}"
 
     for entry in os.scandir(root):
@@ -247,6 +352,7 @@ def publish_snapshot(
             and manifest.get("source_workflow") == source_workflow
             and manifest.get("functions_sha256") == functions_sha
             and manifest.get("evaluation_sha256") == evaluation_sha
+            and manifest.get("story_profiles_sha256") == profiles_sha
             and manifest.get("schema_version") == schema_version
             and manifest.get("parent_snapshot_id") == parent_snapshot_id
             and manifest.get("run_id") == effective_run_id
@@ -257,6 +363,9 @@ def publish_snapshot(
             for item in existing:
                 item.pop("snapshot_id", None)
             if existing != occurrences:
+                continue
+            existing_profiles = _read_jsonl(os.path.join(entry.path, "story_profiles.jsonl"))
+            if existing_profiles != profiles:
                 continue
             if function_contracts is not None:
                 existing_contracts = _read_jsonl(os.path.join(entry.path, "function_contracts.jsonl"))
@@ -286,13 +395,16 @@ def publish_snapshot(
         "verdict": "PASS",
         "function_count": len(functions),
         "occurrence_count": len(published_occurrences),
+        "story_profile_count": len(profiles),
         "manifest_file": "manifest.json",
         "functions_file": "functions.jsonl",
         "evaluation_file": "evaluation.json",
         "occurrences_file": "occurrences.jsonl",
+        "story_profiles_file": "story_profiles.jsonl",
         "functions_sha256": functions_sha,
         "evaluation_sha256": evaluation_sha,
         "occurrences_sha256": _sha256(occurrences_bytes),
+        "story_profiles_sha256": profiles_sha,
     }
     if function_contracts is not None:
         manifest.update({
@@ -310,6 +422,8 @@ def publish_snapshot(
             f.write(evaluation_bytes)
         with open(os.path.join(tmp, "occurrences.jsonl"), "wb") as f:
             f.write(occurrences_bytes)
+        with open(os.path.join(tmp, "story_profiles.jsonl"), "wb") as f:
+            f.write(profiles_bytes)
         if function_contracts is not None:
             with open(os.path.join(tmp, "function_contracts.jsonl"), "wb") as f:
                 f.write(contracts_bytes)

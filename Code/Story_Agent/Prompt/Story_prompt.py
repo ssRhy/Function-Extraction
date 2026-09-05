@@ -1,13 +1,13 @@
-FUNCTION_CONSTRAINT_PROMPT = """你是基于普罗普故事形态学的结构约束规划器。根据输入的大纲、机制、角色和状态合同，为每个大纲段生成写作约束，只输出 JSON，字段名严格如下：
-{"segments":[{"segment_index":1,"function_name":"FUNCTION","role_bindings":{"P1":"执行者"},"required_preconditions":["发生前必须成立的条件"],"required_effects":["段末必须已经产生的结构后果"],"obligations_opened":[],"obligations_advanced":[],"obligations_resolved":[],"required_action":"必须实际发生的行动","required_reason":"该行动在因果链中必须发生的原因","required_state_change":"行动完成后的状态变化","causal_to_next":"本段结果如何使下一段成为可能"}],"story":{"core_conflict":"开端的核心冲突","ending_resolves":"结局必须解决的问题","ending_must_show":["正文必须展示的解决事实"],"required_final_state":"结尾必须达到的稳定状态","resolution_actions":["必须完成的解决动作"]}}
+FUNCTION_CONSTRAINT_PROMPT = """你是基于普罗普故事形态学的结构约束规划器。根据输入的大纲、机制、角色、状态合同和 ending_target，为每个大纲段生成写作约束，只输出 JSON，字段名严格如下：
+{"segments":[{"segment_index":1,"function_name":"FUNCTION","role_bindings":{"actor":"P1"},"required_preconditions":["发生前必须成立的条件"],"required_effects":["段末必须已经产生的结构后果"],"obligations_opened":[],"obligations_advanced":[],"obligations_resolved":[],"required_action":"必须实际发生的行动","required_reason":"该行动在因果链中必须发生的原因","required_state_change":"行动完成后的状态变化","relationship_changes":[],"causal_to_next":"本段结果如何使下一段成为可能"}],"story":{"core_conflict":"开端的核心冲突","ending_resolves":"结局必须解决的问题","ending_must_show":["正文必须展示的解决事实"],"required_final_state":"结尾必须达到的稳定状态","resolution_actions":["必须完成的解决动作"]}}
 
 规则：
 1. segments 必须与 source_segments 一一对应；segment_index 和 function_name 必须原样保留，每项恰好出现一次，不新增、删除或重排 Function。
 2. Function 由它在因果链中造成的结构后果定义。required_effects 和 required_state_change 必须写明该段结束时已经发生的变化，不能只写意图、气氛或准备。
-3. role_bindings 必须与 seed、mechanism_plan 和 contract_ledger 中的角色位置一致，不新增核心人物。required_action 与 required_reason 必须说明谁做什么以及为什么该行动承接前因。
+3. role_bindings 必须与 seed、mechanism_plan 和 contract_ledger 中的角色位置一致，不新增核心人物；relationship_changes 必须逐项保留 mechanism_plan 中已有的关系变化及其证据，不得新增或升级关系。required_action 与 required_reason 必须说明谁做什么以及为什么该行动承接前因。
 4. required_preconditions 表示本段开始前必须成立的条件；义务字段只记录输入能够支持的开启、推进和清偿，没有则输出空数组，不得虚构义务。
 5. causal_to_next 必须说明本段结果如何支持下一段；最后一段可以为空字符串。
-6. story 必须综合 seed.core_conflict、ending_spec 和 outline.ending。resolution_actions 必须是正文中完成的动作，ending_must_show 与 required_final_state 必须回应开端问题，不能停在准备解决。
+6. story 必须综合 seed.core_conflict、ending_target、ending_budget 和 outline.ending。`ending_target` 已统一处理 Pattern 结局规范或 seed 结局方向；没有 Pattern `ending_spec` 不表示没有结局。`ending_budget` 是可使用的前序证据和关系状态上限。resolution_actions 必须是正文中完成的动作，ending_must_show 与 required_final_state 必须回应开端问题，不能停在准备解决。
 7. contract_ledger 为空或未启用时，以 mechanism_plan、source_segments 和结局字段为准。所有数组元素必须是字符串。
 8. story 只能发布前序 Function 和 mechanism_plan.character_state_changes 已经建立的关系类型与状态上界。不得因题材标签、宽泛的“关系稳定”或 outline.ending 中无前序依据的描述，把信任、合作、和解或关心升级为另一种关系或更高承诺。"""
 
@@ -18,11 +18,11 @@ SCENE_PLAN_PROMPT = """你是短篇故事场景结构策划。把既定大纲拆
 规则：
 1. segments 必须与输入 source_segments 一一对应，每个 segment_index 恰好出现一次；每个来源段可拆成 1 至 3 个场景。
 2. 不能新增、删除或调整 source_segments 的 Function 顺序。
-3. 人物、世界、冲突和关键行动只能依据输入展开，不新增核心人物、核心冲突或新的结局方案。
+3. `characters` 只能填写 `allowed_character_ids` 中已有的 seed 人物 ID，不能填写“P3的手下”“村长”等自然语言角色、临时人物或角色描述；非核心人物只能在 beats/setting 中作为背景描述，如果其行动是本场必要部分，必须先由 seed 定义对应 ID。人物、世界、冲突和关键行动只能依据输入展开，不新增核心人物、核心冲突或新的结局方案。
 4. 同一来源段的场景组整体落实对应 function_constraints 段的结构要求和 narrative_plan 中同索引的 genre_realization；不得自行设计另一种题材化实现。
 5. 将 narrative_plan 已确定的 motivation_setup、connective_event、reaction_beat 和 setup_payoffs 分配到正确场景；不得新增另一套动机、伏笔或回收方式。
 6. 每场必须明确目标、阻碍、关键行动和状态变化；transition 只承接已经确定的 connective_event 或 causal_to_next。
-7. function_constraints.story 与结局的核心解决动作必须落在最后几个场景，最后一个场景完成结局兑现。
+7. function_constraints.story 与 ending_target 的核心解决动作必须落在最后几个场景，最后一个场景完成结局兑现。
 8. 场景只能实现已有关系变化，不得把理解、信任、合作、和解或关心升级为另一种关系或更高承诺。"""
 
 

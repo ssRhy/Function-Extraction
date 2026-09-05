@@ -204,6 +204,30 @@ def test_scene_plan_rejects_unknown_character_id():
     assert any("未定义人物" in issue for issue in app._scene_plan_issues(source, plan))
 
 
+def test_plan_scenes_retries_unknown_character_id(monkeypatch):
+    source = _source()
+    invalid = _scene_plan_draft().model_dump()
+    invalid["segments"][0]["scenes"][0]["characters"] = ["P9"]
+    calls = []
+
+    def fake_chat(messages, output_schema, **_kwargs):
+        assert output_schema is state.ScenePlanDraft
+        calls.append(messages)
+        if len(calls) == 1:
+            return state.ScenePlanDraft.model_validate(invalid)
+        assert "allowed_character_ids" in messages[-1]["content"]
+        return _scene_plan_draft()
+
+    monkeypatch.setattr(app, "chat_structured", fake_chat)
+    result = app.plan_scenes_node({
+        "outline_data": source,
+        "function_constraints": _function_constraints().model_dump(),
+    })
+
+    assert len(calls) == 2
+    assert result["scene_plan"]["scenes"][0]["characters"] == ["P1"]
+
+
 def test_character_names_must_cover_seed_characters():
     source = _source()
     story = {"title": "标题", "scenes": [{"scene_id": "S1", "text": "正文"}]}
@@ -236,6 +260,7 @@ def test_scene_developments_require_exact_scene_ids():
 def test_prompts_do_not_promote_relationships_beyond_outline_evidence():
     assert "状态上界" in app.FUNCTION_CONSTRAINT_PROMPT
     assert "场景结构" in app.SCENE_PLAN_PROMPT
+    assert "allowed_character_ids" in app.SCENE_PLAN_PROMPT
     assert "pacing_mode" not in app.SCENE_PLAN_PROMPT
     assert "刺激 → 反应 → 两难 → 决定" in app.DEVELOP_SCENES_PROMPT
     assert "literary_plan" in app.DEVELOP_SCENES_PROMPT
@@ -276,10 +301,13 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
         payload = json.loads(messages[-1]["content"])
         if output_schema is state.FunctionConstraintPlan:
             assert payload["contract_ledger"]["enabled"] is False
+            assert payload["ending_target"]["source"] == "pattern"
+            assert "ending_spec" not in payload
             return _function_constraints()
         if output_schema is state.ScenePlanDraft:
             assert payload["function_constraints"]["segments"][0]["function_name"] == "F1"
             assert payload["narrative_plan"]["steps"][0]["genre_realization"]
+            assert payload["allowed_character_ids"] == ["P1"]
             return _scene_plan_draft()
         if output_schema is state.SceneDevelopmentPlan:
             assert payload["scene_plan"]["scenes"][0]["scene_id"] == "S1"

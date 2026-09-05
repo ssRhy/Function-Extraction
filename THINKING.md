@@ -1287,3 +1287,156 @@ Plan.md 早于当前实现，不能把其中所有“后续计划”继续当作
 ## 194. 三个结构现象暂不升级为开发任务（2026-09-04）
 
 用户追问 motif 候选碎片化、Pattern 近邻变体和 Contract 组合是否仍有必要。结合当前职责判断：三者都是有价值的审计观察，但都不是当前核心链路阻塞项。motif 碎片化主要是滑动窗口中间产物，Pattern 近邻可能包含有价值的变体，Contract 组合已有 Outline Ledger 处理；只有当它们分别影响成本、选择/解释或因果证明时才启动对应治理。
+
+## 195. Pattern 归纳与 Function 驱动的 Pattern 合成必须区分（2026-09-04）
+
+用户明确指出，当前系统已经完成的是“从真实故事中的 FunctionOccurrence 序列提取 motif，经 LLM 审查后发布 Pattern”，以及在生成时从 Published Pattern 中选择并固定 Function chain；这不等于“LLM 从全部 Function 中主动编排新的 Function 组合”。
+
+当前真实数据流是：
+
+```text
+真实故事中的 FunctionOccurrence 序列
+→ 程序提取 motif
+→ LLM 审查 motif 变体
+→ Published Pattern
+→ Planner 选择已有 Pattern 并固定 core_function_chain
+```
+
+原始 Plan 仍要求的另一条能力是：
+
+```text
+Function 集合 + 规则/状态/故事目标
+→ LLM 动态选择后继 Function
+→ FOLLOW / ADAPT / EXPLORE 生成多条候选链
+→ 验证候选链
+→ 保存为候选 Pattern 或 Creative Memory
+```
+
+因此，当前 Planner 的准确定位是确定性的 Pattern 选择与结构上下文编排器，而不是 LLM-guided Function Planner。后续讨论完成度时，必须把“真实 Pattern 归纳/增量更新”与“从 Function 空间主动合成新 Pattern”分别统计，不能因为前者已经跑通就宣称后者已实现。
+
+## 196. 动态候选先作为运行时产物（2026-09-04）
+
+用户明确选择动态候选“仅本次使用”。因此本轮实现把候选链放在 `OutlineState.dynamic_candidates/dynamic_candidate`，只将最终大纲的动态来源和候选审计信息写入 Outline 文档；不把候选注册成 Pattern，也不让它参与 Pattern 使用计数或 Evolve。这样可以先验证“Function 空间主动编排 → 合同/状态校验 → 大纲生成”的闭环，再根据真实质量证据决定是否需要长期记忆。
+
+## 197. motif 组合必须是序列合并，不是 Function 列表追加（2026-09-04）
+
+用户指出动态 Planner 生成的链出现重复 Function，不能把它误认为 motif 组合已经成立。由此明确：LLM 负责选择 motif、组合顺序和结构意图，程序负责按 motif 的真实 Function 序列计算合法前后缀 overlap、消解边界重复，并检查新扩展不能重复带回已经完成的 Function；motif 内部原生回环可以保留。真实 smoke 已验证 `COMPOSE_MOTIFS`、overlap=1 和新的跨结构转移边同时进入动态候选，重复项可回溯到 motif 内部而非 Beam Search 的机械追加。
+## 198. Beam Search 采用质量排序和结构去重（2026-09-04）
+
+用户要求先删冗余，再落实 `beams = [空链]` 的多轮扩展流程。审计后仅删除无调用方的 `OPERATIONS` 常量；保留实际用于 Snapshot、motif、Contract 和 LLM 输出的逻辑。Beam 现在每轮对每条部分链请求多个扩展，先 canonicalize motif/overlap，再硬过滤，按故事目标、状态/义务、历史 transition 和结构新意评分，删除完全重复及 `SequenceMatcher >= 0.8` 的近似链，保留最多 4 条；若达到最小长度且没有合法后继，程序自动完成该 beam。真实 Snapshot smoke 留下 4 条不同候选，均无硬错误。
+
+## 199. 重复 Function 的当前边界与 Planner 阶段收口（2026-09-04）
+
+用户追问 motif 组合中的重复是否应转化为故事递进。记录当前实现是第一版安全阀：边界 overlap 会被合并，motif 内部回环会保留，但跨 motif 的重复 Function 目前直接作为硬错误；后续若继续提升递进表达，应改为检查状态、义务、角色目标和 transition 是否发生变化，再决定接受或拒绝。当前 LLM Planner 已完成动态编排、motif 组合、overlap、Beam 多样性、合同/状态校验、Outline 接入、CLI 和运行时边界，可作为阶段性收口版本；未完成项仅是递进式重复的更细语义判定、operation 配额和长期 Creative Memory，不阻塞当前 Planner 闭环。
+
+## 200. 删除非核心 schema fallback（2026-09-04）
+
+用户要求清理 LLM Planner 冗余代码和测试。结构化输出已要求严格使用 `extensions` 及正式字段，因此删除了 `candidates/options`、字段别名和 `overlap` 字符串转换等兼容 fallback，以及对应的 2 个测试；保留五种 operation、motif overlap、硬校验、Beam、图流程和持久化边界覆盖。清理后相关回归为 37 项通过。
+
+## 200. 往返抽取与分层相似度不作为当前运行时硬门槛（2026-09-04）
+
+用户询问真实 Function 往返抽取验证和生成后的分层相似度诊断是否必要。当前判断是：两者对研究结论和后续质量治理有价值，但都不是当前可用闭环的必需节点。
+
+真实 Function 往返验证的价值在于检查“动态 Planner/大纲生成的结构”能否被 Observer/Matcher 从生成结果中重新识别；它不能替代已有的 Contract、状态/义务校验，也会受到 LLM 采样和匹配波动影响。因此采用小批量、定期回归的方式即可，不在每次生成中强制执行。已有生成—回流基线可继续作为比较依据。
+
+生成后的分层相似度诊断只有在需要控制新颖性、避免实例重复、实现候选排序或支撑论文级质量结论时才有必要。当前动态 Planner 已有 Function chain 结构新意和 Pattern 近似去重，目标仍是先保证结构可生成，不为创新额外增加五层比较和自动修复。若后续确实需要，先增加只读的 Function chain/motif 与实例机制相似度诊断，不直接作为发布或生成阻断。
+
+## 201. 人物立场与关系变化必须分层保存（2026-09-04）
+
+用户明确要求按十步补齐人物信息，并进一步追问如何从真实故事库继承人物立场、长期目标和关系变化。由此确定：故事级 Profile 负责“谁、想要什么、开场与主人公的关系”，FunctionContract 负责“需要哪些标准角色位置”，FunctionOccurrence 负责“本次事件由谁对谁产生了什么有证据的变化”。不能把具体人物 ID 写进跨故事 Function 定义，也不能只靠 Outline LLM 自由记忆关系。
+
+实现上继续沿用一个 SQLite 知识库和 Snapshot 冻结边界：Profile 随 story version 保存，evolve 用当前 Run 按 story 覆盖父 Snapshot；Planner 只从冻结 Snapshot 投影匿名的角色统计、长期目标/立场上下文和关系变化案例。关系账本作为生成期硬校验，防止一个 Function 借“受益/共同对抗”等弱事实自动推出信任、合作或亲密升级。
+
+## 202. 严格跨字段校验会暴露真实 Observer 的重试成本（2026-09-04）
+
+本轮 3 篇真实 LLM 重跑中，首篇第一次 Observer 返回了结构合法但语义不一致的结果：`role_bindings` 引用了人物，而 `participant_ids` 没有覆盖该人物。当前实现正确拒绝了它；外层重试后才通过，期间还触发了一次 JSON 自修复。由此确认人物绑定不能只依赖 Pydantic 字段校验，但也需要把这类确定性跨字段错误纳入 Observer 的有限重试/反馈机制，否则真实批处理会因单篇采样波动中断。当前先保留严格门槛，不自动并集合并人物 ID，以免掩盖模型遗漏。
+
+## 203. 15 篇 Evolve 足以验证正式闭环，但不等于 Pattern 已成熟（2026-09-04）
+
+用户将原计划的 108 篇 Evolve 收缩为 15 篇。最终选择根 Snapshot 后清单中的前 15 篇，保持目标可追溯；这批新增文本实际集中在悬疑题材，因此 27 个故事的三题材 diversity 主要来自 12 篇根样本，不能把本轮结果当成平衡跨题材评估。
+
+正式链路已经得到可复核结果：schema 5 根 → 15 篇真实 Observer/Matcher/Curator/Evaluator → 子 Snapshot → Coordinator 自动 Pattern。失败的中止/重试 Run 均没有 Snapshot 且暂存清零，说明父子 Snapshot 边界有效；但 Pattern 只有候选 cluster、没有 Published Pattern，样本量仍不足以支撑下游 published Planner 的质量结论。
+
+本轮发布失败揭示了一个重要层次区别：supporting evidence 命中 Function 不代表该事件已经满足 FunctionContract 的全部角色槽位。与其放宽 Contract 或根据参与者猜测 `affected`/`beneficiary`，应把这类 occurrence 降级为 `UNCERTAIN`；这样保留真实不确定性，同时让 Snapshot 的人物与契约校验继续成为硬边界。
+
+真实 dynamic Outline 进一步验证了下游防线：角色统计、长期目标/立场和关系变化案例确实进入 Mechanism；当模型引入 seed 之外人物、或把关系变化放在契约未声明关系效果的 Function 上时，关系账本阻断输出。当前应把该结果解释为“引用传递与非法变化拦截通过”，而不是“已生成一个合格 Outline”；待 Published Pattern 形成后再做正常 published Planner 的端到端质量验证。
+## 204. 人物连续性的证明必须分成数据继承、账本门禁和重复生成三层（2026-09-04）
+
+- 用户提出：要证明系统能稳定生成保持人物立场、长期目标和关系连续性的 Outline，需要更多真实样本、更多 Published Pattern，以及至少一批通过关系账本校验的真实 Outline，并追问具体验证方法。
+- 当前 schema5 正式库已经证明了 Function → Snapshot → Pattern → Outline 的工程链路，但 27 篇故事对应的 0 个 Published Pattern 和 1 份被账本阻断的动态 Outline，不能证明生成质量；关系账本也不能单独证明长期目标和立场没有跳变。
+- 关键判断：必须先把“目标/立场变化”变成带人物 ID、前后状态、触发 Function 和证据的可检查账本项；然后用冻结 Snapshot、固定 Story Seed、同一案例多次真实 LLM 重复生成，分别测硬约束通过率、语义连续性和重复一致性。LLM 自评不能作为唯一证据。
+- 最小正式验收建议：训练/Pattern 库至少 60 篇、至少 4 类题材；至少 5 个由 3 篇以上真实故事且覆盖 2 类题材的 Published Pattern；每个 Pattern 至少 3 个固定 Seed、每个 Seed 重复 5 次；所有硬账本错误为 0，且抽样人工/独立评审确认目标、立场和关系变化都有前序证据。重复评测使用临时数据库或不消耗 Pattern 的评测副本，以保留生产环境中 pattern_id 全库只使用一次的约束。
+
+## 205. 27 份 Outline 门槛失败的含义（2026-09-04）
+
+用户追问硬校验、关系账本和重复组均为 0 的原因。核对结果显示：27 份 Outline 全部生成成功，但每份都产生了 3～10 条关系变化（平均 5.15 条），且每份至少有一条关系双方没有被当前 Function 的 `role_bindings` 覆盖。23/27 份在没有 `RELATIONSHIP_STATUS` Contract 效果的 Function 上生成了关系变化，18/27 份的关系效果没有覆盖双方角色，25/27 份存在同一关系维度的 `before` 与前一步 `after` 不连续；这些计数相互重叠。
+
+因此 0/27 首先说明“关系变化输出与 FunctionContract/角色绑定/前后状态不闭合”，不是 LLM 没有产出文本。硬校验采用合取门槛，任一合同错误或账本错误都会使单份 Outline 失败；3 次重复全部通过才算一个完整重复组，所以 0/9 不代表没有生成重复结果，而是没有一个 Seed 的 3 次结果全部过硬门槛。当前还确认选中的 Published Pattern 本身存在关系 Contract 未充分声明角色双方的结构缺口，不能把失败全部归咎于生成模型。
+
+## 206. 关系连续性失败采用三处最小根修复（2026-09-04）
+
+用户要求给出解决思路，并明确使用 Ponytail 收敛复杂度。当前不增加 Agent、数据库表或第二套关系系统，只处理三个根因：第一，FunctionContract 中凡声明 `RELATIONSHIP_STATUS` 的 effect 必须覆盖两个已有标准角色槽位，关系语义 Function 缺少第二方时应在新 Snapshot 中修正；第二，Mechanism 生成后立刻复用现有关系账本校验，带具体错误反馈最多重试一次，仍失败则在 Scaffold/Realize 前终止，避免继续消耗 LLM；第三，关系 `before` 不再由 LLM自由复述，而由 Seed 初始边、Contract 的 before 和前一步 after 确定性继承，LLM只负责 after 与 evidence。
+
+现有冻结 Snapshot 不原地修改；合同生成/发布门禁修正后发布新 Snapshot 并重跑 Pattern，再复用同一批 27 个案例验证。当前“重复通过率”只是硬通过率的分组重复，和“硬校验 27/27”基本重复；若后续需要证明重复语义稳定性，应另行比较固定 Seed 三次输出的规范化目标、立场和关系终态，而不是继续扩大样本掩盖根因。
+
+## 207. 不做全局重构，只收拢关系账本的真实重复与索引错误（2026-09-04）
+
+用户要求用 Ponytail 判断是否需要重构。代码和真实评测产物确认无需重构 Snapshot、StoryProfile、KnowledgeBase、Outline 图或新增关系系统；但 `build_contract_ledger()` 当前按 `function_name` 建立 Mechanism 映射，同一 Pattern 重复 Function 时后一次会覆盖前一次。真实 Pattern `PAT_5507fe7dc2822593` 的第一段 `RELATIONSHIP_FORMATION(P1→P2)` 已被错误解析为第四段 `P3→P1`，必须改为只按唯一 `segment_index` 寻址并增加一个重复 Function 回归测试。
+
+另一个必要的局部收拢是删除评测脚本对人物、绑定、关系效果等核心规则的重复实现：连续 `before/after` 检查应进入生产 `Contracts/ledger.py`，评测直接调用同一实现，仅保留 Snapshot 案例存在性等评测专属条件。除此之外不抽象通用重试框架、不拆新服务、不整理无关文件；现有 31 项相关测试全部通过，说明该真实重复 Function 错误目前缺少测试覆盖。
+
+## 208. FunctionContract 与 Mechanism 的关系边界修复后，关系账本先达到稳定门禁（2026-09-04）
+
+本轮没有把关系变化权限交给 Mechanism 的自然语言判断。Contract 的关系 effect 必须是两个不同标准角色槽位组成的二元边；Mechanism 只能绑定该 effect 的同一对人物，旧 Snapshot 中的单角色关系 effect 在运行时按“无关系授权”处理。这样区分了“Function 名称看起来像关系变化”和“Contract 实际授权关系边”两件事。
+
+关系 `before` 也不再由 LLM 自由复述：第一条从 seed 的有向初始关系或 Contract before 取得，后续同一方向/维度继承前一条 after；Mechanism 只提供 after 与 evidence，账本继续检查未知人物、绑定、精确角色对、双方人物状态和证据。真实模型第一次输出若越界，最多获得一次确定性错误反馈。
+
+使用上一轮同一冻结 Snapshot 与 27 个真实复评案例，关系变化从 139 条降到 39 条，且 39 条全部落在 `RELATIONSHIP_FORMATION`/`COMMUNITY_FORMATION` 的有效二元 effect 上；关系账本从 `0/27` 提升为 `27/27`。但 Validator 仍只通过 `12/27`，三次重复只有 `1/9` 组全部通过，人物目标/立场抽查 `12/14`，所以本轮结论仅是“关系变化边界与账本连续性修复有效”，不是“整体 Outline 已稳定”。
+
+冻结 Snapshot 中仍有 `CONFRONT_OPPOSITION` 与 `SOCIAL_BOND_DISRUPTION` 两个历史单角色关系 effect；本轮没有偷偷修库，而是保守不授权。后续若需要正式数据本身通过新 Contract schema，必须以新不可变 Snapshot 重建/发布这些合同，再重新生成 Pattern；不能把兼容读取的复评结果当作已完成的数据修复。
+
+## 209. 先校准 Outline 评测口径，再扩大真实样本（2026-09-04）
+
+用户要求按前述方案落地。27 份复评显示，实际 `outline.ending` 已由输出 schema 强制存在，但 Validator 把可选的 Pattern `ending_spec=null` 误读为没有结局；另有一份人物审核的所有明细项均为 true、汇总却为 false。由此明确：LLM 汇总值不能覆盖确定性字段检查，评测必须拆分 structural、semantic、overall 三层，并由代码从人物明细计算审核通过值。
+
+当前 3 个被测 Published Pattern 都没有有证据的 `ending_spec`。这不表示 Pattern 无效，而表示它们是局部结构证据，不能直接用于证明完整 Outline 的结局稳定性。完整稳定性评测应增加“有证据 ending_spec”的资格门槛；不能手工补写结局，应该继续 Evolve/Pattern 直到形成合格 Pattern。
+
+本轮下游最小补强是让 SeedCharacter 显式携带初始立场，并把 Contract 关系 effect 的 before/after 上限传给 Mechanism；继续复用已有关系账本和 occurrence_index，不新增 Agent、数据库表或关系等级系统。下一步应先对现有 27 份产物只重跑 Validator，确认污染后的失败分布，再用合格 Pattern 重新生成 27 份。
+
+## 210. 结局失败先收拢到 Validator 与一次性 Realize 回边（2026-09-05）
+
+- 独立评审将剩余失败具体化为结局身份混淆、前序未支持的新真相/解决方案、`final_ledger` 与 ending 矛盾，以及低信任状态被写成互信/和解/稳定联盟。由此确认继续堆 Prompt 不够，但也不需要新增 Agent 或数据层。
+- 结论：保留角色绑定/账本，集中修 Mechanism、Ending、Validator，不增加新层。当前代码只把高置信的未知人物/身份合并/关系状态越界收拢到现有 Validator 结果；因果充分性、证据是否真实支撑结局、义务是否包含可观察动作及后果，仍保留给语义 Validator。
+- 采用一次性 `realize_retry_count` 条件回边，而非循环修复：结构合同或规则失败不重写，语义失败最多依据 `validation.issues` 重写一次，第二次仍失败保留诊断。这是第一版安全阀，不宣称替代独立语义评审。
+
+## 211. 5 篇增量没有产生非空 ending_spec（2026-09-05）
+
+- 用户选择先添加 5 篇新故事，完整执行一次增量 `Evolve → Pattern`，用真实数据判断是否需要区分“局部 Pattern”和“完整故事 Pattern”。这次 Evolve 与 Pattern 均成功，子 Snapshot 新增 5 个故事并发布 6 个 Published Pattern。
+- 结果是 Published Pattern 的非空 `ending_spec` 仍为 `0/6`，本轮新增的 3 个 Published Pattern 也全部为空。由此暂不引入 Pattern 类型拆分、不手工补写 ending_spec，也不把 ending_spec 变成当前发布硬门槛；当前证据只说明结局规范还没有从这 5 篇样本中自然形成。
+- 这次运行还确认了一个真实迁移边界：父 Snapshot 的历史非法 Contract 不能直接通过严格 `load_function_contracts()` 读取。增量 Evolve 需要显式读取旧合同、在子 Snapshot 规范化，再由新 Snapshot 严格校验；这保持了不可变父数据和新数据门禁，同时避免为了兼容旧数据放宽运行时关系授权。
+
+## 212. 结局继续复用现有生成链（2026-09-05）
+
+- 用户决定暂不扩展完整故事 Pattern 类型；继续保留证据态 `ending_spec` 与生成态 `ending_target` 的边界，并在现有 Seed → Realize → Validator 链内补强结局。无 Pattern `ending_spec` 时，`ending_target.must_show` 直接复用已经要求包含“解决动作 → 冲突结果 → 稳定终态”的 `seed.ending_direction`，不新增字段、Agent、数据库或回写路径。
+
+## 213. 撤回重复的 seed must_show 映射（2026-09-06）
+
+- 用户指出将 `seed.ending_direction` 同时写入 `ending_target.must_show` 和 `final_state` 会造成重复。确认现有 `outline.ending.resolution_actions` 已承担具体解决动作，故撤回该映射，不新增结局字段或解析规则。
+
+## 214. Seed 结局方向约束的真实 smoke 结果（2026-09-06）
+
+- 按当前最小方案，只要求 Seed 的单一 `ending_direction` 明确写出“可观察解决动作 → 直接冲突结果 → 稳定终态”；`ending_target.must_show` 继续为空，具体动作由已有 `outline.ending.resolution_actions` 生成。
+- 4 份临时副本真实生成结果为 `outline.ending=4/4`、Validator `3/4` 通过。唯一失败来自结局使用了前文未建立的记忆、证据或义务，说明当前瓶颈是既有结局因果闭合，不是缺少 `must_show` 字段；暂不增加新层或新字段。
+
+## 215. 结局完整性必须通过正文消费验证（2026-09-06）
+
+- 用户明确指出：要用生成出的 Outline 验证是否真的有完整结局，不能只看 Outline JSON 的 ending 字段或 Validator 汇总值。由此把验收链收敛为 `Outline → Story_Agent → 正文最后场景 → 独立 LLM 质量诊断`。
+- 本轮 5 份 Outline 中，1 份已被 Outline Validator 阻断，4 份进入正文尝试；其中 1 份虽 Validator 通过，却因场景计划引用 seed 未定义人物而在正文前置阶段失败，说明 Outline Validator 与 Story Agent 消费合同仍有真实缺口。
+- 成功生成的 3 份正文都实际完成结局动作、冲突后果和稳定终态；独立质量诊断的 `ending_closure` 均为 `5/5`。古风仙侠的冲突解决为 `4/5`，指出 P3 和解转折稍突兀，说明“完整闭合”和“转折自然”仍需分开记录。
+- 因此当前只能说结局生成已有正面证据，不能说整批 Outline 或生成稳定性已通过。先处理未定义人物引用这一已复现的消费问题，再决定是否需要进一步调整 Prompt。
+
+## 216. 场景人物必须是 seed 的已定义角色（2026-09-06）
+
+- 用户要求处理真实正文链复现的“场景计划引用 seed 未定义人物”问题。根因不是正文写作，而是 `SCENE_PLAN_PROMPT` 只禁止新增“核心人物”，却没有限制 `SceneDraft.characters` 的 ID 集合；模型因此输出了“P3 的手下”“村长”等临时角色。
+- 最小修复是沿用现有 `_scene_plan_issues()` 硬校验，同时把 seed 的 `allowed_character_ids` 显式传入场景计划 Prompt，并禁止自然语言/临时角色进入 `characters`。对该确定性错误最多重试一次，避免静默删项或猜测角色映射；非核心人物仍可在 beats/setting 中被描述。
+- 离线回归 `51 passed`。针对原失败 Outline 的真实 Story_Agent 重跑最终成功：4 个场景的角色列表只包含 `P1/P2/P3`，正文 `5060` 字符，独立质量诊断 `ending_closure=5/5`、`conflict_resolution=5/5`，无诊断问题。第一次重跑出现的是场景段对齐波动，不属于人物边界修复，未扩展为新的通用重试层。

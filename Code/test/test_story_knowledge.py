@@ -14,6 +14,16 @@ from KnowledgeBase import StoryKnowledgeStore
 STORY_TEXT = "一个真实故事。"
 
 
+def _profile():
+    return {
+        "world_setting": "测试世界", "protagonist_id": "P1",
+        "characters": [{
+            "id": "P1", "label": "主角", "structural_role": "protagonist",
+            "long_term_goal": "完成任务", "motivation": "避免失败",
+        }], "relationships": [], "core_conflict": "任务受阻", "ending_state": "任务完成",
+    }
+
+
 def _observation():
     version_id = story_version_id("story", STORY_TEXT)
     item = {
@@ -24,6 +34,9 @@ def _observation():
         "before_state": "之前",
         "event": "事件",
         "after_state": "之后",
+        "participant_ids": ["P1"],
+        "role_bindings": {"actor": ["P1"]},
+        "relationship_deltas": [],
     }
     item["observation_version_id"] = observation_version_id(version_id, item)
     return item
@@ -55,6 +68,9 @@ def _snapshot(tmp_path, function, contracts=None, parent=None, workflow="evolve"
         "function_name": "TEST_FUNCTION",
         "status": "MATCHED",
         "source_sentence_indices": [0],
+        "participant_ids": ["P1"],
+        "role_bindings": {"actor": ["P1"]},
+        "relationship_deltas": [],
     }
     return publish_snapshot(
         [function],
@@ -64,6 +80,7 @@ def _snapshot(tmp_path, function, contracts=None, parent=None, workflow="evolve"
         str(tmp_path / "snapshots"),
         [occurrence],
         contracts,
+        story_profiles=[{"story_id": "story", "story_version_id": observation["story_version_id"], "profile": _profile()}],
         parent_snapshot_id=parent,
     )
 
@@ -102,6 +119,7 @@ def _commit_function_snapshot(store, snapshot, corpus, story_meta, observations)
             }},
             {**meta, "source_file": filename},
             by_story.get(story_id, []), position,
+            _profile(),
         )
     return store.commit_function_run(snapshot, manifest["run_id"])
 
@@ -177,6 +195,34 @@ def test_snapshot_versions_accumulate_and_link_parent(tmp_path):
         ).fetchone()
         assert row[0] == os.path.basename(first)
         assert conn.execute("SELECT definition FROM functions").fetchone()[0] == "修订后的结构变化"
+
+
+def test_run_profile_view_inherits_parent_and_overrides_current_story(tmp_path):
+    first = _snapshot(tmp_path, _function())
+    corpus, meta, observations = _corpus(tmp_path)
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    _commit_function_snapshot(store, first, corpus, meta, observations)
+
+    run_id = "FR_PROFILE_OVERRIDE"
+    parent_id = os.path.basename(first)
+    store.begin_function_run(run_id, "evolve", "profile_override", parent_id, str(corpus))
+    changed_text = "一个更新后的真实故事。"
+    changed_profile = _profile()
+    changed_profile["characters"][0]["long_term_goal"] = "完成新的任务"
+    store.stage_story_observations(
+        run_id,
+        {"raw_text": changed_text, "metadata": {
+            "story_id": "story",
+            "story_version_id": story_version_id("story", changed_text),
+        }},
+        {"source_file": "story.txt"},
+        [], 1, changed_profile,
+    )
+
+    view = store.load_run_story_profile_view(parent_id, run_id)
+    assert len(view) == 1
+    assert view[0]["story_id"] == "story"
+    assert view[0]["profile"]["characters"][0]["long_term_goal"] == "完成新的任务"
 
 
 def test_lineage_event_payload_round_trip(tmp_path):

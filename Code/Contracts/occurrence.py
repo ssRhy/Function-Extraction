@@ -22,6 +22,7 @@ def assignment_metrics(occurrences: list[dict]) -> dict:
 def align_occurrences(
     functions: list[dict],
     observations: list[dict],
+    contracts: list[dict] | None = None,
 ) -> list[dict]:
     """以最终 supporting_obs_ids 为准生成可发布的 FunctionOccurrence。"""
     support: dict[str, list[dict]] = {}
@@ -34,6 +35,11 @@ def align_occurrences(
         for obs in observations
         if obs.get("obs_id") or obs.get("occurrence_id")
     }
+    contracts_by_name = {
+        item.get("function_name"): item
+        for item in (contracts or [])
+        if item.get("function_name")
+    }
 
     result = []
     for obs_id, obs in by_id.items():
@@ -44,11 +50,25 @@ def align_occurrences(
         matches = support.get(obs_id, [])
         if len(matches) == 1:
             func = matches[0]
-            occurrence.update({
-                "status": "MATCHED",
-                "function_id": func["function_id"],
-                "function_name": func["function_name"],
-            })
+            contract = contracts_by_name.get(func["function_name"])
+            missing = [
+                role for role in (contract or {}).get("role_slots", [])
+                if not (occurrence.get("role_bindings") or {}).get(role)
+            ]
+            if missing:
+                occurrence.update({
+                    "status": "UNCERTAIN",
+                    "function_id": None,
+                    "function_name": None,
+                    "candidate_functions": [func["function_name"]],
+                    "reason": f"FunctionContract 角色槽位未完整绑定: {', '.join(missing)}",
+                })
+            else:
+                occurrence.update({
+                    "status": "MATCHED",
+                    "function_id": func["function_id"],
+                    "function_name": func["function_name"],
+                })
         elif not matches and occurrence.get("label") == "NOVEL":
             occurrence.update({
                 "status": "OTHER",

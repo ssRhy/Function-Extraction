@@ -49,6 +49,8 @@ class SourceOutlineDocument(BaseModel):
     contract_ledger: dict | None = None
     outline: SourceOutline
     ending_spec: dict | None = None
+    ending_target: dict | None = None
+    ending_budget: dict | None = None
     validation: dict | None = None
 
 
@@ -64,6 +66,10 @@ class FunctionSegmentConstraint(BaseModel):
     required_action: str = Field(min_length=1)
     required_reason: str = Field(min_length=1)
     required_state_change: str = Field(min_length=1)
+    relationship_changes: list[dict] = Field(
+        default_factory=list,
+        description="必须保持的有证据关系变化，来自 mechanism_plan",
+    )
     causal_to_next: str
 
 

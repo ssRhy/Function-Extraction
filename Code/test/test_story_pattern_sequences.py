@@ -17,6 +17,15 @@ def _function():
     }]
 
 
+PROFILE = {
+    "world_setting": "测试世界", "protagonist_id": "P1",
+    "characters": [{
+        "id": "P1", "label": "主角", "structural_role": "protagonist",
+        "long_term_goal": "完成任务", "motivation": "避免失败",
+    }], "relationships": [], "core_conflict": "任务受阻", "ending_state": "任务完成",
+}
+
+
 def _occurrence(obs_id, source_indices, status="MATCHED"):
     return {
         "occurrence_id": obs_id,
@@ -27,6 +36,9 @@ def _occurrence(obs_id, source_indices, status="MATCHED"):
         "function_id": "F_1" if status == "MATCHED" else None,
         "function_name": "FUNCTION_A" if status == "MATCHED" else None,
         "source_sentence_indices": source_indices,
+        "participant_ids": ["P1"],
+        "role_bindings": {"actor": ["P1"]},
+        "relationship_deltas": [],
     }
 
 
@@ -39,17 +51,21 @@ def _commit_snapshot(tmp_path, occurrences):
         "before_state": "before",
         "event": item["obs_id"],
         "after_state": "after",
+        "participant_ids": ["P1"],
+        "role_bindings": {"actor": ["P1"]},
+        "relationship_deltas": [],
     } for item in occurrences]
     staged = store.stage_story_observations(
         "R_TEST",
         {"raw_text": "story", "metadata": {"story_id": "s1", "title": "s1", "story_type": "test"}},
-        {"source_file": "s1.txt"}, observations, 1,
+        {"source_file": "s1.txt"}, observations, 1, PROFILE,
     )
     versions = {item["obs_id"]: item["observation_version_id"] for item in staged}
     published = [dict(item, observation_version_id=versions[item["obs_id"]]) for item in occurrences]
     path = publish_snapshot(
         _function(), {"verdict": "PASS"}, "bootstrap", "test", str(tmp_path / "snapshots"),
         published, run_id="R_TEST",
+        story_profiles=[{"story_id": "s1", "story_version_id": staged[0]["story_version_id"], "profile": PROFILE}],
     )
     manifest = store.commit_function_run(path, "R_TEST")
     return store.db_path, manifest
@@ -80,6 +96,7 @@ def test_build_story_sequences_orders_source_positions(tmp_path):
     path = publish_snapshot(
         _function(), {"verdict": "PASS"}, "evolve", "test", str(tmp_path),
         [_occurrence("s1_obs_002", [20]), _occurrence("s1_obs_001", [3])],
+        story_profiles=[{"story_id": "s1", "story_version_id": "SV_s1", "profile": PROFILE}],
     )
     from Contracts.snapshot import validate_snapshot, load_occurrences
     manifest = validate_snapshot(path)

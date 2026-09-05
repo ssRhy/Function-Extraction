@@ -17,6 +17,14 @@ FUNCTION = {
     "supporting_obs_ids": ["story_obs_001"],
 }
 
+PROFILE = {
+    "world_setting": "测试世界", "protagonist_id": "P1",
+    "characters": [{
+        "id": "P1", "label": "主角", "structural_role": "protagonist",
+        "long_term_goal": "完成任务", "motivation": "避免失败",
+    }], "relationships": [], "core_conflict": "任务受阻", "ending_state": "任务完成",
+}
+
 
 def _story(text):
     version_id = story_version_id("story", text)
@@ -42,6 +50,9 @@ def _observation(text):
         "before_state": "before",
         "event": text,
         "after_state": "after",
+        "participant_ids": ["P1"],
+        "role_bindings": {"actor": ["P1"]},
+        "relationship_deltas": [],
     }
     item["observation_version_id"] = observation_version_id(version_id, item)
     return item
@@ -50,12 +61,13 @@ def _observation(text):
 def _commit(store, root, run_id, workflow, text, parent=None):
     store.begin_function_run(run_id, workflow, "test", parent)
     observations = store.stage_story_observations(
-        run_id, _story(text), {"source_file": "story.txt"}, [_observation(text)], 1,
+        run_id, _story(text), {"source_file": "story.txt"}, [_observation(text)], 1, PROFILE,
     )
     snapshot = publish_snapshot(
         [FUNCTION], {"verdict": "PASS"}, workflow, "test", str(root),
         align_occurrences([FUNCTION], observations),
         parent_snapshot_id=parent, run_id=run_id,
+        story_profiles=[{"story_id": "story", "story_version_id": story_version_id("story", text), "profile": PROFILE}],
     )
     return store.commit_function_run(snapshot, run_id)["snapshot_id"]
 
@@ -70,7 +82,7 @@ def test_run_overlay_snapshot_immutability_and_failure_cleanup(tmp_path):
 
     store.begin_function_run("R3", "evolve", "test", child)
     store.stage_story_observations(
-        "R3", _story("failed"), {"source_file": "story.txt"}, [_observation("failed")], 1,
+        "R3", _story("failed"), {"source_file": "story.txt"}, [_observation("failed")], 1, PROFILE,
     )
     store.fail_function_run("R3", {"reason": "test"})
 
@@ -90,7 +102,7 @@ def test_new_run_recovers_interrupted_unpublished_run(tmp_path):
     store.begin_function_run("R1", "bootstrap", "test", None)
     store.stage_story_observations(
         "R1", _story("interrupted"), {"source_file": "story.txt"},
-        [_observation("interrupted")], 1,
+        [_observation("interrupted")], 1, PROFILE,
     )
 
     store.begin_function_run("R2", "bootstrap", "test", None)

@@ -104,7 +104,7 @@ def evolve_bank_adder_node(state: NarrativePipelineState) -> dict:
         return {"added_obs_ids": []}
     staged = StoryKnowledgeStore(state["knowledge_db"]).stage_story_observations(
         state["run_id"], normalized, state.get("story_config") or {}, observations,
-        state.get("current_story_index", 0) + 1,
+        state.get("current_story_index", 0) + 1, state.get("story_profile"),
     )
     story_id = normalized["metadata"]["story_id"]
     bank = get_bank()
@@ -145,6 +145,7 @@ def collector_node(state: NarrativePipelineState) -> dict:
         "raw_text": None,
         "story_config": None,
         "normalized_story": None,
+        "story_profile": None,
         "observations": [],
         "added_obs_ids": [],
         "match_decisions": [],
@@ -440,8 +441,22 @@ def evaluator_final_node(state: dict) -> dict:
         with open(mr_path, "w", encoding="utf-8") as f:
             json.dump(mr, f, ensure_ascii=False, indent=2)
 
+    function_contracts = []
     observations = bank.get_all()
-    final_occurrences = align_occurrences(final_funcs, observations)
+    if final_report.get("verdict") == "PASS":
+        inherited_contracts = []
+        base_snapshot_id = state.get("base_snapshot_id")
+        snapshot_root = state.get("snapshot_root") or DEFAULT_SNAPSHOT_ROOT
+        parent_path = os.path.join(snapshot_root, base_snapshot_id) if base_snapshot_id else ""
+        if base_snapshot_id and os.path.isdir(parent_path):
+            inherited_contracts = load_function_contracts(parent_path, validate=False)
+        function_contracts = build_function_contracts(
+            final_funcs,
+            observations,
+            out_dir,
+            existing_contracts=inherited_contracts,
+        )
+    final_occurrences = align_occurrences(final_funcs, observations, contracts=function_contracts)
     final_report["assignment"] = assignment_metrics(final_occurrences)
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(final_report, f, ensure_ascii=False, indent=2)
@@ -450,20 +465,6 @@ def evaluator_final_node(state: dict) -> dict:
           f"({a['assignment_coverage']:.3f}), UNCERTAIN={a['uncertain_rate']:.3f}, OTHER={a['other_rate']:.3f}")
     print(f"  Final Report → {report_path}")
     _write_jsonl(os.path.join(out_dir, "occurrences_final.jsonl"), final_occurrences)
-    function_contracts = []
-    if final_report.get("verdict") == "PASS":
-        inherited_contracts = []
-        base_snapshot_id = state.get("base_snapshot_id")
-        snapshot_root = state.get("snapshot_root") or DEFAULT_SNAPSHOT_ROOT
-        parent_path = os.path.join(snapshot_root, base_snapshot_id) if base_snapshot_id else ""
-        if base_snapshot_id and os.path.isdir(parent_path):
-            inherited_contracts = load_function_contracts(parent_path)
-        function_contracts = build_function_contracts(
-            final_funcs,
-            observations,
-            out_dir,
-            existing_contracts=inherited_contracts,
-        )
 
     run_id = state.get("run_id")
     if not run_id:
@@ -478,6 +479,9 @@ def evaluator_final_node(state: dict) -> dict:
         function_contracts=function_contracts,
         parent_snapshot_id=state.get("base_snapshot_id"),
         run_id=run_id,
+        story_profiles=StoryKnowledgeStore(state["knowledge_db"]).load_run_story_profile_view(
+            state.get("base_snapshot_id"), run_id,
+        ) if state.get("knowledge_db") else [],
     )
     if snapshot_path:
         print(f"  OntologySnapshot → {snapshot_path}")
@@ -657,6 +661,7 @@ def main() -> int:
         "raw_text": None,
         "story_config": None,
         "normalized_story": None,
+        "story_profile": None,
         "observations": [],
         "added_obs_ids": [],
         "similar_observations": [],

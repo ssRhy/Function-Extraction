@@ -4,6 +4,11 @@ import hashlib
 import re
 
 from pydantic import BaseModel, Field, model_validator
+from Contracts.story_profile import ROLE_POSITION_SET, ROLE_POSITIONS
+
+
+STANDARD_ROLE_POSITIONS = ROLE_POSITIONS
+RELATIONSHIP_ASPECTS = frozenset({"RELATIONSHIP_STATUS", "RELATIONSHIP"})
 
 
 class StateCondition(BaseModel):
@@ -42,6 +47,9 @@ class FunctionContractBody(BaseModel):
     def validate_role_references(self):
         if not self.role_slots or not self.preconditions or not self.effects:
             raise ValueError("FunctionContract 缺少角色、前置或效果")
+        unknown = set(self.role_slots) - ROLE_POSITION_SET
+        if unknown:
+            raise ValueError(f"FunctionContract 使用了非标准角色位置: {', '.join(sorted(unknown))}")
         if len(set(self.role_slots)) != len(self.role_slots):
             raise ValueError("FunctionContract 角色槽位重复")
         referenced = []
@@ -52,7 +60,24 @@ class FunctionContractBody(BaseModel):
             referenced.extend(slot for item in group for slot in item.role_slots)
         if not set(referenced).issubset(set(self.role_slots)):
             raise ValueError("FunctionContract 使用了未声明角色槽位")
+        for effect in self.effects:
+            if effect.aspect in RELATIONSHIP_ASPECTS and (
+                len(effect.role_slots) != 2 or len(set(effect.role_slots)) != 2
+            ):
+                raise ValueError("关系状态效果必须明确覆盖两个不同角色槽位")
         return self
+
+
+def relationship_effects(contract: dict) -> list[dict]:
+    """返回能授权一条二元关系边的有效 Contract effects。"""
+    return [
+        effect for effect in contract.get("effects", [])
+        if effect.get("aspect") in RELATIONSHIP_ASPECTS
+        and len(effect.get("role_slots", [])) == 2
+        and len(set(effect.get("role_slots", []))) == 2
+        and set(effect.get("role_slots", [])).issubset(ROLE_POSITION_SET)
+        and set(effect.get("role_slots", [])).issubset(set(contract.get("role_slots", [])))
+    ]
 
 
 def definition_sha256(function: dict) -> str:
@@ -79,6 +104,12 @@ def validate_function_contracts(functions: list[dict], contracts: list[dict]) ->
             raise ValueError(f"FunctionContract 缺少角色、前置或效果: {function.get('function_name')}")
         if len(set(body.role_slots)) != len(body.role_slots):
             raise ValueError(f"FunctionContract 角色槽位重复: {function.get('function_name')}")
+        unknown = set(body.role_slots) - ROLE_POSITION_SET
+        if unknown:
+            raise ValueError(
+                f"FunctionContract 使用了非标准角色位置: {function.get('function_name')}: "
+                f"{', '.join(sorted(unknown))}"
+            )
         role_slots = set(body.role_slots)
         referenced = []
         referenced.extend(slot for item in body.preconditions for slot in item.role_slots)

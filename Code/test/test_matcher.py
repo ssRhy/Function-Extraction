@@ -59,6 +59,12 @@ class FakeEmbedder:
 def _obs(sid, oid, text="角色发现关键线索并改变认知", surface="发现线索", idx=(0,)):
     return {
         "obs_id": oid, "story_id": sid, "event": text, "participants": ["角色"],
+        "participant_ids": ["P1"],
+        "role_bindings": {
+            "actor": ["P1"], "affected": [], "information_provider": [],
+            "resource_provider": [], "beneficiary": [], "obstacle": [],
+        },
+        "relationship_deltas": [],
         "before_state": text, "after_state": text, "affected_aspect": "认知",
         "narrative_effect": "推动行动", "surface_form": surface,
         "source_sentence_indices": list(idx),

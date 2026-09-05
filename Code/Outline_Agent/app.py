@@ -1,6 +1,7 @@
 """Outline Agent - 按题材生成单轮短篇大纲。
 
-线性图：START → planner → seed → mechanism → scaffold → realize → validate → export → END
+图流程：published 走 Pattern 选择；dynamic 走 dynamic_seed → dynamic_planner；两者随后共用
+mechanism → scaffold → realize → validate → export → END。
 读取知识库与派生索引，完整大纲写入知识库并导出 JSON/Markdown。
 
 用法（Code/ 下）：
@@ -10,6 +11,7 @@
 import argparse
 import json
 import os
+import re
 import sys
 import time
 from collections import Counter, defaultdict
@@ -22,7 +24,9 @@ if os.path.isdir(_VENDOR) and _VENDOR not in sys.path:
 from langgraph.graph import StateGraph, START, END
 
 from FunctionExtract_Agent.llm import chat_structured
-from Contracts.ledger import build_contract_ledger
+from Contracts.function_contract import relationship_effects
+from Contracts.ledger import build_contract_ledger, normalize_relationship_befores
+from Contracts.role_projection import project_role_references
 from KnowledgeBase import DEFAULT_DB_PATH, StoryKnowledgeStore
 
 from Outline_Agent.state import (
@@ -35,6 +39,7 @@ from Outline_Agent.state import (
     PatternSelection,
 )
 from Outline_Agent.Prompt.Outline_prompt import (
+    DYNAMIC_SEED_PROMPT,
     NARRATIVE_PROMPT,
     MECH_PROMPT,
     PATTERN_SELECTION_PROMPT,
@@ -42,6 +47,7 @@ from Outline_Agent.Prompt.Outline_prompt import (
     SEED_PROMPT,
     VALIDATE_PROMPT,
 )
+from Outline_Agent.dynamic_planner import plan_dynamic_outline
 
 
 _DATA = os.path.join(_ROOT, "data")
@@ -167,6 +173,10 @@ def load_planner_references(snapshot_id, pattern, chain, knowledge_db=DEFAULT_DB
     occurrences = store.load_occurrences(snapshot_id)
     motifs = _motif_references(pattern, store.load_motif_evidence(snapshot_id))
     transitions = build_function_transitions(occurrences)
+    role_references = project_role_references(
+        functions, store.load_contracts(snapshot_id), occurrences,
+        store.load_story_profiles(snapshot_id),
+    )
     names = {step["function_name"] for step in chain}
     return {
         "motifs": motifs,
@@ -176,6 +186,7 @@ def load_planner_references(snapshot_id, pattern, chain, knowledge_db=DEFAULT_DB
             if transitions.get(name)
         },
         "instance_cases": _instance_cases(functions, occurrences, chain),
+        **role_references,
     }
 
 
@@ -251,6 +262,8 @@ def planner(catalog, genre, pattern_name=None, contracts=None, references=None):
             "contract": contract or {},
             "reference_transitions": references.get("transitions", {}).get(name, []),
             "reference_instance_cases": references.get("instance_cases", {}).get(name, []),
+            "reference_role_stats": references.get("role_stats", {}).get(name, {}),
+            "reference_relationship_cases": references.get("relationship_cases", {}).get(name, []),
         })
     return pattern, annotate_occurrences(chain)
 
@@ -259,15 +272,85 @@ def _compact_chain(chain):
     keys = (
         "segment_index", "function_id", "function_name", "definition", "preconditions", "role_slots",
         "contract", "reference_transitions", "reference_instance_cases",
+        "reference_role_stats", "reference_relationship_cases",
         "occurrence_index", "occurrence_total",
     )
     return [
         {
-            k: step.get(k, [] if k in {"reference_transitions", "reference_instance_cases"} else None)
+            k: step.get(
+                k,
+                {} if k == "reference_role_stats"
+                else [] if k in {"reference_transitions", "reference_instance_cases", "reference_relationship_cases"}
+                else None,
+            )
             for k in keys
         }
         for step in chain
     ]
+
+
+def _relationship_constraints(chain):
+    return [
+        {
+            "segment_index": step["segment_index"],
+            "function_name": step["function_name"],
+            "allowed_role_pairs": [
+                list(effect["role_slots"])
+                for effect in relationship_effects(step.get("contract") or {})
+            ],
+            "allowed_effects": [
+                {
+                    "role_slots": list(effect["role_slots"]),
+                    "aspect": effect["aspect"],
+                    "before": effect["before"],
+                    "after": effect["after"],
+                }
+                for effect in relationship_effects(step.get("contract") or {})
+            ],
+        }
+        for step in chain
+    ]
+
+
+def build_ending_target(ending_spec, seed):
+    """将可选的 Pattern 结局规范统一为本轮实际结局目标。"""
+    if ending_spec:
+        return {"source": "pattern", **ending_spec}
+    return {
+        "source": "seed",
+        "resolves": seed.get("core_conflict", ""),
+        "must_show": [],
+        "final_state": seed.get("ending_direction", ""),
+    }
+
+
+def build_ending_budget(state):
+    """汇总 ending 可使用的前序义务、伏笔和关系状态，不新增持久化 schema。"""
+    ledger = state.get("contract_ledger") or {}
+    relationship_ledger = ledger.get("relationship_ledger") or {}
+    payoffs = []
+    for step in (state.get("narrative") or {}).get("steps", []):
+        for payoff in step.get("setup_payoffs", []):
+            if payoff.get("payoff_segment_index") is None:
+                payoffs.append({
+                    "segment_index": step.get("segment_index"),
+                    "content": payoff.get("content", ""),
+                    "payoff": payoff.get("payoff", ""),
+                })
+    states = {}
+    for change in relationship_ledger.get("changes", []):
+        key = (change.get("source_id"), change.get("target_id"), change.get("dimension"))
+        states[key] = {
+            "source_id": change.get("source_id"),
+            "target_id": change.get("target_id"),
+            "dimension": change.get("dimension", ""),
+            "after": change.get("after", ""),
+        }
+    return {
+        "unresolved_obligations": ledger.get("obligations") or [],
+        "ending_payoffs": payoffs,
+        "relationship_state_upper_bounds": list(states.values()),
+    }
 
 
 def _align(chain, items):
@@ -321,6 +404,103 @@ def narrative_plan_issues(chain, narrative):
     return issues
 
 
+_PERSON_ID_RE = re.compile(r"(?<![A-Za-z0-9_])P\d+(?![A-Za-z0-9_])")
+_IDENTITY_MARKERS = (
+    "同一人", "合并", "互换", "冒充", "伪装成", "认作", "当作", "实际是", "原来是",
+)
+_CAUTIOUS_RELATION_MARKERS = (
+    "低信任", "信任极低", "不信任", "保持戒备", "互相提防", "谨慎合作", "有限合作",
+    "临时合作", "脆弱合作", "尚未达成协作", "未达成协作", "关系紧张", "敌对",
+)
+_STRONG_RELATION_MARKERS = (
+    "互信", "完全信任", "彼此信任", "稳定联盟", "正式结盟", "和解", "相互和解",
+    "坚定盟友", "永久联盟", "永久承诺",
+)
+_NEGATION_MARKERS = ("不", "未", "无", "没有", "并非", "不是", "并不是", "不能", "尚未", "拒绝", "并未")
+
+
+def _has_unnegated_marker(text, markers):
+    for marker in markers:
+        for match in re.finditer(re.escape(marker), text):
+            prefix = text[max(0, match.start() - 4):match.start()]
+            if not any(prefix.endswith(negation) for negation in _NEGATION_MARKERS):
+                return True
+    return False
+
+
+def _ending_text(outline):
+    ending = (outline or {}).get("ending") or {}
+    return " ".join(
+        [
+            *[str(item) for item in ending.get("resolution_actions") or []],
+            str(ending.get("conflict_resolution") or ""),
+            str(ending.get("final_state") or ""),
+        ]
+    )
+
+
+def _ending_semantic_issues(state):
+    """补充可确定的结局边界；开放式因果仍由 Validator 语义判断。"""
+    outline = state.get("outline") or {}
+    ending_text = _ending_text(outline)
+    seed = state.get("seed") or {}
+    seed_ids = {item.get("id") for item in seed.get("characters") or []}
+    ending_ids = set(_PERSON_ID_RE.findall(ending_text))
+    issues = []
+
+    unknown_ids = sorted(ending_ids - seed_ids)
+    if unknown_ids:
+        issues.append(f"结局引用 seed 之外的人物 ID: {', '.join(unknown_ids)}")
+
+    for sentence in re.split(r"[。！？；\n]", ending_text):
+        ids = _PERSON_ID_RE.findall(sentence)
+        if len(set(ids)) >= 2 and (
+            _has_unnegated_marker(sentence, _IDENTITY_MARKERS)
+            or (
+                re.search(r"身份(?:是|为|等同|互换|相同|一致)", sentence)
+                and not any(negation in sentence for negation in ("不是", "并非", "未", "不"))
+            )
+        ):
+            issues.append("结局合并或互换了不同人物 ID 的身份")
+            break
+
+    prior_relation_parts = [
+        *[str(item) for item in (outline.get("final_ledger") or [])],
+        json.dumps(
+            [character.get("relationships") or {} for character in seed.get("characters") or []],
+            ensure_ascii=False,
+        ),
+    ]
+    for step in (state.get("mechanism") or {}).get("steps", []):
+        for change in step.get("relationship_changes") or []:
+            prior_relation_parts.append(json.dumps(change, ensure_ascii=False))
+    for change in (state.get("contract_ledger") or {}).get("relationship_ledger", {}).get("changes", []):
+        prior_relation_parts.append(json.dumps(change, ensure_ascii=False))
+    for bound in (state.get("ending_budget") or {}).get("relationship_state_upper_bounds", []):
+        prior_relation_parts.append(json.dumps(bound, ensure_ascii=False))
+
+    for prior in prior_relation_parts:
+        if not _has_unnegated_marker(prior, _CAUTIOUS_RELATION_MARKERS):
+            continue
+        prior_ids = set(_PERSON_ID_RE.findall(prior))
+        if prior_ids and ending_ids and not prior_ids & ending_ids:
+            continue
+        if _has_unnegated_marker(ending_text, _STRONG_RELATION_MARKERS):
+            issues.append("结局关系状态超过前序谨慎/低信任状态，不能直接写成互信、和解或稳定联盟")
+            break
+    return list(dict.fromkeys(issues))
+
+
+def _should_retry_realize(state):
+    validation = state.get("validation") or {}
+    return (
+        validation.get("overall_ok") is False
+        and not validation.get("contract_issues")
+        and not validation.get("rule_issues")
+        and not state.get("realize_retry_count", 0)
+    )
+
+
 # ---------- 节点 ----------
 
 def select_pattern_node(state):
@@ -358,6 +538,18 @@ def select_pattern_node(state):
         "pattern_selection": choice,
     }
 
+
+def dynamic_seed_node(state):
+    user = {
+        "genre": state["genre"],
+        "user_request": state.get("user_request"),
+    }
+    seed = chat_structured([
+        {"role": "system", "content": DYNAMIC_SEED_PROMPT},
+        {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+    ], StorySeed).model_dump()
+    return {"seed": seed}
+
 def planner_node(state):
     catalog = load_catalog(state["snapshot_id"], state["knowledge_db"])
     all_candidates = candidate_patterns(catalog, state["genre"])
@@ -391,11 +583,26 @@ def planner_node(state):
     if not pattern_id:
         raise ValueError(f"Pattern 缺少稳定 ID: {pattern['pattern_name']}")
     return {
+        "pattern_source": "published",
         "pattern_id": pattern_id,
         "pattern_name": pattern["pattern_name"],
         "ending_spec": pattern.get("ending_spec"),
         "chain": chain,
         "planner_references": references,
+    }
+
+
+def dynamic_planner_node(state):
+    references, candidates, selected = plan_dynamic_outline(state, chat_structured)
+    return {
+        "pattern_source": "dynamic",
+        "pattern_id": None,
+        "pattern_name": selected["candidate_id"],
+        "ending_spec": None,
+        "chain": selected["chain"],
+        "planner_references": references,
+        "dynamic_candidates": candidates,
+        "dynamic_candidate": selected,
     }
 
 
@@ -417,15 +624,37 @@ def mechanism_node(state):
     user = {
         "chain": _compact_chain(state["chain"]),
         "seed": state["seed"],
+        "ending_target": build_ending_target(state.get("ending_spec"), state["seed"]),
+        "relationship_constraints": _relationship_constraints(state["chain"]),
         "reference_motifs": (state.get("planner_references") or {}).get("motifs", []),
+        "reference_role_stats": (state.get("planner_references") or {}).get("role_stats", {}),
+        "reference_relationship_cases": (state.get("planner_references") or {}).get("relationship_cases", {}),
     }
-    data = chat_structured([
+    messages = [
         {"role": "system", "content": MECH_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-    ], MechanismPlan).model_dump()
-    data["steps"] = _align(state["chain"], data["steps"])
-    ledger = build_contract_ledger(state["chain"], data["steps"], state["seed"])
-    return {"mechanism": data, "contract_ledger": ledger}
+    ]
+    for attempt in range(2):
+        data = chat_structured(messages, MechanismPlan).model_dump()
+        data["steps"] = _align(state["chain"], data["steps"])
+        data["steps"] = normalize_relationship_befores(
+            state["chain"], data["steps"], state["seed"],
+        )
+        ledger = build_contract_ledger(state["chain"], data["steps"], state["seed"])
+        if not ledger["issues"]:
+            return {"mechanism": data, "contract_ledger": ledger}
+        if attempt == 0:
+            messages = messages + [{
+                "role": "user",
+                "content": (
+                    "Mechanism 方案存在确定性 Contract/关系账本错误："
+                    + "；".join(ledger["issues"])
+                    + "。请只修正这些边界：没有有效双角色关系 effect 的 Function，"
+                    "relationship_changes 必须为空；关系变化双方必须是同一个允许角色对的绑定人物；"
+                    "before 必须沿用关系账本，不得自由改写，并重新输出完整 JSON。"
+                ),
+            }]
+    raise ValueError("Mechanism 方案不合法: " + "；".join(ledger["issues"]))
 
 
 def scaffold_node(state):
@@ -433,8 +662,9 @@ def scaffold_node(state):
         "chain": _compact_chain(state["chain"]),
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
+        "ending_target": build_ending_target(state.get("ending_spec"), state["seed"]),
+        "ending_budget": build_ending_budget(state),
         "reference_motifs": (state.get("planner_references") or {}).get("motifs", []),
-        "ending_spec": state.get("ending_spec"),
     }
     messages = [
         {"role": "system", "content": NARRATIVE_PROMPT},
@@ -461,18 +691,35 @@ def scaffold_node(state):
 def realize_node(state):
     user = {
         "chain": _compact_chain(state["chain"]),
-        "ending_spec": state.get("ending_spec"),
+        "ending_target": build_ending_target(state.get("ending_spec"), state["seed"]),
+        "ending_budget": build_ending_budget(state),
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
         "narrative_plan": state["narrative"],
         "contract_ledger": state.get("contract_ledger"),
     }
-    data = chat_structured([
+    messages = [
         {"role": "system", "content": REALIZE_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-    ], OutlineRealization).model_dump()
+    ]
+    retry = _should_retry_realize(state)
+    if retry:
+        messages.append({
+            "role": "user",
+            "content": (
+                "Validator 上次指出以下语义问题："
+                + "；".join(state["validation"].get("issues") or [])
+                + "。只修正被指出的 beats 或 ending 身份、因果、关系措辞和义务兑现；"
+                "固定 seed、Function chain、role_bindings、mechanism、relationship_changes、narrative，"
+                "不得新增人物、真相、证据、解决方案或改变结构，并重新输出完整 JSON。"
+            ),
+        })
+    data = chat_structured(messages, OutlineRealization).model_dump()
     data["segments"] = _align(state["chain"], data["segments"])
-    return {"outline": data}
+    return {
+        "outline": data,
+        "realize_retry_count": state.get("realize_retry_count", 0) + int(retry),
+    }
 
 
 def validate_node(state):
@@ -483,7 +730,9 @@ def validate_node(state):
             {"segment_index": step["segment_index"], "function_name": step["function_name"]}
             for step in state["chain"]
         ],
-        "ending_spec": state.get("ending_spec"),
+        "ending_target": build_ending_target(state.get("ending_spec"), state["seed"]),
+        "ending_budget": build_ending_budget(state),
+        "generated_ending": (state.get("outline") or {}).get("ending"),
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
         "narrative_plan": state["narrative"],
@@ -506,6 +755,10 @@ def validate_node(state):
     if data["contract_issues"]:
         data["overall_ok"] = False
         data["issues"] = list(data.get("issues", [])) + data["contract_issues"]
+    semantic_issues = _ending_semantic_issues({**state, "ending_budget": build_ending_budget(state)})
+    if semantic_issues:
+        data["overall_ok"] = False
+        data["issues"] = list(dict.fromkeys(data.get("issues", []) + semantic_issues))
     return {"validation": data}
 
 
@@ -523,7 +776,35 @@ def _render_markdown(result):
         "## 人物",
     ]
     for char in result["seed"]["characters"]:
-        lines.append(f"- {char['id']}（{char['label']} · {char['role']}）：{char['goal']}")
+        lines.append(
+            f"- {char['id']}（{char['label']} · {char['role']} · "
+            f"立场={char.get('stance_toward_protagonist', 'neutral')}）：{char['goal']}"
+        )
+    lines.append("")
+    lines.append("## 开场人物关系")
+    relationship_rows = [
+        (char["id"], target_id, description)
+        for char in result["seed"]["characters"]
+        for target_id, description in (char.get("relationships") or {}).items()
+    ]
+    for source_id, target_id, description in relationship_rows:
+        lines.append(f"- {source_id} → {target_id}：{description}")
+    if not relationship_rows:
+        lines.append("- 无预设关系边")
+    lines.append("")
+    lines.append("## Function 关系变化")
+    relation_changes = [
+        (step["segment_index"], change)
+        for step in result["mechanism_plan"]["steps"]
+        for change in step.get("relationship_changes", [])
+    ]
+    for segment_index, change in relation_changes:
+        lines.append(
+            f"- 第{segment_index}段 {change['source_id']} → {change['target_id']}："
+            f"{change['dimension']} {change['before']} → {change['after']}（{change['evidence']}）"
+        )
+    if not relation_changes:
+        lines.append("- 无有证据支持的关系变化")
     lines.append("")
     lines.append("## 分段大纲")
     for index, segment in enumerate(result["outline"]["segments"], 1):
@@ -557,16 +838,24 @@ def export_node(state):
         "schema_version": 1,
         "snapshot_id": state["snapshot_id"],
         "pattern_id": state.get("pattern_id"),
+        "pattern_source": state.get("pattern_source") or (
+            "dynamic" if state.get("planner_mode") == "dynamic" else "published"
+        ),
+        "planner_mode": state.get("planner_mode", "published"),
         "pattern_name": state["pattern_name"],
         "genre": state["genre"],
         "user_request": state.get("user_request"),
         "ending_spec": state.get("ending_spec"),
+        "ending_target": build_ending_target(state.get("ending_spec"), state["seed"]),
+        "ending_budget": build_ending_budget(state),
         "chain": [step["function_name"] for step in state["chain"]],
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
         "narrative_plan": state["narrative"],
         "contract_ledger": state.get("contract_ledger"),
         "planner_references": state.get("planner_references"),
+        "dynamic_candidate": state.get("dynamic_candidate"),
+        "dynamic_candidates": state.get("dynamic_candidates", []),
         "outline": state["outline"],
         "validation": state["validation"],
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
@@ -589,20 +878,32 @@ def _build_graph():
     graph = StateGraph(OutlineState)
     graph.add_node("select_pattern", select_pattern_node)
     graph.add_node("planner", planner_node)
+    graph.add_node("dynamic_seed", dynamic_seed_node)
+    graph.add_node("dynamic_planner", dynamic_planner_node)
     graph.add_node("seed", seed_node)
     graph.add_node("mechanism", mechanism_node)
     graph.add_node("scaffold", scaffold_node)
     graph.add_node("realize", realize_node)
     graph.add_node("validate", validate_node)
     graph.add_node("export", export_node)
-    graph.add_edge(START, "select_pattern")
+    graph.add_conditional_edges(
+        START,
+        lambda state: "dynamic" if state.get("planner_mode") == "dynamic" else "published",
+        {"published": "select_pattern", "dynamic": "dynamic_seed"},
+    )
     graph.add_edge("select_pattern", "planner")
     graph.add_edge("planner", "seed")
+    graph.add_edge("dynamic_seed", "dynamic_planner")
+    graph.add_edge("dynamic_planner", "mechanism")
     graph.add_edge("seed", "mechanism")
     graph.add_edge("mechanism", "scaffold")
     graph.add_edge("scaffold", "realize")
     graph.add_edge("realize", "validate")
-    graph.add_edge("validate", "export")
+    graph.add_conditional_edges(
+        "validate",
+        lambda state: "realize" if _should_retry_realize(state) else "export",
+        {"realize": "realize", "export": "export"},
+    )
     graph.add_edge("export", END)
     return graph.compile()
 
@@ -615,10 +916,16 @@ def main():
     parser.add_argument("--snapshot-id", required=True)
     parser.add_argument("--knowledge-db", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--request", default=None, help="用户故事要求")
+    parser.add_argument(
+        "--planner-mode", choices=("published", "dynamic"), default="published",
+        help="Planner 模式，默认使用已发布 Pattern",
+    )
     parser.add_argument("--out-dir", default=None)
     args = parser.parse_args()
 
     genre = normalize_genre(args.genre)
+    if args.planner_mode == "dynamic" and args.pattern:
+        raise ValueError("dynamic Planner 不接受 --pattern")
     if args.list_patterns:
         for index, pattern in enumerate(available_patterns(
             load_catalog(args.snapshot_id, args.knowledge_db), genre, args.knowledge_db,
@@ -635,24 +942,29 @@ def main():
         "out_dir": out_dir,
         "pattern_request": args.pattern,
         "user_request": args.request,
+        "planner_mode": args.planner_mode,
         "pattern_id": None,
         "pattern_name": "",
+        "pattern_source": args.planner_mode,
         "pattern_selection": None,
         "ending_spec": None,
         "chain": [],
         "planner_references": None,
+        "dynamic_candidates": [],
+        "dynamic_candidate": None,
         "seed": None,
         "mechanism": None,
         "narrative": None,
         "contract_ledger": None,
         "outline": None,
         "validation": None,
+        "realize_retry_count": 0,
         "outline_id": "",
         "result_path": "",
     })
 
     validation = result["validation"] or {}
-    print(f"[Planner] FOLLOW pattern={result['pattern_name']}")
+    print(f"[Planner] mode={args.planner_mode} pattern={result['pattern_name']}")
     print(f"[Planner] chain={result['chain']}")
     print(f"[Validate] overall_ok={validation.get('overall_ok')}")
     print(f"[Validate] rule_issues={validation.get('rule_issues') or '无'}")

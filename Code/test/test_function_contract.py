@@ -40,14 +40,14 @@ def _observation():
 
 def _body():
     obligation = ObligationTemplate(
-        key="RESOURCE_REQUIREMENT", role_slots=["行动者"],
+        key="RESOURCE_REQUIREMENT", role_slots=["actor"],
         description="行动缺少资源", satisfied_when="行动者取得足够资源",
     )
     return FunctionContractBody(
-        role_slots=["行动者"],
-        preconditions=[StateCondition(role_slots=["行动者"], aspect="RESOURCE", state="INSUFFICIENT")],
+            role_slots=["actor"],
+            preconditions=[StateCondition(role_slots=["actor"], aspect="RESOURCE", state="INSUFFICIENT")],
         effects=[StateEffect(
-            role_slots=["行动者"], aspect="RESOURCE", before="INSUFFICIENT", after="AVAILABLE",
+                role_slots=["actor"], aspect="RESOURCE", before="INSUFFICIENT", after="AVAILABLE",
         )],
         obligation_effects=ObligationEffects(resolves=[obligation]),
     )
@@ -127,3 +127,60 @@ def test_contract_rejects_non_supporting_evidence():
     }
     with pytest.raises(ValueError, match="非 supporting evidence"):
         validate_function_contracts([function], [contract])
+
+
+def test_contract_requires_two_role_slots_for_relationship_effect():
+    function = _function()
+    contract = {
+        "function_id": function["function_id"],
+        "function_name": function["function_name"],
+        "definition_sha256": contract_module.definition_sha256(function),
+        "evidence_refs": ["s1_obs_001"],
+        **_body().model_dump(),
+    }
+    contract["effects"][0].update({
+        "aspect": "RELATIONSHIP_STATUS",
+        "role_slots": ["actor"],
+    })
+    with pytest.raises(ValueError, match="两个不同角色槽位"):
+        validate_function_contracts([function], [contract])
+
+
+def test_inherited_legacy_relationship_effect_is_dropped():
+    function = _function()
+    contract = {
+        "function_id": function["function_id"],
+        "function_name": function["function_name"],
+        "definition_sha256": contract_module.definition_sha256(function),
+        "evidence_refs": ["s1_obs_001"],
+        **_body().model_dump(),
+    }
+    contract["effects"].append({
+        "aspect": "RELATIONSHIP_STATUS",
+        "before": "敌对",
+        "after": "决裂",
+        "role_slots": ["actor"],
+    })
+    sanitized = contract_module._sanitize_legacy_contract(contract)
+    validate_function_contracts([function], [sanitized])
+    assert all(item["aspect"] != "RELATIONSHIP_STATUS" for item in sanitized["effects"])
+
+
+def test_inherited_only_legacy_relationship_effect_is_downgraded():
+    function = _function()
+    contract = {
+        "function_id": function["function_id"],
+        "function_name": function["function_name"],
+        "definition_sha256": contract_module.definition_sha256(function),
+        "evidence_refs": ["s1_obs_001"],
+        **_body().model_dump(),
+    }
+    contract["effects"] = [{
+        "aspect": "RELATIONSHIP_STATUS",
+        "before": "敌对",
+        "after": "决裂",
+        "role_slots": ["actor"],
+    }]
+    sanitized = contract_module._sanitize_legacy_contract(contract)
+    validate_function_contracts([function], [sanitized])
+    assert sanitized["effects"][0]["aspect"] == "FUNCTION_STATE"

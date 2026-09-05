@@ -82,6 +82,7 @@ def bank_adder_node(state: NarrativePipelineState) -> dict:
         observations = StoryKnowledgeStore(state["knowledge_db"]).stage_story_observations(
             state["run_id"], state["normalized_story"], state.get("story_config") or {},
             observations, state.get("current_story_index", 0) + 1,
+            state.get("story_profile"),
         )
     if not observations:
         return {"added_obs_ids": [], "messages": [{"role": "system", "content": "[BankAdder] 无 observations，跳过"}]}
@@ -147,6 +148,7 @@ def story_loader_node(state: NarrativePipelineState) -> dict:
             "raw_text": None,
             "story_config": None,
             "normalized_story": None,
+            "story_profile": None,
             "observations": [],
             "added_obs_ids": [],
             "similar_observations": [],
@@ -164,6 +166,7 @@ def story_loader_node(state: NarrativePipelineState) -> dict:
         "raw_text": raw_text,
         "story_config": story_config,
         "normalized_story": None,
+        "story_profile": None,
         "observations": [],
         "added_obs_ids": [],
         "similar_observations": [],
@@ -200,6 +203,7 @@ def pairs_collector_node(state: NarrativePipelineState) -> dict:
         "raw_text": None,
         "story_config": None,
         "normalized_story": None,
+        "story_profile": None,
         "observations": [],
         "added_obs_ids": [],
         "similar_observations": [],
@@ -418,7 +422,12 @@ def export_node(state: NarrativePipelineState) -> dict:
     final_state["force_full_review"] = True
     final_result = evaluator_node(final_state)
     final_report = final_result.get("evaluation_report") or {}
-    final_occurrences = align_occurrences(store.load_all(), get_bank().get_all())
+    function_contracts = []
+    if final_report.get("verdict") == "PASS":
+        function_contracts = build_function_contracts(store.load_all(), get_bank().get_all(), out_dir)
+    final_occurrences = align_occurrences(
+        store.load_all(), get_bank().get_all(), contracts=function_contracts,
+    )
     final_report["assignment"] = assignment_metrics(final_occurrences)
     with open(final_report_path, "w", encoding="utf-8") as f:
         json.dump(final_report, f, ensure_ascii=False, indent=2)
@@ -428,9 +437,7 @@ def export_node(state: NarrativePipelineState) -> dict:
     with open(os.path.join(out_dir, "occurrences_final.jsonl"), "w", encoding="utf-8") as f:
         for occurrence in final_occurrences:
             f.write(json.dumps(occurrence, ensure_ascii=False) + "\n")
-    function_contracts = []
-    if final_report.get("verdict") == "PASS":
-        function_contracts = build_function_contracts(store.load_all(), get_bank().get_all(), out_dir)
+    story_profiles = knowledge.load_run_story_profile_view(None, run_id) if knowledge and run_id else []
     snapshot_path = publish_snapshot(
         store.load_all(),
         final_report,
@@ -440,6 +447,7 @@ def export_node(state: NarrativePipelineState) -> dict:
         occurrences=final_occurrences,
         function_contracts=function_contracts,
         run_id=run_id,
+        story_profiles=story_profiles,
     )
     if snapshot_path:
         print(f"  OntologySnapshot → {snapshot_path}")
@@ -693,6 +701,7 @@ def main() -> int:
                 "raw_text": None,
                 "story_config": None,
                 "normalized_story": None,
+                "story_profile": None,
                 "observations": [],
                 "added_obs_ids": [],
                 "similar_observations": [],

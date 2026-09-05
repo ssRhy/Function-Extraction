@@ -21,6 +21,7 @@ class NarrativePipelineState(TypedDict):
     normalized_story: dict | None  # NormalizedStory
 
     # ---- Observer 输出 ----
+    story_profile: dict | None  # 故事级人物、长期目标与关系图
     observations: list[dict]  # NarrativeObservation 列表
 
     # ---- Bank 输出 ----

@@ -52,6 +52,21 @@ def load_outline_document(knowledge_db, outline_id):
     return document.model_dump()
 
 
+def _ending_target(source):
+    return source.get("ending_target") or {
+        "source": "pattern" if source.get("ending_spec") else "seed",
+        "resolves": (
+            (source.get("ending_spec") or {}).get("resolves")
+            or source.get("seed", {}).get("core_conflict", "")
+        ),
+        "must_show": (source.get("ending_spec") or {}).get("must_show", []),
+        "final_state": (
+            (source.get("ending_spec") or {}).get("final_state")
+            or source.get("seed", {}).get("ending_direction", "")
+        ),
+    }
+
+
 def _scene_plan_issues(source, plan):
     segments = source["outline"]["segments"]
     character_ids = {
@@ -187,7 +202,8 @@ def function_constraints_node(state):
         "mechanism_plan": source["mechanism_plan"],
         "contract_ledger": source.get("contract_ledger"),
         "source_segments": _indexed_segments(source),
-        "ending_spec": source.get("ending_spec"),
+        "ending_target": _ending_target(source),
+        "ending_budget": source.get("ending_budget") or {},
         "ending": source["outline"]["ending"],
     }
     constraints = chat_structured([
@@ -201,22 +217,40 @@ def plan_scenes_node(state):
     source = state["outline_data"]
     user = {
         "seed": source["seed"],
+        "allowed_character_ids": [
+            item["id"] for item in (source["seed"].get("characters") or [])
+            if item.get("id")
+        ],
         "mechanism_plan": source["mechanism_plan"],
         "narrative_plan": source["narrative_plan"],
         "source_segments": _indexed_segments(source),
         "function_constraints": state["function_constraints"],
         "ending": source["outline"]["ending"],
-        "ending_spec": source.get("ending_spec"),
+        "ending_target": _ending_target(source),
+        "ending_budget": source.get("ending_budget") or {},
     }
-    draft = chat_structured([
+    messages = [
         {"role": "system", "content": SCENE_PLAN_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-    ], ScenePlanDraft).model_dump()
-    plan = build_scene_plan(source, draft)
-    issues = _scene_plan_issues(source, plan)
-    if issues:
+    ]
+    for attempt in range(2):
+        draft = chat_structured(messages, ScenePlanDraft).model_dump()
+        plan = build_scene_plan(source, draft)
+        issues = _scene_plan_issues(source, plan)
+        if not issues:
+            return {"scene_plan": plan}
+        if attempt == 0 and any("未定义人物" in issue for issue in issues):
+            messages.append({
+                "role": "user",
+                "content": (
+                    "场景计划存在人物引用错误：" + "；".join(issues)
+                    + "。只修正 characters：它必须是 allowed_character_ids 的子集，"
+                    "不得填写自然语言角色或临时人物；非核心人物改写到 beats/setting，"
+                    "保持其他结构不变并重新输出完整 JSON。"
+                ),
+            })
+            continue
         raise ValueError(f"场景计划不符合大纲: {'；'.join(issues)}")
-    return {"scene_plan": plan}
 
 
 def develop_scenes_node(state):
@@ -250,7 +284,8 @@ def write_story_node(state):
         "writing_requirements": {
             "min_chinese_chars": 3000,
         },
-        "ending_spec": source.get("ending_spec"),
+        "ending_target": _ending_target(source),
+        "ending_budget": source.get("ending_budget") or {},
         "ending": source["outline"]["ending"],
     }
     story = chat_structured([

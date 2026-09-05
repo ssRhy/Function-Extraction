@@ -2,6 +2,7 @@
 
 import json
 import os
+from copy import deepcopy
 
 from FunctionExtract_Agent.llm import chat_structured
 from Contracts.function_contract import (
@@ -38,7 +39,11 @@ def _format_evidence(observations: list[dict]) -> str:
         rows.append({
             "obs_id": observation.get("obs_id"),
             "story_id": observation.get("story_id"),
+            "event": observation.get("event", ""),
             "participants": observation.get("participants", []),
+            "participant_ids": observation.get("participant_ids", []),
+            "role_bindings": observation.get("role_bindings", {}),
+            "relationship_deltas": observation.get("relationship_deltas", []),
             "before_state": observation.get("before_state", ""),
             "after_state": observation.get("after_state", ""),
             "affected_aspect": observation.get("affected_aspect", ""),
@@ -92,6 +97,32 @@ def _write_vocabulary(path: str, contracts: list[dict]) -> None:
         handle.write("\n")
 
 
+def _sanitize_legacy_contract(contract: dict) -> dict:
+    """在子 Snapshot 中丢弃历史单角色关系授权，保持新合同门槛严格。"""
+    sanitized = deepcopy(contract)
+    effects = sanitized.get("effects") or []
+    valid_effects = [
+        effect for effect in effects
+        if not (
+            effect.get("aspect") in {"RELATIONSHIP_STATUS", "RELATIONSHIP"}
+            and (
+                len(effect.get("role_slots", [])) != 2
+                or len(set(effect.get("role_slots", []))) != 2
+            )
+        )
+    ]
+    if len(valid_effects) != len(effects):
+        # 只有旧关系授权时，降级为普通 Function 状态，避免重新生成再次污染关系边。
+        if valid_effects:
+            sanitized["effects"] = valid_effects
+        else:
+            sanitized["effects"] = [
+                {**effect, "aspect": "FUNCTION_STATE"}
+                for effect in effects
+            ]
+    return sanitized
+
+
 def build_function_contracts(
     functions: list[dict],
     observations: list[dict],
@@ -105,7 +136,7 @@ def build_function_contracts(
     path = os.path.join(out_dir, "function_contracts.jsonl")
     existing = _read_existing(path)
     for contract in existing_contracts or []:
-        existing.setdefault(contract["function_id"], contract)
+        existing.setdefault(contract["function_id"], _sanitize_legacy_contract(contract))
     bank = {item.get("obs_id"): item for item in observations if item.get("obs_id")}
     contracts = []
     for function in functions:

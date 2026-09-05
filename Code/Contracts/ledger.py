@@ -1,6 +1,147 @@
 """按 FunctionContract 计算故事链的状态与叙事义务账本。"""
 
+from Contracts.function_contract import relationship_effects
 from Contracts.state_vocabulary import StateVocabulary
+
+
+def _relation_pairs(contract, bindings):
+    pairs = set()
+    for effect in relationship_effects(contract):
+        people = tuple(bindings.get(slot) for slot in effect["role_slots"])
+        if all(isinstance(person_id, str) for person_id in people) and len(set(people)) == 2:
+            pairs.add(frozenset(people))
+    return pairs
+
+
+def _seed_relationship_before(seed, source_id, target_id):
+    for character in seed.get("characters", []):
+        if character.get("id") == source_id:
+            value = (character.get("relationships") or {}).get(target_id)
+            if isinstance(value, str) and value.strip():
+                return value
+    return None
+
+
+def _contract_relationship_before(contract, bindings, source_id, target_id):
+    for effect in relationship_effects(contract):
+        people = {bindings.get(slot) for slot in effect["role_slots"]}
+        if people == {source_id, target_id}:
+            return effect.get("before")
+    return None
+
+
+def _expected_relationship_before(
+    seed, contract, bindings, source_id, target_id, key, current,
+):
+    if key in current:
+        return current[key]
+    return (
+        _seed_relationship_before(seed, source_id, target_id)
+        or _contract_relationship_before(contract, bindings, source_id, target_id)
+    )
+
+
+def normalize_relationship_befores(
+    chain: list[dict],
+    mechanism_steps: list[dict],
+    seed: dict,
+) -> list[dict]:
+    """用 seed/Contract/前一步 after 固定关系变化的 before。"""
+    normalized = [
+        {
+            **step,
+            "relationship_changes": [dict(change) for change in step.get("relationship_changes", [])],
+        }
+        for step in mechanism_steps
+    ]
+    step_by_index = {
+        step.get("segment_index") or index: step
+        for index, step in enumerate(normalized, 1)
+    }
+    current = {}
+    for index, chain_step in enumerate(chain, 1):
+        segment_index = chain_step.get("segment_index") or index
+        mechanism = step_by_index.get(segment_index) or {}
+        bindings = mechanism.get("role_bindings") or {}
+        contract = chain_step.get("contract") or {}
+        for change in mechanism.get("relationship_changes", []):
+            key = (change.get("source_id"), change.get("target_id"), change.get("dimension"))
+            expected = _expected_relationship_before(
+                seed, contract, bindings, key[0], key[1], key, current,
+            )
+            if expected:
+                change["before"] = expected
+            current[key] = change.get("after")
+    return normalized
+
+
+def build_relationship_ledger(
+    chain: list[dict],
+    mechanism_steps: list[dict],
+    seed: dict,
+) -> dict:
+    """校验机制方案中的关系变化是否有角色与契约证据支持。"""
+    people = {item.get("id") for item in seed.get("characters", [])}
+    step_by_index = {
+        step.get("segment_index") or index: step
+        for index, step in enumerate(mechanism_steps, 1)
+    }
+    changes, issues = [], []
+    current = {}
+    for index, step in enumerate(chain, 1):
+        name = step.get("function_name")
+        segment_index = step.get("segment_index") or index
+        mechanism = step_by_index.get(segment_index) or {}
+        bindings = mechanism.get("role_bindings") or {}
+        bound_people = {value for value in bindings.values() if isinstance(value, str)}
+        contract = step.get("contract") or {}
+        relation_effects = relationship_effects(contract)
+        allowed_pairs = _relation_pairs(contract, bindings)
+        for change in mechanism.get("relationship_changes") or []:
+            source_id = change.get("source_id")
+            target_id = change.get("target_id")
+            dimension = change.get("dimension")
+            key = (source_id, target_id, dimension)
+            if source_id not in people or target_id not in people:
+                issues.append(f"{name} 关系变化引用未知人物: {source_id}/{target_id}")
+            if source_id == target_id:
+                issues.append(f"{name} 关系变化不能连接同一人物: {source_id}")
+            if not {source_id, target_id}.issubset(bound_people):
+                issues.append(f"{name} 关系变化缺少本步角色绑定: {source_id}/{target_id}")
+            if not relation_effects:
+                issues.append(f"{name} 的 FunctionContract 未声明有效的双角色关系效果")
+            elif frozenset((source_id, target_id)) not in allowed_pairs:
+                issues.append(f"{name} 的关系变化未匹配同一关系效果的两个角色槽位: {source_id}/{target_id}")
+            if not str(change.get("evidence") or "").strip():
+                issues.append(f"{name} 关系变化缺少证据: {source_id}/{target_id}")
+            if not str(change.get("dimension") or "").strip():
+                issues.append(f"{name} 关系变化缺少维度: {source_id}/{target_id}")
+            if change.get("before") == change.get("after"):
+                issues.append(f"{name} 关系变化前后状态相同: {source_id}/{target_id}")
+            expected_before = _expected_relationship_before(
+                seed, contract, bindings, source_id, target_id, key, current,
+            )
+            if expected_before is not None and change.get("before") != expected_before:
+                issues.append(
+                    f"{name} 关系变化前状态不连续: {source_id}/{target_id}/{dimension} "
+                    f"expected={expected_before} actual={change.get('before')}"
+                )
+            state_changes = mechanism.get("character_state_changes") or {}
+            for person_id in (source_id, target_id):
+                if person_id not in state_changes:
+                    issues.append(f"{name} 关系变化缺少人物状态对应项: {person_id}")
+            current[key] = change.get("after")
+            changes.append({
+                "segment_index": segment_index,
+                "function_name": name,
+                "source_id": source_id,
+                "target_id": target_id,
+                "dimension": dimension or "",
+                "before": change.get("before", ""),
+                "after": change.get("after", ""),
+                "evidence": change.get("evidence", ""),
+            })
+    return {"ok": not issues, "changes": changes, "issues": issues}
 
 
 def check_contract_chain(chain: list[dict]) -> list[str]:
@@ -39,16 +180,21 @@ def build_contract_ledger(
     seed: dict,
 ) -> dict:
     """将实例角色绑定应用到合同，返回可审计的状态/义务账本。"""
+    relationship_ledger = build_relationship_ledger(chain, mechanism_steps, seed)
     if not any(step.get("contract") for step in chain):
         return {
             "enabled": False, "states": [], "obligations": [],
-            "transitions": [], "issues": [], "warnings": [],
+            "transitions": [], "relationship_ledger": relationship_ledger,
+            "issues": relationship_ledger["issues"], "warnings": [],
         }
 
     vocabulary = StateVocabulary.from_contracts([
         step["contract"] for step in chain if step.get("contract")
     ])
-    mechanism_by_name = {step.get("function_name"): step for step in mechanism_steps}
+    mechanism_by_index = {
+        step.get("segment_index") or index: step
+        for index, step in enumerate(mechanism_steps, 1)
+    }
     person_ids = {item.get("id") for item in seed.get("characters", [])}
     states = {}
     state_raw = {}
@@ -66,7 +212,8 @@ def build_contract_ledger(
 
     for index, step in enumerate(chain):
         contract = step.get("contract") or {}
-        mechanism = mechanism_by_name.get(step.get("function_name"), {})
+        segment_index = step.get("segment_index") or index + 1
+        mechanism = mechanism_by_index.get(segment_index, {})
         bindings = mechanism.get("role_bindings") or {}
         declared_roles = set(contract.get("role_slots", []))
         missing_roles = sorted(declared_roles - set(bindings))
@@ -83,6 +230,7 @@ def build_contract_ledger(
             issues.append(f"{step['function_name']} 缺少实例状态变化说明")
 
         transition = {
+            "segment_index": segment_index,
             "function_name": step["function_name"],
             "role_bindings": dict(bindings),
             "preconditions": [],
@@ -147,6 +295,7 @@ def build_contract_ledger(
                 transition[field].append(item["key"])
         transitions.append(transition)
 
+    issues.extend(relationship_ledger["issues"])
     return {
         "enabled": True,
         "states": [
@@ -155,6 +304,7 @@ def build_contract_ledger(
         ],
         "obligations": list(obligations.values()),
         "transitions": transitions,
+        "relationship_ledger": relationship_ledger,
         "issues": issues,
         "warnings": warnings,
         "state_vocabulary": vocabulary.to_dict(),

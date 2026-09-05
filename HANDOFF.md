@@ -1,5 +1,13 @@
 # 会话交接协议
 
+## 动态 Function Planner 已实现（2026-09-04）
+
+- 新增 `Code/Outline_Agent/dynamic_planner.py`：从当前 Snapshot 读取 Function、Contract、StateVocabulary、真实转移和已发布 Pattern 使用的成熟 motif；通过有限 Beam Search 让 LLM 生成 `REUSE_MOTIF`、`COMPOSE_MOTIFS`、`MUTATE_MOTIF`、`BRIDGE`、`EXPLORE` 五类扩展。
+- 候选只保存在运行时状态，做 Function/Contract/角色槽位/链结构硬校验、合同状态诊断、义务闭合报告、去重、评分和 `REUSE/VARIANT/NOVEL` 分类；motif 组合按真实序列做前后缀 overlap 合并，禁止跨扩展机械重复，但保留 motif 自身内部回环。当前“跨 motif 重复 Function 直接拒绝”是第一版安全阀，用于防止机械循环；若继续完善递进表达，应改为“重复 Function 通过状态/义务/transition 递进验证后才接受”。Beam 按完整质量分（目标、状态/义务、transition、新意）保留最多 4 条，并删除近似链；无合法后继的达到最小长度 beam 由程序完成，不依赖 LLM 的 `complete` 标记。不写 `patterns`、`snapshot_patterns`、`pattern_usage` 或 Pattern Evolve。
+- Outline 图新增 `dynamic_seed → dynamic_planner → mechanism → scaffold → realize → validate → export` 分支；导出 JSON 标记 `planner_mode`、`pattern_source=dynamic`、`pattern_id=null` 并保留候选审计信息。默认 published 路径保持不变。
+- `Outline_Agent` 和 `StoryCLI outline` 均支持 `--planner-mode dynamic`；StoryCLI 动态批量运行不消费或锁定 Published Pattern。
+- 验证：动态 Planner 与现有 Outline/Contract 回归共 37 项通过，compileall 通过；真实 Snapshot 只读输入检查通过（8 Function、8 Contract、45 转移类、67 成熟 motif）。真实 LLM Planner smoke 最终留下 4 条候选，均无硬错误，Function chain 两两相似度低于 0.8；输出汇总在 `/tmp/function-extraction-dynamic-final.YIMP1b/beam-candidates-final.json`。另有真实 `COMPOSE_MOTIFS` overlap-focused 运行：`MC_45e6407f3456c934 + MC_75f48d181d4dfe12`，实际 overlap=1，新增跨结构边 `F_8822B065 → F_31B1FB25`。候选和动态 Outline 均保持 `pattern_source=dynamic`、`pattern_id=null`；运行使用临时数据库副本，Pattern 相关表未被污染。overlap-focused 运行的下游 Outline Validator 因 LLM 生成的连续性/结局问题未通过，另一条无重叠组合 smoke 整体通过。
+
 ## `HANDOFF.md`｜跨天任务必备
 
 长会话收尾：先写 `HANDOFF.md`，只记任务进度，不堆经验。谨慎记录过程信息
@@ -1655,3 +1663,95 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 完整报告见 `Code/data/structure_audit_20260904.md`。当前不新增义务图或结构化 transition 表；若后续需要 Pattern 因果审计，复用已有 Ledger/Checker 做只读诊断，再根据真实收益决定是否接入 Planner。
 - 代码核对补充：项目已有 `Contracts/ledger.py` 中的 `check_contract_chain()` 与 `build_contract_ledger()`，但它们在 Outline 生成阶段运行；StoryPattern 目前只传递 Contract 给摘要 LLM，并检查 Contract 存在，没有用状态/义务兼容性参与 Pattern 发布。后续应复用这套逻辑做 Pattern 诊断，不要再造一套状态系统。
 - 必要性收敛：motif 候选碎片化、Pattern 近邻变体和 Contract 组合不完整目前都不阻塞核心链路，不立即修改。前两项分别在影响成本/选择时再治理，后一项只有在需要 Pattern 因果闭合证明时才复用 Ledger 做只读诊断。
+
+## 本轮（2026-09-04）：StoryProfile—角色绑定—关系账本闭环
+
+- 新增 `Contracts/story_profile.py`：`StoryProfile` 固化主人公、人物长期目标/动机、开场关系与对主人公立场；`EventRoleBindings` 固化 `actor/affected/information_provider/resource_provider/beneficiary/obstacle` 六个标准位置；`RelationshipDelta` 固化有证据的关系变化。
+- Observer 在一次结构化调用中同时输出 Profile 与 Observation；Observation/FunctionOccurrence 透传 `participant_ids`、`role_bindings`、`relationship_deltas`。FunctionContract 只允许六个标准角色位置，不把角色位置硬编码为主人公、反派或帮助者。
+- Snapshot 升级为 schema 5，新增不可变 `story_profiles.jsonl`。发布与知识库提交会校验人物 ID、角色槽位、关系边、关系变化证据和 MATCHED occurrence 的合同槽位；story version/Profile 不一致也会拒绝提交。旧 v4 Snapshot 不做静默兼容，必须显式重建。
+- 新增 `Contracts/role_projection.py`，从同一 Snapshot 投影 Function 角色位置统计与去专名关系变化案例；published/dynamic Outline Planner 将它们传给 Mechanism 阶段。`MechanismStep.relationship_changes`、Story Agent 的 Function constraints 和 Markdown 导出均保留这条关系变化链。
+- `Contracts/ledger.py` 新增关系账本：关系变化双方必须是已知人物、存在初始关系或本步角色绑定，FunctionContract 必须声明覆盖双方的 `RELATIONSHIP_STATUS` effect，且双方状态项和证据不能为空。
+- 定向回归：StoryProfile/roles、Snapshot、KnowledgeBase（含父 Snapshot Profile 继承/当前 Run 覆盖）、FunctionContract、contract flow、dynamic Planner 共 50 项通过；`compileall` 通过。全量 pytest 仍受环境中既有 `sentence_transformers/torch` 不兼容与缺少 `chromadb` 阻塞；当时未重建正式 DB。
+
+## 本轮（2026-09-04）：StoryProfile v5 真实 LLM 重跑
+
+- 使用 3 篇跨题材真实故事做隔离验证：悬疑 `2944521006_348025005`、现代情感 `1098353532_335946791`、末世科幻 `2534659706_430078256`；真实调用 Pre-Processor、Observer 和 Outline Mechanism，共 12 次 LLM 调用、95,365 tokens、172.0 秒。
+- 真实 Observer 产生 3 份 Profile、28 条 Observation；28/28 有 `participant_ids`，关系变化共 8 条。画像人物数分别为 9、5、2，开场关系边分别为 6、4、1。首篇 Observer 的第一次调用出现 `role_bindings` 引用人物但 `participant_ids` 漏列，严格跨字段校验拒绝该结果；外层重试后成功，没有自动修正人物集合。
+- 使用 smoke Function 将真实 Observation 绑定后发布 schema 5 Snapshot，并提交隔离 SQLite：28 条 MATCHED occurrence、3 条匿名关系变化案例、Profile 投影和关系账本均成功；SQLite `foreign_key_check` 为空，Mechanism 真实输出的关系账本 issues 为空。
+- 验证产物位于 `Code/data/story_profile_v5_real_validation_20260904_retry/`。本次 Function 绑定是数据流 smoke，不代表新的正式 Function 归纳结果；正式 Knowledge DB 仍未修改，正式最新 Snapshot 仍是 schema 4，因此尚未证明完整正式库重建后的全量 Evolve/Outline 质量。
+
+## 本轮（2026-09-04）：schema 5 正式重建与 15 篇 Evolve 链路验证
+
+- 按用户要求将旧 schema 4 正式重建状态做可恢复归档，保存在 `Code/data/_archive_schema4_rebuild_20260904/`；没有删除历史数据。新的正式根 Bootstrap Run 为 `FR_6034217c6270439e`，发布 schema 5 Snapshot `real_coordinator_rebuild_v5_20260904_20260904T144557585107Z_6fb574a248e6`，包含 12 个 StoryProfile、95 条 Observation、7 个 Function/Contract。
+- 108 篇 Evolve 批次中止后，Run `FR_6cc29d2044a14945` 被记录为失败，暂存 `run_stories`/`run_observations` 均清零；此前两次真实失败 Run 也只保留审计记录，没有发布 Snapshot。修复最终对齐逻辑后，正式 15 篇 Evolve Run `FR_9f5cbe9425944e44` 成功，输入为根 Snapshot 后语料清单的前 15 篇，产生 121 条新 Observation。
+- 新子 Snapshot 为 `real_coordinator_rebuild_v5_20260904_20260904T153921189793Z_8ae9ee1f6b63`，父节点正确指向根；总计 27 个 StoryProfile、216 个 FunctionOccurrence、7 个带状态/义务契约的 Function。最终 Evolve 评估 6/6 通过；94 条 Occurrence 为契约完整的 `MATCHED`，122 条保留为 `UNCERTAIN`，没有用人物猜测填补缺失槽位。
+- 真实 Coordinator 自动触发 Pattern Run `PR_06a330c7bc9ad178` 并成功完成：27 条故事序列、18 个 motif、16 个 cluster、15 个候选 cluster；当前样本尚未达到 Published Pattern 门槛（`published_patterns=0`），所以不能把本轮描述为已有可选 Pattern 的正常 Outline 生成。
+- Snapshot 校验确认 7 组角色统计和 17 个匿名关系变化案例可从冻结 Snapshot 投影，并可被 dynamic Planner 读取。随后运行一次真实 dynamic Outline：Mechanism 确实收到长期目标、立场、角色位置和关系案例，但模型生成的 `P3` 不在本次 seed，且为没有 `RELATIONSHIP_STATUS` 效果的 Function 添加了关系变化；关系账本将其判为 `overall_ok=false` 并保留诊断产物，证明下游不会把无证据关系变化静默写入大纲。
+- 本轮真实运行暴露并修复一个发布边界：`align_occurrences()` 过去只按 supporting evidence 标记 `MATCHED`，没有按最终 FunctionContract 的 `role_slots` 复核。现在缺少必要人物槽位的匹配会降级为 `UNCERTAIN`，Snapshot 发布仍对直接伪造/非法 occurrence 保持严格拒绝。全量离线回归为 `334 passed, 1 skipped`。
+
+## 本轮（2026-09-04）：平衡增量 Evolve 与 27 份关系连续性门槛评测
+
+- 在 schema 5 正式重建根之后，按悬疑惊悚、古风仙侠、现代情感各 5 篇连续完成 4 批增量 Evolve，共新增 60 篇真实故事。4 个 Run（`FR_48abce8a18a6480f`、`FR_5b079c6dc2f54c54`、`FR_298e32aeb64c48c7`、`FR_f2f754a8adbf4c50`）和对应 Pattern Run 均成功，最终冻结 Snapshot `real_coordinator_rebuild_v5_20260904_20260904T170911270122Z_a18d9bc44323`。
+- 最终 Pattern Run `PR_f85a319c39c2455e` 在该 Snapshot 上发布 6 个 Published Pattern，另有 1 个 blocked Pattern；达到至少 3 个 Published Pattern 的冻结条件。最后一批 Evolve 的 Coordinator 评估为 5/6 维度通过（`separation` 仍失败），但按当前项目门槛整体为 PASS。
+- 新增 `Code/test/run_relationship_outline_eval.py` 作为隔离评测 harness：固定 3 个 Published Pattern、3 个题材，每个组合使用同一真实 LLM Seed 重复 3 次，共生成 27 份 Outline；每个案例复制知识库，避免消耗正式 Pattern 使用次数或写入正式 Outline。
+- 27/27 生成完成，但硬校验通过 `0/27`、关系账本通过 `0/27`、完整重复组 `0/9`；14/14 份自动人物审查通过，说明抽查到的长期目标和立场与 Seed 人物画像一致，但不能抵消关系账本失败。
+- 主要失败集中于：`HAZARD_ENCOUNTER`、`PROTECTIVE_INTERVENTION`、`REVELATION_SHIFTING_COGNITION` 的 FunctionContract 未声明关系效果；`CONFRONT_OPPOSITION`/`SOCIAL_BOND_DISRUPTION` 的关系效果没有覆盖实际绑定的双方；部分步骤关系双方未绑定或 `before` 与账本状态不一致。该结果说明“人物画像能传入并被保持”已有正向证据，但“Function 只产生合同和账本有证据支持的关系变化”尚未成立。
+- 因硬校验和重复率均未达到门槛，按用户要求没有启动 81～100 份扩展，也没有作出“能够稳定保持人物立场、长期目标和关系连续性”的表述。评测产物见 `Code/data/relationship_outline_eval_20260904/phase1_27/`；正式库的 `pattern_usage` 仍为 0，评测未污染正式 Pattern 使用记录。
+
+## 本轮（2026-09-04）：FunctionContract—Mechanism 关系边界修复与 27 份真实复评
+
+- `FunctionContract` 现在只把恰好覆盖两个不同标准角色槽位的 `RELATIONSHIP_STATUS`/`RELATIONSHIP` effect 视为有效二元关系授权；新合同对单角色关系 effect 直接拒绝。运行时对旧 Snapshot 中的非法 effect 采取保守策略：不授权任何关系变化，不原地修改冻结数据。
+- Outline Mechanism 收到由 Contract 确定性计算的 `relationship_constraints`，关系账本按同一 effect 的两端精确匹配人物绑定；`before` 由 seed 初始关系、Contract before 和前一步 after 继承，模型只决定 after/evidence。账本错误最多反馈重试一次，仍失败则不进入 Scaffold/Realize。
+- 保留同一冻结 Snapshot、同一 9 个 seed、3 Pattern × 3 题材 × 3 次重复，真实复评写入 `Code/data/relationship_outline_eval_20260904/phase2_27/`。27/27 生成，关系账本通过 `27/27`，关系变化从上一轮 `139` 条降至 `39` 条，且只出现在允许关系 effect 的 `RELATIONSHIP_FORMATION` / `COMMUNITY_FORMATION`。
+- 整体硬校验为 `12/27`，完整重复组 `1/9`，人物目标/立场自动审查 `12/14`；因此修复证明了关系越界与连续性门禁已闭合，但尚不能宣称大纲整体稳定。未启动扩展评测。专用环境全量回归 `338 passed, 1 skipped`。
+- 当前冻结 Snapshot 仍保留两个历史单角色关系 effect（`CONFRONT_OPPOSITION`、`SOCIAL_BOND_DISRUPTION`）；这是兼容读取下的非授权旧数据。若要发布干净的正式 Contract 数据，需要后续生成新的不可变 Snapshot，不能回写本 Snapshot。
+
+## 本轮（2026-09-04）：Outline 评测口径与角色上下文收敛
+
+- Outline 的结局上下文现在区分 Pattern 的可选 `ending_spec` 与实际生成的 `outline.ending`；没有 Pattern 结局规范时，运行时由 `seed.core_conflict`/`seed.ending_direction`构造 `ending_target`，并把前序义务、ending 伏笔和关系终态汇总为临时 `ending_budget`，不新增持久化表或第二套结局 schema。
+- `SeedCharacter` 增加可机读的 `stance_toward_protagonist`；Mechanism 的关系约束同时传递 Contract 的关系 effect 上限；重复 Function 与立场逆转规则继续复用现有 occurrence/why/state 字段。
+- 关系连续性评测拆分 `structural_ok`、`semantic_ok` 和 `overall_ok`；人物审核的通过值由 assessment 明细确定性计算，不再使用 LLM 可能自相矛盾的 `overall_ok` 汇总。新增 `--require-ending-spec`，只在完整 Outline 稳定性评测时筛选有真实结局证据的 Published Pattern；不手工给局部 Pattern 补 ending_spec。
+- 定向回归为 46 项通过；全仓 pytest 仍被既有环境依赖问题阻塞（`sentence_transformers/transformers` 与 `chromadb`），未修改无关依赖或数据。
+
+## 本轮（2026-09-05）：结局语义门禁与一次受限 Realize 重写
+
+- 保留现有角色绑定、关系账本、FunctionContract、Snapshot、KnowledgeBase 和 StoryProfile；只在 Outline Validator 边界补充结局身份/关系语义检查，没有增加 Agent、数据库表、持久化 schema 或新 Validator 层。
+- `validate_node` 现在对结局引用 seed 外人物 ID、合并/互换不同人物 ID，以及将前序“谨慎合作/低信任/未和解”写成“互信/和解/稳定联盟”给出确定性语义问题；结局真相、证据、解决方案的前因支持和 setup_payoff/obligation 的“可观察动作 → 后果”仍由现有 LLM Validator 判断。
+- LangGraph 在 `validate → realize` 增加最小条件回边：仅当 `overall_ok=false` 且 `rule_issues`、`contract_issues` 都为空时重写一次；固定 seed、Function chain、role_bindings、mechanism、relationship_changes 和 narrative，第二次仍失败直接 export 保留失败结果。隔离评测 harness 复用同一条件与计数器。
+- 生产 Outline API 模型仍为 `deepseek-v4-flash`、`reasoning_effort=none`；独立评审使用的 `gpt-5.6-luna`、`xhigh` 只代表 Codex 评审执行模型，不作为 API 模型，也未添加端点 fallback。没有运行 Evolve/Pattern 或昂贵的 27 份真实 LLM 评测。
+- 离线验证：`python -m pytest Code/test/test_dynamic_planner.py Code/test/test_outline_agent.py Code/test/test_contract_flow.py -q` → `49 passed`；`python -m compileall -q Code` 通过；本轮相关文件的 `git diff --check` 通过。仓库全量检查只命中本轮之前已存在的 `Plan.md:820` 尾随空格/EOF 空行，未修改无关文件。
+
+## 本轮（2026-09-05）：5 篇增量 Evolve 尝试未发布
+
+- 以正式父 Snapshot `real_coordinator_rebuild_v5_20260904_20260904T170911270122Z_a18d9bc44323` 选择 5 篇原始 120 篇语料中尚未入库的故事（悬疑 1、古风 2、现代情感 2）进行增量 Evolve。
+- 第一次 15 篇尝试因一个文件路径错误实际只处理 4 篇，随后人工中断；第二次修正为 5 篇并完整处理，两个 Run（`FR_26ad2e013a674bb7`、`FR_77a81196eb9c4784`）最终均在 FunctionContract 发布前失败。
+- 失败原因相同：LLM 为关系状态效果生成了只有 `role_slots=['actor']` 的单角色合同，触发当前严格的“关系效果必须覆盖两个不同角色槽位”门禁。Evolve 过程虽完成了最终评估（第二次 6/6 PASS），但没有发布子 Snapshot，也没有进入 Pattern。
+- 正式库保持不变：最新 Snapshot 仍为 `real_coordinator_rebuild_v5_20260904_20260904T170911270122Z_a18d9bc44323`，`story_versions=87`；两个失败 Run 的 `run_stories`/`run_observations` 暂存均已清零。当前不继续盲目重跑，下一步应先处理该 Contract 生成失败的最小根因，再重试同一批次。
+
+## 本轮（2026-09-05）：5 篇增量 Evolve → Pattern 完成
+
+- 按用户要求以父 Snapshot `real_coordinator_rebuild_v5_20260904_20260904T170911270122Z_a18d9bc44323` 增量处理 5 篇未入库故事：`131735036_52597335`、`1859328724_293120775`、`2554565947_438706550`、`3114910977_326607114`、`3257901908_580075993`。最终 Evolve Run 为 `FR_87f606da61ee4480`，子 Snapshot 为 `real_coordinator_rebuild_v5_20260904_20260905T153027932297Z_e698f1f44c84`。
+- Evolve 最终评估 6/6 通过；总计 92 个 StoryProfile、730 个 FunctionOccurrence、14 个 Function，新增 `ABRUPT_LIFE_CHANGE`。Coordinator 自动完成 Pattern Run `PR_c3e6eef3a6e59e66`，Pattern 结果为 6 个 Published、1 个 blocked，新增 Pattern 3 个、更新 2 个。
+- 对新 Snapshot 的严格校验通过；SQLite `foreign_key_check` 为空、`integrity_check=ok`。6 个 Published Pattern 的 `ending_spec` 全部为空，非空数量为 `0/6`；3 个本轮新增 Published Pattern 也没有出现结局规范。因此本轮只证明增量链路和 Pattern 发布闭环可用，不能证明新增 5 篇会自然产生“完整故事 Pattern”或结局结构。
+- 为兼容父 Snapshot 中两个历史单角色关系 effect，新增子 Snapshot 迁移边界：读取父 Contract 时跳过旧数据的整库严格校验，在子 Snapshot 中把无合法二元关系 effect 的历史 effect 降级为 `FUNCTION_STATE`，不授予关系边；父 Snapshot 不变，新 Contract 仍保持严格二元关系门禁。相关 Contract/Snapshot 回归 22 项通过，随后本轮完整运行成功。
+
+## 本轮（2026-09-06）：Seed 结局方向约束收紧与真实 Outline smoke
+
+- 保留现有结局分层：Pattern 的可选 `ending_spec` 仍只表示历史证据；无 `ending_spec` 时继续由 Seed 生成 `ending_direction`，`ending_target.must_show` 保持空数组；具体解决动作仍由 `outline.ending.resolution_actions` 负责。
+- 仅收紧 `DYNAMIC_SEED_PROMPT` 与 `SEED_PROMPT`：`ending_direction` 必须按“可观察解决动作 → 直接冲突结果 → 稳定终态”组织为单一结局方向。不新增字段、Agent、数据库或解析规则。
+- 离线回归 `60 passed`。使用正式 Snapshot 的 4 个临时知识库副本做真实 LLM smoke（悬疑 2、古风 1、现代情感 1），4 份均生成完整 `outline.ending`，Validator `3/4` 通过；失败样本是前序未建立记忆/证据/义务导致的语义闭合问题，不是结局字段缺失。正式库保持只读，`outlines=1`、`pattern_usage=0`。
+- 结果只证明 Seed 结局方向和现有 ending 链可用，不证明结局语义稳定；后续若同类“结局引入前序不存在信息/义务”重复出现，再针对现有 Realize/Validator 做局部修复。
+
+## 本轮（2026-09-06）：用 Outline 生成正文验证结局是否真正闭合
+
+- 不能只以 `outline.ending` 非空或 Outline Validator `overall_ok=true` 判定“完整结局”。使用本轮生成的 5 份 Outline 继续跑现有 `Story_Agent`：1 份原本 `overall_ok=false`，按正式入口阻断；4 份中 1 份在场景计划阶段引用 seed 未定义的“P3 的手下”“村长”而失败，另 3 份成功生成正文。
+- 3 份正文均达到中文字符下限（`5674`、`4640`、`6559`），使用现有独立质量诊断 Prompt 复核最后场景：现代情感与悬疑正文的 `ending_closure=5/5`、`conflict_resolution=5/5`；古风仙侠的 `ending_closure=5/5`、`conflict_resolution=4/5`，结局已解决但 P3 和解转折略突兀。3 份正文都实际写出了解决行动、冲突后果和稳定终态。
+- 结论收窄为：当前方案已经有“Outline → 正文 → 独立结局评审”的正面样本，但尚不能宣称 Outline 批次全部可消费或结局稳定。下一步优先修复真实暴露的未定义人物引用/场景计划问题；不新增 `must_show`、Agent 或数据库层。
+- 本次所有 Outline/Story 均使用临时数据库副本；正式 Knowledge DB 未写入。
+
+## 本轮（2026-09-06）：收拢 Story Agent 的场景人物引用边界
+
+- 真实正文验证发现：Outline Validator 通过的样本，场景计划仍可能把“P3 的手下”“村长”等非 seed 人物写入 `scene.characters`，导致 Story Agent 在正文前置阶段拒绝执行。
+- `SCENE_PLAN_PROMPT` 现在明确要求 `characters` 只能使用输入的 `allowed_character_ids`；非核心人物只能作为 beats/setting 背景描述，必要角色必须先进入 seed。`plan_scenes_node` 将 seed 人物 ID 作为确定性输入，不放宽现有未知人物硬校验。
+- 对未知人物错误复用现有有限重试模式，仅反馈一次并要求只修正 `characters`；第二次仍非法则阻断，不静默删除人物或把自然语言角色猜测映射到已有 ID。
+- 离线 Story Agent/Contract/Outline 回归为 `51 passed`。对原真实失败 Outline 重跑：首次曾因场景草案对齐波动失败，第二次成功生成正文（`5060` 字符）；最终 4 个场景的 `characters` 均为 seed 中的 `P1/P2/P3`，独立质量诊断六项均为 `5/5`、无问题。正式数据库保持只读。

@@ -5,8 +5,14 @@ import json
 import sqlite3
 from pathlib import Path
 
-from Contracts.snapshot import load_function_contracts, load_occurrences, load_snapshot
+from Contracts.snapshot import (
+    load_function_contracts,
+    load_occurrences,
+    load_snapshot,
+    load_story_profiles as load_snapshot_story_profiles,
+)
 from Contracts.run_result import failed_run_result
+from Contracts.story_profile import StoryProfile
 from Contracts.versioning import observation_version_id, story_version_id
 
 
@@ -375,6 +381,7 @@ class StoryKnowledgeStore:
         story_config: dict,
         observations: list[dict],
         position: int,
+        story_profile: dict | None = None,
     ) -> list[dict]:
         """写入当前 Run 的不可见版本；返回带版本 ID 的 Observation。"""
         metadata = normalized_story["metadata"]
@@ -382,11 +389,16 @@ class StoryKnowledgeStore:
         story_id = metadata["story_id"]
         version_id = metadata.get("story_version_id") or story_version_id(story_id, text)
         content_sha = metadata.get("content_sha256") or hashlib.sha256(text.encode("utf-8")).hexdigest()
+        normalized_profile = (
+            StoryProfile.model_validate(story_profile).model_dump()
+            if story_profile is not None else None
+        )
         story_payload = {
             **metadata,
             "story_id": story_id,
             "story_version_id": version_id,
             "source_file": story_config.get("source_file"),
+            "story_profile": normalized_profile,
         }
         staged = []
         with self.connect() as conn:
@@ -402,6 +414,12 @@ class StoryKnowledgeStore:
                     run_id, _json(story_payload),
                 ),
             )
+            stored = conn.execute(
+                "SELECT payload_json FROM story_versions WHERE story_version_id=?",
+                (version_id,),
+            ).fetchone()
+            if stored and json.loads(stored["payload_json"]) != story_payload:
+                raise ValueError(f"story version 已存在且人物画像不一致: {story_id}")
             conn.execute(
                 """INSERT OR REPLACE INTO run_stories
                    (run_id, story_id, story_version_id, position) VALUES (?, ?, ?, ?)""",
@@ -429,6 +447,12 @@ class StoryKnowledgeStore:
                         run_id, order, _json(observation),
                     ),
                 )
+                stored_observation = conn.execute(
+                    "SELECT payload_json FROM observation_versions WHERE observation_version_id=?",
+                    (observation["observation_version_id"],),
+                ).fetchone()
+                if stored_observation and json.loads(stored_observation["payload_json"]) != observation:
+                    raise ValueError(f"observation version 已存在且人物绑定不一致: {obs_id}")
                 conn.execute(
                     """INSERT OR REPLACE INTO run_observations
                        (run_id, obs_id, observation_version_id) VALUES (?, ?, ?)""",
@@ -436,6 +460,73 @@ class StoryKnowledgeStore:
                 )
                 staged.append(observation)
         return staged
+
+    @staticmethod
+    def _profile_record(story_id: str, story_version_id: str, payload: dict) -> dict:
+        return {
+            "story_id": story_id,
+            "story_version_id": story_version_id,
+            "profile": payload.get("story_profile"),
+        }
+
+    def load_story_profiles(self, snapshot_id: str) -> list[dict]:
+        """读取 Snapshot 中每个 story version 的人物画像（缺失也保留记录）。"""
+        manifest = self.load_snapshot_manifest(snapshot_id)
+        if manifest.get("schema_version") != 5:
+            raise ValueError(
+                f"Snapshot {snapshot_id} 尚未包含 StoryProfile，请显式重建 schema 5 Snapshot"
+            )
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT ssv.story_id, ssv.story_version_id, sv.payload_json
+                   FROM snapshot_story_versions ssv
+                   JOIN story_versions sv ON sv.story_version_id=ssv.story_version_id
+                   WHERE ssv.snapshot_id=? ORDER BY ssv.position, ssv.story_id""",
+                (snapshot_id,),
+            ).fetchall()
+        return [
+            self._profile_record(row["story_id"], row["story_version_id"], json.loads(row["payload_json"]))
+            for row in rows
+        ]
+
+    def load_run_story_profile_view(
+        self, parent_snapshot_id: str | None, run_id: str,
+    ) -> list[dict]:
+        """返回父 Snapshot 被当前 Run 按 story 覆盖后的 Profile 视图。"""
+        if parent_snapshot_id:
+            manifest = self.load_snapshot_manifest(parent_snapshot_id)
+            if manifest.get("schema_version") != 5:
+                raise ValueError(
+                    f"父 Snapshot {parent_snapshot_id} 尚未包含 StoryProfile，请显式重建 schema 5 Snapshot"
+                )
+        with self.connect() as conn:
+            if parent_snapshot_id:
+                rows = conn.execute(
+                    """SELECT ssv.story_id, ssv.story_version_id, sv.payload_json
+                       FROM snapshot_story_versions ssv
+                       JOIN story_versions sv ON sv.story_version_id=ssv.story_version_id
+                       WHERE ssv.snapshot_id=?
+                         AND ssv.story_id NOT IN (SELECT story_id FROM run_stories WHERE run_id=?)
+                       UNION ALL
+                       SELECT rs.story_id, rs.story_version_id, sv.payload_json
+                       FROM run_stories rs
+                       JOIN story_versions sv ON sv.story_version_id=rs.story_version_id
+                       WHERE rs.run_id=?
+                       ORDER BY 1""",
+                    (parent_snapshot_id, run_id, run_id),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """SELECT rs.story_id, rs.story_version_id, sv.payload_json
+                       FROM run_stories rs
+                       JOIN story_versions sv ON sv.story_version_id=rs.story_version_id
+                       WHERE rs.run_id=? ORDER BY rs.position, rs.story_id""",
+                    (run_id,),
+                ).fetchall()
+        return [
+            self._profile_record(row["story_id"], row["story_version_id"], json.loads(row["payload_json"]))
+            for row in rows
+        ]
 
     def load_run_observation_view(self, parent_snapshot_id: str | None, run_id: str) -> list[dict]:
         """Bank 计算视图：父 Snapshot，按当前 Run 中的 story 覆盖。"""
@@ -553,6 +644,29 @@ class StoryKnowledgeStore:
                SELECT ?, obs_id, observation_version_id FROM run_observations WHERE run_id=?""",
             (snapshot_id, run_id),
         )
+        snapshot_profiles = load_snapshot_story_profiles(str(snapshot_path))
+        snapshot_story_ids = {
+            row["story_id"] for row in conn.execute(
+                "SELECT story_id FROM snapshot_story_versions WHERE snapshot_id=?",
+                (snapshot_id,),
+            )
+        }
+        profile_story_ids = {record["story_id"] for record in snapshot_profiles}
+        if snapshot_story_ids != profile_story_ids:
+            raise ValueError("Snapshot Profile 必须覆盖 Snapshot 中的全部故事")
+        for record in snapshot_profiles:
+            row = conn.execute(
+                """SELECT sv.story_version_id, sv.payload_json
+                   FROM snapshot_story_versions ssv
+                   JOIN story_versions sv ON sv.story_version_id=ssv.story_version_id
+                   WHERE ssv.snapshot_id=? AND ssv.story_id=?""",
+                (snapshot_id, record["story_id"]),
+            ).fetchone()
+            if not row or row["story_version_id"] != record["story_version_id"]:
+                raise ValueError(f"Snapshot Profile 没有对应的 story version: {record['story_id']}")
+            payload = json.loads(row["payload_json"])
+            if payload.get("story_profile") != record.get("profile"):
+                raise ValueError(f"Snapshot Profile 与 story version 不一致: {record['story_id']}")
         for position, function in enumerate(functions, 1):
             conn.execute(
                 """INSERT INTO functions
@@ -1202,6 +1316,7 @@ class StoryKnowledgeStore:
             "contracts": self.load_contracts(snapshot_id),
             "observations": observations,
             "story_metadata": metadata,
+            "story_profiles": self.load_story_profiles(snapshot_id),
             "occurrences": occurrences,
         }
 

@@ -112,16 +112,16 @@ def _repair_json(content: str) -> str:
 
 
 def chat_structured(messages: list, output_schema: type, model: str = "deepseek-v4-flash",
-                    reasoning_effort: str = "none"):
+                    reasoning_effort: str = "none", max_retries: int = _STRUCTURED_RETRY):
     """
     强制 JSON 格式返回 + Pydantic 验证解析。
 
     JSON 解析失败（坏 JSON）或字段校验失败（缺字段/类型错）时，把错误反馈给 LLM
-    自动重试（最多 _STRUCTURED_RETRY 次），保证结构化输出层自纠正，不再由上层崩溃。
+    自动重试（默认最多 _STRUCTURED_RETRY 次），保证结构化输出层自纠正，不再由上层崩溃。
     """
     last_error = ""
     last_content = ""
-    for attempt in range(_STRUCTURED_RETRY + 1):
+    for attempt in range(max_retries + 1):
         content = _strip_json_fences(chat(
             messages,
             response_format={"type": "json_object"},
@@ -143,10 +143,10 @@ def chat_structured(messages: list, output_schema: type, model: str = "deepseek-
                     return output_schema.model_validate(data)
                 except ValidationError as e:
                     last_error = f"字段校验失败: {str(e)[:300]}"
-        if attempt < _STRUCTURED_RETRY:
-            print(f"  [llm] 结构化输出重试 {attempt + 1}/{_STRUCTURED_RETRY}: {last_error}")
+        if attempt < max_retries:
+            print(f"  [llm] 结构化输出重试 {attempt + 1}/{max_retries}: {last_error}")
             messages = list(messages) + [{
                 "role": "user",
                 "content": f"你上次的输出解析失败：{last_error}\n请只重新输出符合要求的 JSON。",
             }]
-    raise ValueError(f"结构化输出 {_STRUCTURED_RETRY} 次重试后仍失败: {last_error}\n原始内容: {last_content[:200]}")
+    raise ValueError(f"结构化输出 {max_retries} 次重试后仍失败: {last_error}\n原始内容: {last_content[:200]}")
