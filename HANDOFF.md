@@ -1878,3 +1878,11 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 最终离线验证：全仓 `362 passed, 1 skipped`；全量 `compileall` 通过；`git diff --check` 通过。未运行昂贵 LLM、Evolve 或 Pattern。
 - 正式 SQLite 使用 `mode=ro` 检查，文件 SHA-256 前后均为 `1d4f5ca5634a54dc15aab884110479602d2f7063b93b5664968dfe8399d28f90`；`integrity_check=ok`、`foreign_key_check=[]`。当前 serving 为 `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`，对应 `Pattern Run=SUCCESS`、Published Pattern=`7`、Generation Outcome=`18`、Pattern Usage=`18`，`pattern_usage` 已是自增审计结构。
 - 当前阶段保持闭合：不新增 Supervisor、通用自动修复、五层相似度、独立 Creative Memory、Best-of-N、Pattern ending_spec 或新的关系等级系统；后续只在既定真实触发条件再次出现时处理。
+
+## 本轮（2026-09-07）：固定 9 题 benchmark、Direct LLM 基线与盲化比较
+
+- 固定 manifest：`Code/data/evaluation/fixed_benchmark_20260907/benchmark_manifest.json`。从既有 `production_batch_20260907` 选择悬疑惊悚、古风仙侠、现代情感各 3 个已通过完整系统 Validator 的 Outline；9 个输入均为原批次实际输入 `user_request=null`，因此本 benchmark 只代表 genre-only，不把生成后的 `core_conflict` 反写成创作要求。对应 serving 均为 `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`。
+- Direct LLM 基线保存于 `Code/data/evaluation/fixed_benchmark_20260907/baseline_results.jsonl`：9 个逻辑题目、8 个成功、1 个失败；失败题目 `01_02` 在 3 次结构化尝试后仍缺少角色 `name`，没有手工补齐。模型为 `deepseek-v4-flash`、`reasoning_effort=none`，共 21 次 API 调用（含已有重试），`baseline_run.json` 记录 prompt/model/耗时/错误；正式 DB SHA-256 前后均为 `1d4f5ca5634a54dc15aab884110479602d2f7063b93b5664968dfe8399d28f90`。
+- 修正版盲化证据位于 `blind_pairs.jsonl`、`blind_reviews.jsonl`、`blind_eval_report.json`；A/B 随机种子为 `20260907`，4 对 A=full、4 对 A=direct。发现并舍弃了第一版人物 ID 匿名化缺口及一次错误的胜负聚合，最终只采用修正版结果；评审员未收到来源、Pattern、Function、ID 或文件路径。
+- 最终 8 对可评分，单一 `deepseek-v4-flash` 评审的总体优选为 `full=4 / direct=4 / tie=0`。full−direct 均分：结构完整性 `-0.375`、因果连贯性 `0`、人物动机 `-0.375`、冲突/结局兑现 `0`、模板化/雷同 `-0.75`；平均置信度 `4.375`。这不是完整系统收益，且单评审/小样本不能替代人工多人盲评。
+- 阶段 4 条件不满足：未执行正式增量 Evolve、Pattern、候选 Snapshot、promote 或正常生成；Run/Snapshot/Pattern/Serving ID 无新增，当前 serving、Outcome=`18`、Pattern Usage=`18` 保持不变。正式 SQLite 只读检查仍为 `integrity_check=ok`、`foreign_key_check=[]`。后续只有提供有明确创作要求的新固定题目并完成更合适的人工盲评，或出现新的真实触发条件，才重新考虑增量。
