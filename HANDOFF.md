@@ -1959,3 +1959,9 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 在新的正式数据库副本 `/var/folders/6v/9d5z229x1zxflc81pfcfgxrw0000gn/T/tmp.XiEmhokoTL/knowledge.db` 中只重跑两个样本。普通样本 `OUT_e81b0f1759471150` 首次返回 `overall_ok=false、repairable=true`，触发且只触发一次重写，复验通过，最终 `rewritten`，Outcome=`GO_5a706420f7759583`。
 - 寻药样本第一次正文输出的 `scene_id` 与固定 scene plan 不完整对应，在进入 Validator 前被既有 Schema/scene ID 硬门禁停止，因此本次没有产生该样本的 Validator 判定或 Outcome；按用户要求不追加随机重跑。该样本不能作为“寻药偏离被 Validator 判定并修复”的证据。
 - 普通样本的固定 Outline、ending target、Function constraints、人物/scene ID 在两次生成之间不变，Outcome 的 `first_validation`、`revalidation`、`repair_occurred` 和最终状态完整。副本 `integrity_check=ok`、外键为空；正式库 SHA-256、计数和 Serving 未变。
+
+## 本轮（2026-09-07）：只按数量对齐 Story scene ID 并重跑寻药样本
+
+- `Code/Story_Agent/app.py` 的 `_align_story_scenes()` 现在只在正文场景数量与 scene plan 不一致时拒绝；数量一致时直接按 scene plan 顺序覆盖正文 scene ID，不再要求 LLM 返回的 ID 集合先完全匹配。
+- 使用上一轮正式副本只重跑 `OUT_SMOKE_MEDICINE_DRIFT`。本次正文 3807 个中文字符，scene ID 对齐后全部匹配 plan，Validator 返回 `overall_ok=true、repairable=false`，最终 `accepted`，Outcome=`GO_a8cfb22aedfa9b8f`，没有发生重写。
+- 人工抽查本次正文确实完成寻药、血引救治、权力危机解决和医脉安置，未发现需要触发修复的主线偏离；因此不人为把 accepted 改成 rewritten。副本最终 `outlines=28`、`generation_outcomes=36`、`pattern_usage=26`、`snapshots=9`，完整性和外键检查通过，正式库与 Serving 不变。

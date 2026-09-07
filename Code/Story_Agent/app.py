@@ -124,10 +124,10 @@ def validate_character_names(source, story):
 
 def _align_story_scenes(scene_plan, story):
     expected = [scene["scene_id"] for scene in scene_plan["scenes"]]
-    by_id = {scene["scene_id"]: scene for scene in story["scenes"]}
-    if len(by_id) != len(story["scenes"]) or set(by_id) != set(expected):
+    if len(story["scenes"]) != len(expected):
         raise ValueError("正文场景与场景计划的 scene_id 不完整对应")
-    story["scenes"] = [by_id[scene_id] for scene_id in expected]
+    for scene, scene_id in zip(story["scenes"], expected):
+        scene["scene_id"] = scene_id
     return story
 
 
