@@ -1755,3 +1755,65 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - `SCENE_PLAN_PROMPT` 现在明确要求 `characters` 只能使用输入的 `allowed_character_ids`；非核心人物只能作为 beats/setting 背景描述，必要角色必须先进入 seed。`plan_scenes_node` 将 seed 人物 ID 作为确定性输入，不放宽现有未知人物硬校验。
 - 对未知人物错误复用现有有限重试模式，仅反馈一次并要求只修正 `characters`；第二次仍非法则阻断，不静默删除人物或把自然语言角色猜测映射到已有 ID。
 - 离线 Story Agent/Contract/Outline 回归为 `51 passed`。对原真实失败 Outline 重跑：首次曾因场景草案对齐波动失败，第二次成功生成正文（`5060` 字符）；最终 4 个场景的 `characters` 均为 seed 中的 `P1/P2/P3`，独立质量诊断六项均为 `5/5`、无问题。正式数据库保持只读。
+
+## 本轮（2026-09-06）：Pattern 接通 StoryProfile 结局证据与隔离重跑
+
+- Pattern 输入现在从 Snapshot 加载 StoryProfile，并把 `core_conflict`、`ending_state`、`ending_resolution_actions`、`ending_evidence_sentence_indices`、`ending_closure` 传入 motif evidence；`reaches_story_end` 由完整 structural sequence 的最终 `MATCHED` 节点确定性计算。Summary 的输入签名同时绑定结局证据，避免资料变化时复用旧摘要。
+- 先在正式最新 Snapshot 的数据库副本上重跑 Pattern：`10` 个 Published Pattern 中 `3` 个得到非空 `ending_spec`，但证据仍混有非尾部 motif（全体 motif evidence `15/101` 触达尾部），说明只接通既有 `core_conflict`/`ending_state` 仍不足以形成可审计的完整结局归纳。
+- 因此按最小范围扩充现有 StoryProfile，而非新增平行 Profile：新增 `ending_resolution_actions`、`ending_evidence_sentence_indices`、`ending_closure`（`resolved/partial/open`），Observer Prompt/边界校验和旧 Profile 读取均已兼容；相关 Pattern/Observer/Snapshot 回归 `147 passed, 1 skipped`，全仓回归 `355 passed, 1 skipped`。
+- 使用 3 篇未入库的真实古风故事在临时 DB 完整跑通 `Evolve → schema 5 Snapshot → Pattern`：新 Snapshot `/tmp/function-ending-evolve.CjurRf/snapshots3/ending_schema_smoke_3_20260906_20260906T104423149252Z_11173bc5baa2` 含 `95` 份 Profile，新增 Profile 均落盘结局证据字段；Pattern Run `PR_dfb9a8cc3671283f` 成功但因候选 cluster 未达到发布条件，`published_patterns=0`，没有生成新的 `ending_spec`。这证明字段和不可变 Snapshot 链已接通，不证明结局 Pattern 语义已达标。
+- 正式 Knowledge DB 未写入；5 篇混合题材 smoke 因既有 Observer 人物证据越界失败，已清空暂存并保留失败 Run 审计，未继续盲目扩大批次。若正式重建，需在同一 namespace 下使用新 Observer 重新处理故事，复用 Function 本体/ID，重建 Occurrence、Snapshot、motif 和 Pattern。
+
+## 本轮（2026-09-06）：Observer 越界限制与 92 篇正式结局证据重建
+
+- Observer 对 characters/relationships/ending 的非负越界 evidence sentence indices 做确定性丢弃并写入 warning；负数和结构非法仍走现有失败重试。为避免回写旧版本，本次用显式 `ending_evidence_v1` 生成新的 StoryVersion/ObservationVersion。
+- 在同一 namespace `real_coordinator_rebuild_v5_20260904`，从父 Snapshot `real_coordinator_rebuild_v5_20260904_20260905T153027932297Z_e698f1f44c84` 正式重提取 92 篇故事。Evolve Run `FR_cf8b4b842ee44940` 成功：92 个 StoryProfile、741 个 Observation/Occurrence；14 个 Function ID 与 Function 本体保持不变，Curator 只应用已有 MATCH/EXTEND 证据，不归纳/修订/删除 Function。新 Snapshot：`real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`。
+- 新 Snapshot 中 35 个 Profile 有 resolution actions、12 个为 `resolved`；Occurrence 为 353 `MATCHED`、388 `UNCERTAIN`。Schema 5、父子 lineage、外键和 SQLite integrity 校验均通过；失败的首次正式尝试未发布 Snapshot，正式 Registry 已恢复原始校验和。
+- 在新 Snapshot 上重建 Pattern，Run `PR_55e46b86aaba78c9` 成功：92 sequences、79 motifs、72 clusters、7 Published Pattern。Summary 增加确定性的跨故事结局证据门控；本批 `ending_spec` 为 `0/7`，因为没有至少两个故事同时满足尾部触达、`resolved`、resolution actions 和 sentence evidence，未手工补写。
+- 全仓 `pytest`：`359 passed, 1 skipped`；`compileall` 与 `git diff --check` 通过。未重建 Function 本体，也未引入第二套结局或 obligation 系统。
+
+## 本轮（2026-09-07）：停用 Pattern 结局归纳，保留兼容字段
+
+- 按精简方案移除 Observer Prompt/输出中的三个结局证据字段及其下标过滤，移除 Pattern 的 StoryProfile 加载、结局位置计算、motif/summary 结局证据传播和跨故事门控；`StoryProfile.core_conflict`、`ending_state` 保留。
+- `StoryProfile` 模型不再声明三个主动字段，但对历史 JSON 做精确兼容过滤；现有 Snapshot/数据库不改写。`StoryPatternSummary.ending_spec` 和下游 `build_ending_target()` 兼容读取继续保留，Pattern 摘要统一将 `ending_spec` 置为 `None`，Prompt 也固定要求返回 `null`。
+- 删除对应专用 Pattern/Profile 测试，保留 Observer 人物/关系证据越界保护、Outline 完整 `ending` 与 seed 回退测试。未执行 Evolve、Pattern 或 92 篇 LLM 重跑。
+- 验证：全仓 `pytest` 为 `353 passed, 1 skipped`；正式 Snapshot `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77` schema 5 校验通过，Pattern Run `PR_55e46b86aaba78c9` 仍为 SUCCESS；SQLite `foreign_key_check=0`、`integrity_check=ok`。
+
+## 本轮（2026-09-07）：结构、冗余与数据流只读审计
+
+- 当前主链仍是 `Bootstrap → Evolve → Snapshot → Pattern → Outline → Story`。全量收集 354 项测试，执行结果为 `353 passed, 1 skipped`；没有确认可安全删除的已收集测试。
+- 正式 Knowledge DB 只读核验通过：`integrity_check=ok`、`foreign_key_check=0`，最新 Snapshot 与 Pattern Run 的引用、Occurrence 绑定和失败 Run 暂存均无悬挂记录。`UNCERTAIN` Occurrence 的空 `function_id` 是既定语义，不是外键异常。
+- 发现两个需要后续结构决策的边界漂移：持久 Registry 的 14 个 Function payload 与父 Snapshot 一致、与最新 Snapshot 的 14 个 payload 均不一致；默认 ObservationBank 实际落在 `FunctionExtract_Agent/data/bank`，而 README 约定为 `Code/data/bank`，该嵌套 Chroma 当前无 embedding 记录且含已脱离 collection 的物理目录。当前 Evolve 使用 Knowledge DB 的 run-scoped view，故未判定为当前发布链断裂；后续应收敛 Registry 生命周期和 Bank 单一存储路径。
+- 8 个历史磁盘 Snapshot 中最新 2 个可通过当前严格 Contract 校验，较早 6 个因历史单角色关系 effect 被当前二元关系门禁拒绝；不可回写历史 Snapshot，应保留现有子 Snapshot 迁移边界并明确历史读取策略。
+- 明确代码级低风险候选只有 `Story_Agent.state` 中无调用的 `ScenePlanItem/ScenePlan` 和 `Critic` 中未使用的 `CriticReview` import；`STANDARD_ROLE_POSITIONS` 更像兼容别名，暂不删除。Coordinator、StoryCLI、Pipeline 存在三套编排入口，但均有现行测试或用户入口，不宜在未确定唯一控制面前删除。
+- 审计阶段未删除代码、测试、数据库或 Chroma 文件；随后执行的最小修复另记如下，仍保留工作树已有修改。
+
+## 本轮（2026-09-07）：最小边界修复与单篇 Evolve 验证
+
+- `ObservationBank` 默认 `data/bank` 统一解析到 `Code/data/bank`；旧的 `FunctionExtract_Agent/data/bank` 生成物未删除，避免覆盖工作树已有 Chroma 修改。Evolve 继续使用 Knowledge DB 的 run-scoped Bank view。
+- Evolve 在失败/异常出口恢复 Registry 到父 Snapshot，正常 PASS 出口同步到新发布 Snapshot；用临时 DB 模拟失败出口验证了 14 个 Function payload 与父 Snapshot 完全一致。
+- 删除 `Story_Agent.state` 中无调用的 `ScenePlanItem`/`ScenePlan`，删除 `CriticReview` 未使用 import；没有删除 pytest 测试。
+- README 当前运行说明已更新：离线测试改为 `python -m pytest test -q`，embedding 改为 `BAAI/bge-small-zh-v1.5`，当前 LLM 路径改为 `FunctionExtract_Agent/llm.py`；历史进展段保留原有时间线和结论，路径统一为当前结构。
+- 定向离线回归 `50 + 19 = 69 passed`，compileall、CLI help 和 diff check 通过。使用正式 Knowledge DB 临时副本跑 1 篇真实 Evolve：Run `FR_341a01b1d0ab493f` PASS，发布临时 Schema 5 Snapshot，14 个 Function 保持稳定，临时 SQLite integrity/FK 检查通过；assignment `MATCHED=358/739`、`UNCERTAIN=381`，仅证明流程和边界，不证明语义质量。
+- 正式 Knowledge DB、正式 Registry 和旧 Chroma 未写入；本轮未执行全量清空或全量 LLM 重建。
+
+## 本轮（2026-09-07）：清理临时代码与数据，只保留正式边界
+
+- 按用户要求，将 `Code/data/` 下的 archive、smoke、validation、eval、e2e、incremental、profile、rebuild、closed_loop 目录和一次性审计报告移入系统 Trash；保留 `knowledge/`、`registry/`、`ontology_snapshots/`、`checkpoints/`、`evaluation/`，以及当前正式 namespace 的 `bootstrap`、`evolve_15_final`、`outline_dynamic` 和最新成功 Evolve 产物。
+- 清空 `story_cli/stories/` 下 51 个重复 `OUT_NEW` 生成目录，保留正式输出根目录；清除空的 `Code/data/bank/chroma_db` 缓存、旧嵌套 `FunctionExtract_Agent/data/bank` Chroma、根目录临时 rebuild 数据、`.pytest_cache`、`__pycache__`、`.pyc` 和 `.DS_Store`。
+- 删除未被生产链或 pytest 使用的一次性比较/评测 harness；保留 `clean_corpus.py`、`build_transition_index.py`、`story_pattern_loader.py` 及全部 `test_*.py`，没有删除行为测试。
+- 正式 Knowledge DB、Registry、Snapshot、checkpoint 和正式语料未被清理动作改写；后续验证应使用 `PYTHONDONTWRITEBYTECODE=1` 与禁用 pytest cache，避免重新产生临时文件。
+
+## 本轮（2026-09-07）：Serving Snapshot 与候选 Snapshot 解耦
+
+- `KnowledgeBase` 新增同库单行 `serving_snapshots` 指针，保存 `snapshot_id`、`promoted_at`，并通过 Snapshot 关联保留 `snapshot_created_at` 与 namespace；`promote_snapshot()` 是唯一切换入口，Snapshot 内容仍不可变。
+- 不保留空白新库/旧库自动推断 serving 的通用兼容分支；正式库已先备份，再由当前代码创建指针表并显式 promote 当前 Snapshot。之后 `commit_function_run()` 不会因 Evolve/Bootstrap 产生候选而自动切换 serving。
+- Outline Planner、dynamic Planner references 和 StoryCLI 的无 `snapshot_id` 路径默认解析 serving；Evolve 无显式父 Snapshot 时也从 serving 建立工作基线，显式 `base_snapshot_id` 仍优先。
+- 本次 serving 代码从隔离 worktree 合并到 main；已有 main 工作树改动保留，正式库实际验证另行记录。
+
+## 本轮（2026-09-07）：main 正式库 Serving 链路验证
+
+- 将隔离 worktree 的 Serving 相关代码只合并到 main 对应文件，保留 main 原有未提交改动；main 的 `compileall`、Serving 默认解析和 `git diff --check` 均通过。
+- 在 main 上对正式库执行单篇真实 Evolve（`--freeze-functions`，仅冻结 Function 本体，不跳过 Observation/Matcher/Evaluator/Snapshot 提交）。Run `FR_2b6442e4f79543c0` 以旧 serving `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77` 为父版本，`6/6` 评估通过，发布候选 `serving_verification_main_20260907_20260907T025642311869Z_aaef6bcfe669`。
+- 候选提交后 serving 仍保持旧 ID；默认 Outline Resolver 和 dynamic Planner 都读取旧 ID，显式传候选 ID 才读取候选。旧 Snapshot 故事数 `92`，候选为 `93`，证明默认路径没有偷偷读取最新候选。
+- 显式 `promote_snapshot()` 后，唯一 serving 指针切换到候选，默认 Planner 随之切换；最终正式库 `Snapshot=9`、`integrity_check=ok`、`foreign_key_check` 为空。验证前备份为 `Code/data/knowledge/story_knowledge_before_main_serving_verification_20260907.db`。

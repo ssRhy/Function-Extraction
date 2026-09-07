@@ -7,6 +7,7 @@ from Contracts.occurrence import align_occurrences
 from Contracts.snapshot import publish_snapshot
 from Contracts.versioning import observation_version_id, story_version_id
 from KnowledgeBase import StoryKnowledgeStore
+from Outline_Agent import app as outline_app
 
 
 FUNCTION = {
@@ -130,3 +131,25 @@ def test_new_run_recovers_interrupted_unpublished_run(tmp_path):
             "SELECT COUNT(*) FROM observations"
         ).fetchone()[0] == 0
         assert conn.execute("SELECT status FROM pipeline_runs WHERE run_id='R2'").fetchone()[0] == "RUNNING"
+
+
+def test_serving_snapshot_is_explicit_and_planner_defaults_to_it(tmp_path):
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    parent = _commit(store, tmp_path / "snapshots", "R1", "bootstrap", "old")
+    store.promote_snapshot(parent)
+    child = _commit(store, tmp_path / "snapshots", "R2", "evolve", "new", parent)
+
+    assert store.serving_snapshot_id() == parent
+    assert outline_app.resolve_snapshot_id(None, store.db_path) == parent
+    assert store.resolve_snapshot_id(child) == child
+
+    promoted = store.promote_snapshot(child)
+    assert promoted["snapshot_id"] == child
+    assert promoted["snapshot_created_at"]
+    assert promoted["promoted_at"]
+    assert store.serving_snapshot_id() == child
+    assert store.load_story_pattern_inputs(parent)["observations"][0]["event"] == "old"
+
+    with store.connect() as conn:
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+        assert conn.execute("SELECT COUNT(*) FROM serving_snapshots").fetchone()[0] == 1

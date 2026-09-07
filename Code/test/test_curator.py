@@ -127,6 +127,24 @@ def test_apply_pending(tmp_path):
     print("curator 应用 pending: OK")
 
 
+def test_freeze_applies_pending_without_function_maintenance(tmp_path):
+    bank, store, prev = _setup(str(tmp_path), [_func("F_A")])
+    try:
+        with _no_merge_scan():
+            out = curator_node({
+                "freeze_functions": True,
+                "pending_evidence": [{"function_name": "F_A", "obs_id": "o1", "source": "matcher"}],
+                "occurrences": [], "mid_reports": [], "out_dir": str(tmp_path),
+            })
+    finally:
+        _teardown(prev)
+    function = store.load_all()[0]
+    assert function["function_name"] == "F_A"
+    assert "o1" in function["supporting_obs_ids"]
+    assert out["pending_evidence"] == []
+    print("冻结 Function 本体仍应用 pending: OK")
+
+
 def test_novelty_threshold(tmp_path):
     bank, store, prev = _setup(str(tmp_path), [_func("F_A")])
     obs = [

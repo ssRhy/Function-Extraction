@@ -100,25 +100,6 @@ def validate_function_contracts(functions: list[dict], contracts: list[dict]) ->
         if contract.get("definition_sha256") != definition_sha256(function):
             raise ValueError(f"FunctionContract 定义哈希失效: {function.get('function_name')}")
         body = FunctionContractBody.model_validate(contract)
-        if not body.role_slots or not body.preconditions or not body.effects:
-            raise ValueError(f"FunctionContract 缺少角色、前置或效果: {function.get('function_name')}")
-        if len(set(body.role_slots)) != len(body.role_slots):
-            raise ValueError(f"FunctionContract 角色槽位重复: {function.get('function_name')}")
-        unknown = set(body.role_slots) - ROLE_POSITION_SET
-        if unknown:
-            raise ValueError(
-                f"FunctionContract 使用了非标准角色位置: {function.get('function_name')}: "
-                f"{', '.join(sorted(unknown))}"
-            )
-        role_slots = set(body.role_slots)
-        referenced = []
-        referenced.extend(slot for item in body.preconditions for slot in item.role_slots)
-        referenced.extend(slot for item in body.effects for slot in item.role_slots)
-        for group in (body.obligation_effects.opens, body.obligation_effects.advances,
-                      body.obligation_effects.resolves):
-            referenced.extend(slot for item in group for slot in item.role_slots)
-        if not set(referenced).issubset(role_slots):
-            raise ValueError(f"FunctionContract 使用了未声明角色槽位: {function.get('function_name')}")
         evidence_refs = contract.get("evidence_refs") or []
         if not evidence_refs:
             raise ValueError(f"FunctionContract 缺少证据引用: {function.get('function_name')}")

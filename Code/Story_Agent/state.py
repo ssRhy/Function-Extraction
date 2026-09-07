@@ -86,24 +86,6 @@ class FunctionConstraintPlan(BaseModel):
     story: StoryLevelConstraint
 
 
-class ScenePlanItem(BaseModel):
-    scene_id: str = Field(min_length=1)
-    source_segment_indices: list[int] = Field(min_length=1)
-    function_names: list[str] = Field(min_length=1)
-    characters: list[str] = Field(min_length=1)
-    setting: str = Field(min_length=1)
-    goal: str = Field(min_length=1)
-    conflict: str = Field(min_length=1)
-    beats: list[str] = Field(min_length=1)
-    state_change: str = Field(min_length=1)
-    transition: str = ""
-    resolves_ending: bool = False
-
-
-class ScenePlan(BaseModel):
-    scenes: list[ScenePlanItem] = Field(min_length=1)
-
-
 class SceneDraft(BaseModel):
     characters: list[str] = Field(min_length=1)
     setting: str = Field(min_length=1)

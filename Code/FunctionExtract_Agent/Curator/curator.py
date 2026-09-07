@@ -315,6 +315,29 @@ def _revise_from_report(report: dict, store, bank, plan: list[dict]) -> bool:
 
 def curator_node(state: dict) -> dict:
     """收尾维护：应用 pending + novelty 归纳 + 挑战/体检修订；方案留档后 Apply 并清空 pending。"""
+    if state.get("freeze_functions"):
+        # 冻结 Function 本体，但仍需应用 MATCH/EXTEND 证据，才能生成绑定的 Occurrence。
+        store = get_active_store()
+        bank = get_bank()
+        plan: list[dict] = []
+        pending = state.get("pending_evidence", [])
+        if pending:
+            func_map = {f["function_name"]: dict(f) for f in store.load_all()}
+            changed = _apply_pending(pending, func_map, bank, plan)
+            store.replace_all(list(func_map.values()))
+            print(f"[Curator] Function Registry 本体冻结，应用 pending {len(pending)} 条（{len(changed)} 个函数证据更新）")
+        else:
+            print("[Curator] Function Registry 已冻结，无 pending 证据")
+        out_dir = state.get("out_dir", "data/evolve")
+        os.makedirs(out_dir, exist_ok=True)
+        with open(os.path.join(out_dir, "curator_plan.jsonl"), "a", encoding="utf-8") as f:
+            for item in plan:
+                f.write(json.dumps(item, ensure_ascii=False) + "\n")
+        return {
+            "curator_plan": plan,
+            "pending_evidence": [],
+            "messages": [{"role": "system", "content": "[Curator] Function Registry 冻结，跳过维护"}],
+        }
     if not _has_accumulation(state):
         print("[Curator] 无累积（pending/pools/体检问题均空），跳过维护")
         return {

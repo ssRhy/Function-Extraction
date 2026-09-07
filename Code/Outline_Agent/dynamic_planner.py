@@ -169,6 +169,7 @@ def _mature_motifs(rows, patterns):
 def build_dynamic_references(snapshot_id, knowledge_db=DEFAULT_DB_PATH):
     """读取动态 Planner 的完整只读输入。"""
     store = StoryKnowledgeStore(knowledge_db)
+    snapshot_id = snapshot_id or store.serving_snapshot_id()
     functions = store.load_functions(snapshot_id)
     contracts = {
         item["function_id"]: item for item in store.load_contracts(snapshot_id)

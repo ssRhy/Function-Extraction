@@ -76,7 +76,7 @@ def initialize_registry_from_knowledge(
 ) -> str:
     """用统一知识库中的正式 Snapshot 初始化本次 Evolve 工作区。"""
     knowledge = StoryKnowledgeStore(knowledge_db)
-    snapshot_id = base_snapshot_id or knowledge.latest_snapshot_id()
+    snapshot_id = base_snapshot_id or knowledge.serving_snapshot_id()
     store.replace_all(knowledge.load_functions(snapshot_id))
     return snapshot_id
 
@@ -572,17 +572,21 @@ def _build_evolve_graph() -> StateGraph:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Evolve 单图：新文本 → 提取 obs → Matcher 五分类 → 直写/Pools/报告")
+    parser = argparse.ArgumentParser(description="Evolve 单图：新文本 → 提取 obs → Matcher 五分类 → Curator/报告 → Snapshot")
     parser.add_argument("--corpus", type=str, required=True, help="新文本语料目录（含 .txt，递归收集）")
     parser.add_argument("--namespace", type=str, default="evolve_work",
                         help="本次 Evolve 的可变工作命名空间")
     parser.add_argument("--base-snapshot", type=str, default=None,
-                        help="基础 Snapshot ID；缺省读取统一库最新正式 Snapshot")
+                        help="基础 Snapshot ID；缺省读取当前 serving Snapshot")
     parser.add_argument("--knowledge-db", type=str, default=str(DEFAULT_DB_PATH))
     parser.add_argument("--out-dir", type=str, default=None, help="输出目录（缺省 data/evolve）")
     parser.add_argument("--snapshot-root", type=str, default=str(DEFAULT_SNAPSHOT_ROOT))
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 个故事")
     parser.add_argument("--stories", type=str, default=None, help="仅处理指定文件（逗号分隔，优先于 --limit）")
+    parser.add_argument("--story-version-revision", type=str, default=None,
+                        help="显式重提取时加入 StoryVersion revision；缺省保持原 ID")
+    parser.add_argument("--freeze-functions", action="store_true",
+                        help="只重建故事证据，跳过 Curator 对 Function Registry 的修改")
     parser.add_argument("--batch-size", type=int, default=matcher_module.MATCH_BATCH_SIZE, help="Matcher 每批 obs 数")
     parser.add_argument("--top-k", type=int, default=matcher_module.TOP_K, help="每 obs 召回候选函数数")
     args = parser.parse_args()
@@ -660,6 +664,7 @@ def main() -> int:
         "messages": [],
         "raw_text": None,
         "story_config": None,
+        "story_version_revision": args.story_version_revision,
         "normalized_story": None,
         "story_profile": None,
         "observations": [],
@@ -691,6 +696,7 @@ def main() -> int:
         "story_meta": story_meta,
         "errors": [],
         "namespace": args.namespace,
+        "freeze_functions": args.freeze_functions,
         "out_dir": out_dir,
     }
     app = _build_evolve_graph().compile()
@@ -707,6 +713,7 @@ def main() -> int:
             retryable=isinstance(exc, (TimeoutError, ConnectionError)),
         )
         knowledge.fail_function_run(run_id, failure)
+        initialize_registry_from_knowledge(store, args.knowledge_db, base_snapshot_id)
         print(json.dumps({"run_result": failure}, ensure_ascii=False))
         return 1
     elapsed = time.time() - start_time
@@ -720,6 +727,12 @@ def main() -> int:
     if result.get("errors"):
         print(f"  失败记录 {len(result['errors'])} 条（不中断）")
     run_result = result.get("run_result")
+    initialize_registry_from_knowledge(
+        store,
+        args.knowledge_db,
+        run_result["snapshot_id"] if run_result and run_result.get("status") == "PASS"
+        else base_snapshot_id,
+    )
     print(json.dumps({"run_result": run_result}, ensure_ascii=False))
     return 0 if run_result and run_result.get("status") == "PASS" else 1
 

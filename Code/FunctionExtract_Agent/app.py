@@ -160,6 +160,8 @@ def story_loader_node(state: NarrativePipelineState) -> dict:
     if filename in meta:
         story_config["story_type"] = meta[filename].get("category")
         story_config["title"] = meta[filename].get("question_title")
+    if state.get("story_version_revision"):
+        story_config["story_version_revision"] = state["story_version_revision"]
     tag = f" [{story_config['story_type']}]" if story_config.get("story_type") else ""
     print(f"[{idx + 1}/{total}] {filename} (ID={story_id}{tag}, {len(raw_text)} 字)")
     return {

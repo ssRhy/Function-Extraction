@@ -80,6 +80,7 @@ def summarize_story_patterns(state: StoryPatternState) -> dict:
             {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
         ], StoryPatternSummary)
         data = result.model_dump()
+        data["ending_spec"] = None
         anchor_id = cluster.get("anchor_motif_id")
         if not anchor_id:
             eligible_motif_ids = [

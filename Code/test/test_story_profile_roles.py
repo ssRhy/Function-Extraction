@@ -75,6 +75,26 @@ def test_observer_returns_profile_and_bound_observation(monkeypatch):
     assert result["observations"][0]["relationship_deltas"][0]["target_id"] == "P2"
 
 
+def test_observer_drops_out_of_range_profile_evidence(monkeypatch):
+    profile = _profile()
+    profile["characters"][0]["evidence_sentence_indices"] = [0, 9]
+    profile["relationships"][0]["evidence_sentence_indices"] = [1, 9]
+    response = ObservationResponse(story_profile=profile, observations=[])
+    monkeypatch.setattr(observer_module, "chat_structured", lambda *args, **kwargs: response)
+
+    result = observer_node({
+        "normalized_story": {
+            "metadata": {"story_id": "s1", "story_version_id": "SV_1"},
+            "sentences": ["冲突开始。", "结局动作完成。"],
+        },
+    })
+
+    output = result["story_profile"]
+    assert output["characters"][0]["evidence_sentence_indices"] == [0]
+    assert output["relationships"][0]["evidence_sentence_indices"] == [1]
+    assert "丢弃" in result["messages"][0]["content"]
+
+
 def test_snapshot_rejects_unknown_person_and_accepts_profile(tmp_path):
     profile = {"story_id": "s1", "story_version_id": "SV_1", "profile": _profile()}
     function = {

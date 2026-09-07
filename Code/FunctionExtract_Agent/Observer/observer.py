@@ -133,12 +133,12 @@ def observer_node(state: NarrativePipelineState) -> NarrativePipelineState:
     )
 
     profile = result.story_profile
-    for character in profile.characters:
-        if any(index >= len(sentences) for index in character.evidence_sentence_indices):
-            raise ValueError("StoryProfile 人物证据句子下标超出故事范围")
-    for relationship in profile.relationships:
-        if any(index >= len(sentences) for index in relationship.evidence_sentence_indices):
-            raise ValueError("StoryProfile 关系证据句子下标超出故事范围")
+    dropped_profile_indices = 0
+    for item in [*profile.characters, *profile.relationships]:
+        indices = item.evidence_sentence_indices
+        valid = [index for index in indices if index < len(sentences)]
+        dropped_profile_indices += len(indices) - len(valid)
+        item.evidence_sentence_indices = valid
 
     observations = []
     for i, obs in enumerate(result.observations):
@@ -179,11 +179,14 @@ def observer_node(state: NarrativePipelineState) -> NarrativePipelineState:
         observation["observation_version_id"] = observation_version_id(story_version, observation)
         observations.append(observation)
 
+    message = f"[Observer] 完成 (ID={story_id}, 观察到={len(observations)})"
+    if dropped_profile_indices:
+        message += f"，丢弃越界 Profile 证据下标 {dropped_profile_indices} 个"
     return {
         "story_profile": profile.model_dump(),
         "observations": observations,
         "messages": [{
             "role": "system",
-            "content": f"[Observer] 完成 (ID={story_id}, 观察到={len(observations)})"
+            "content": message,
         }]
     }

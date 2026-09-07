@@ -56,6 +56,11 @@ def test_summarizes_clean_clusters_and_binds_snapshot_evidence(monkeypatch):
             optional_steps=["可插入一次关系铺垫"],
             applicability_conditions=["角色需要从准备阶段进入危机应对阶段"],
             counterexamples_limitations=["不适用于核心因果方向相反的序列"],
+            ending_spec={
+                "resolves": "不应由 Pattern 生成",
+                "must_show": ["不应由 Pattern 生成"],
+                "final_state": "不应由 Pattern 生成",
+            },
         )
 
     monkeypatch.setattr(summaries, "chat_structured", fake_chat)
@@ -67,10 +72,12 @@ def test_summarizes_clean_clusters_and_binds_snapshot_evidence(monkeypatch):
     assert pattern["pattern_id"] == "PAT_A"
     assert pattern["snapshot_id"] == "snapshot_test"
     assert [item["function_id"] for item in pattern["core_function_chain"]] == ["F_1", "F_2", "F_3", "F_4"]
+    assert pattern["ending_spec"] is None
     assert pattern["evidence"] == state["motif_clusters"][0]["evidence"]
     assert result["skipped_clusters"] == []
     assert state == before
     assert '"cluster_id": "MCL_A"' in captured["messages"][1]["content"]
+    assert '"ending_spec": null' in captured["messages"][0]["content"]
 
 
 def test_v3_summary_carries_function_contract_into_pattern(monkeypatch):
@@ -95,30 +102,6 @@ def test_v3_summary_carries_function_contract_into_pattern(monkeypatch):
     assert [item["contract"]["function_id"] for item in chain] == [
         "F_1", "F_2", "F_3", "F_4",
     ]
-
-
-def test_summary_carries_pattern_ending_spec(monkeypatch):
-    def fake_chat(_messages, schema):
-        return schema(
-            pattern_name="可闭合模式",
-            abstract_definition="状态推进并解决核心冲突",
-            optional_steps=[], applicability_conditions=[], counterexamples_limitations=[],
-            ending_spec={
-                "resolves": "压迫关系",
-                "must_show": ["公开证据", "压迫者承担后果"],
-                "final_state": "主角脱离压迫并恢复稳定生活",
-            },
-        )
-
-    monkeypatch.setattr(summaries, "chat_structured", fake_chat)
-
-    result = summaries.summarize_story_patterns(_state())
-
-    assert result["pattern_summaries"][0]["ending_spec"] == {
-        "resolves": "压迫关系",
-        "must_show": ["公开证据", "压迫者承担后果"],
-        "final_state": "主角脱离压迫并恢复稳定生活",
-    }
 
 
 def test_skips_needs_review_without_calling_llm(monkeypatch):

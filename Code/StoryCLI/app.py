@@ -155,7 +155,7 @@ def run_function(
     manifest_path, count = _prepare_corpus(inputs, input_dir)
     namespace = namespace or "story_cli"
     if mode == "evolve" and not base_snapshot:
-        base_snapshot = StoryKnowledgeStore(KNOWLEDGE_DB).latest_snapshot_id(namespace)
+        base_snapshot = StoryKnowledgeStore(KNOWLEDGE_DB).serving_snapshot_id()
     if mode == "evolve" and base_snapshot:
         base_manifest = StoryKnowledgeStore(KNOWLEDGE_DB).load_snapshot_manifest(base_snapshot)
         if base_manifest.get("namespace") != namespace:
@@ -265,6 +265,8 @@ def batch_outlines(
 ):
     if count < 1:
         raise ValueError("--count 必须大于 0")
+    if not snapshot_id:
+        snapshot_id = StoryKnowledgeStore(knowledge_db).serving_snapshot_id()
     genre = outline_app.normalize_genre(genre)
     root = Path(out_dir).resolve() if out_dir else DATA / "story_cli" / "outlines" / time.strftime("%Y%m%dT%H%M%S")
     graph = outline_app._build_graph()
@@ -491,7 +493,7 @@ def _add_request_arguments(parser):
 
 
 def _add_outline_arguments(parser, required=False):
-    parser.add_argument("--snapshot-id", required=True)
+    parser.add_argument("--snapshot-id", default=None)
     parser.add_argument("--knowledge-db", default=str(KNOWLEDGE_DB))
     parser.add_argument("--genre", required=required)
     parser.add_argument("--count", type=int, required=required)

@@ -57,12 +57,10 @@ Code/
 │   ├── test_bootstrap_app.py # bootstrap_app 单图全流程测试（mock LLM + FakeEmbedder）
 │   ├── test_registry.py    # RegistryStore 单元测试（CRUD/隔离/字段无损/JSONL 往返）
 │   ├── test_matcher.py     # Matcher 单元测试（召回/直写/occurrence，mock LLM）
-│   ├── migrate_function_cards.py # 一次性迁移：O_0 补 function_id/status/version_history
 │   ├── test_batch_induction.py  # 批后归纳聚类纯函数测试（无 LLM）
 │   ├── test_preprocessor.py # Pre-Processor 测试（mock LLM）
 │   ├── test_confidence.py  # 置信度计算测试
-│   ├── test_clean_corpus.py # 语料清洗回归测试
-│   └── logs/               # 运行日志
+│   └── test_clean_corpus.py # 语料清洗回归测试
 ├── zhihu_story_subset_120_20260815/  # 知乎 120 篇原始语料（3 题材 × 40）
 └── zhihu_story_subset_120_20260815_clean/  # 清洗后语料（Bootstrap 实际输入）
 ```
@@ -73,7 +71,7 @@ Code/
 pip install sentence-transformers chromadb openai pydantic langgraph
 ```
 
-Embedding 模型（`all-MiniLM-L6-v2`）离线加载，无需额外下载配置。
+Embedding 模型（`BAAI/bge-small-zh-v1.5`）离线加载，无需额外下载配置。
 
 `langgraph-checkpoint-sqlite`（SQLite 持久化 checkpoint）因当前环境全局 site-packages 不可写，装在本地 `Code/vendor/`（已被 gitignore）：
 
@@ -105,7 +103,7 @@ python -m FunctionExtract_Agent --namespace o0 --out-dir data/o0  # 自定义命
 - `--corpus`：默认 `zhihu_story_subset_120_20260815_clean`；存在 `manifest.json` 时自动注入 category / question_title 元数据（Diversity 维度按题材计）
 - 修订动作：近义 MERGE（supporting obs 程序并集）、定义 REVISE、SPLIT（obs 按向量余弦确定性分配）、weak-fit 剔除、低证据移除；写回前备份 `<registry>.pre_revise.<ns>.jsonl`
 - Abstraction 复核为“首轮全量 + 后续轮增量”：只重评 `revise_node` 标记的变更集，未变更函数按 function_name 沿用旧评审；确定性五维每轮全量（向量秒级）
-- LLM 统一 `reasoning_effort="none"`（`Agent/llm.py` 硬编码）；设 `LLM_USAGE=1` 可打印按调用方归因的 usage/耗时
+- LLM 统一 `reasoning_effort="none"`（`FunctionExtract_Agent/llm.py` 硬编码）；设 `LLM_USAGE=1` 可打印按调用方归因的 usage/耗时
 
 ### Function 调度（Bootstrap/Evolve → Pattern）
 
@@ -236,10 +234,7 @@ result = bootstrap_app.invoke(initial_state, config=config)
 
 ```bash
 cd Code
-python -m pytest test/test_preprocessor.py test/test_confidence.py test/test_evaluator.py \
-    test/test_revise.py test/test_bootstrap_app.py test/test_registry.py \
-    test/test_matcher.py test/test_evolve.py test/test_batch_induction.py \
-    test/test_clean_corpus.py -q   # 全部离线回归（mock LLM / 无 LLM）
+python -m pytest test -q   # 全部离线回归（mock LLM / 无 LLM）
 ```
 
 ## NarrativeObservation 数据结构
@@ -356,7 +351,7 @@ confidence = 0.3 × diversity + 0.3 × coherence + 0.2 × surface - 0.2 × confu
 
 ## 当前进展（2026-08-16 续 9）：数据目录统一（单一 data 根）
 
-- **统一为单一 `Code/data/` 根目录**：Registry DB（原 `Code/Agent/data/registry/functions.db`）→ `data/registry/functions.db`；Bank 运行时存储（原 `Code/Bank/data/`）→ `data/bank/`；快照 `data/bootstrap/` 与评估 `data/evaluation/` 不变。`registry.py` 默认 DB 路径与 `bank.py` 默认 `persist_dir`（`"data/bank"`）已同步；`.gitignore` 收敛为一条 `Code/data/`。
+- **统一为单一 `Code/data/` 根目录**：Registry DB → `data/registry/functions.db`；Bank 运行时存储 → `data/bank/`；快照 `data/bootstrap/` 与评估 `data/evaluation/` 不变。`registry.py` 默认 DB 路径与 `bank.py` 默认 `persist_dir`（`"data/bank"`）已同步；`.gitignore` 收敛为一条 `Code/data/`。
 - **删除无用产物**：已清空命名空间的 4 个 `.pre_revise.*` 备份、`data/bank_test_conf/`（测试临时产物）；保留 `functions.db.pre_revise.bootstrap.jsonl`（curate 83→82 修订前备份）。
 - 验证：`bootstrap` 命名空间 82 函数完整迁移；回归测试通过。
 
@@ -367,7 +362,7 @@ confidence = 0.3 × diversity + 0.3 × coherence + 0.2 × surface - 0.2 × confu
 - **清理旧产物**：`data/` 下旧分批/试跑目录（`genre_functions` / `trial3_*` / `trial5*` / `trial_none` / `trial_usage_probe.json`）与 `data/evaluation/` 旧 union 快照已删除；保留 `data/bootstrap/` 快照与当前 `evaluation_report.json`。
 - **旧命名空间清空**：`functions.db` 中 `01_悬疑惊悚`(31) / `02_古风穿越重生`(32) / `03_现代情感家庭`(39) / `union`(75) 已清空，仅保留 `bootstrap`(82)。
 - **修订历史落盘**：`revise.py` 的 `revise_node` 每轮修订后追加 `data/evaluation/revise_rounds.jsonl`（`round` / `ts` / `actions`，含 merged/revised/split/removed/backup）。
-- **`.env` 去跟踪**：`git rm --cached Code/Agent/.env`（工作区文件保留，`.gitignore` 已含 `.env`）。
+- **`.env` 去跟踪**：`git rm --cached Code/FunctionExtract_Agent/.env`（工作区文件保留，`.gitignore` 已含 `.env`）。
 
 ## 当前进展（2026-08-17 续 10）：JSON 层加固 + source_sentence_indices 后 120 篇全量复验
 
@@ -418,12 +413,10 @@ confidence = 0.3 × diversity + 0.3 × coherence + 0.2 × surface - 0.2 × confu
 
 ## 当前进展（2026-08-16 续）：Registry SQLite 化 + 5 篇试跑
 
-- **RegistryStore（SQLite）**：Code/Agent/Registry/registry.py，表 unctions(namespace, function_name, definition, payload, updated_at)，主键 (namespace, function_name)；按批次命名空间隔离（atch_run 启动只清当前批），payload 整存保证未来 Evolve 加字段无需迁移存储层。
-- **读写点收敛**：Inducer/Confidence/Evaluator/Revise 全部改走活跃 store（get_active_store/set_active_store）；JSONL 仅在有显式 
-egistry_file（快照/并集评估）时使用；
-evise 修订写回 store 模式前自动 export_jsonl(<db>.pre_revise.<ns>.jsonl) 备份。
-- **5 篇跨题材试跑验收（2026-08-16）**：悬疑 2 + 古风 2 + 现代 1，--batch-induction --out-dir data/trial5；40 obs / 5 functions（均 ≥2 故事支持）；闭环 PASS 5/6（第 1 轮 4/6 → 修订 3 个题材绑定/粒度函数 → 第 2 轮 5/6；evidence 2.2 因样本仅 5 篇不达标，属小样本预期）；耗时 1282s（256.4s/篇）；DB 命名空间 ll 与导出快照逐字段一致。
-- **测试**：新增 	est/test_registry.py 5 项（CRUD/整批事务/命名空间隔离/字段无损/JSONL 往返）；回归 test_revise/test_evaluator/test_batch_induction/test_confidence/test_preprocessor/test_clean_corpus 共 49 项全过；_REGISTRY_FILE 零残留。
+- **RegistryStore（SQLite）**：`Code/FunctionExtract_Agent/Registry/registry.py`，表 `functions(namespace, function_name, definition, payload, updated_at)`，主键 `(namespace, function_name)`；按批次命名空间隔离，payload 整存保证未来 Evolve 加字段无需迁移存储层。
+- **读写点收敛**：Inducer/Confidence/Evaluator/Revise 全部改走活跃 store（`get_active_store`/`set_active_store`）；JSONL 仅在有显式 registry_file（快照/并集评估）时使用；Revise 修订写回 store 模式前自动导出 `<db>.pre_revise.<ns>.jsonl` 备份。
+- **5 篇跨题材试跑验收（2026-08-16）**：悬疑 2 + 古风 2 + 现代 1，`--batch-induction --out-dir data/trial5`；40 obs / 5 functions（均 ≥2 故事支持）；闭环 PASS 5/6；耗时 1282s（256.4s/篇）；DB 命名空间 `all` 与导出快照逐字段一致。
+- **测试**：新增 `test/test_registry.py` 5 项（CRUD/整批事务/命名空间隔离/字段无损/JSONL 往返）；相关回归共 49 项全过；`_REGISTRY_FILE` 零残留。
 ## 当前进展（2026-08-16 续 3）：120 篇全量重跑（V3 定版）验收
 
 - **三批全量重跑（V3 混合切句 + reasoning_effort=none）**：悬疑 638.9s / 335 obs / 31 funcs；古风 670.9s / 304 obs / 32 funcs；现代 832.9s / 372 obs / 39 funcs；**合计 2142.7s ≈ 36 分钟（17.8s/篇）**，对比旧配置约 8h → 约 13 倍提速。每批 Evaluator PASS 4/6（单题材 diversity=1 与 evidence 略低为预期）。
@@ -434,7 +427,7 @@ evise 修订写回 store 模式前自动 export_jsonl(<db>.pre_revise.<ns>.jsonl
 ## 当前进展（2026-08-16 续 2）：Bootstrap 提速 ~13.6 倍 + 5 篇新配置试跑
 
 - **根因定位（隐藏推理 token）**：耗时大头不是 Pre-Processor"全文回显"，而是模型隐藏推理 token——单次切句 completion 8220 tok 中 8207（99.8%）为 reasoning，可见输出仅 28 字符 JSON；同调用 `reasoning_effort=low` 31.4s/3925 tok vs `none` 1.6s/248 tok（约 20 倍）。
-- **对策（两处最小改动）**：① `Agent/llm.py` `chat/chat_structured` 默认 `reasoning_effort="none"`；② `pre_processor.py` 默认走 **V3 混合切句**（规则切句生成候选句子 → LLM 只输出 merges/splits 修正、不回显全文，输出从 ~21k token 降到几百），质量仍由 LLM 把关。
+- **对策（两处最小改动）**：① `FunctionExtract_Agent/llm.py` `chat/chat_structured` 默认 `reasoning_effort="none"`；② `pre_processor.py` 默认走 **V3 混合切句**（规则切句生成候选句子 → LLM 只输出 merges/splits 修正、不回显全文，输出从 ~21k token 降到几百），质量仍由 LLM 把关。
 - **trial5_none 试跑验收（2026-08-16）**：同 trial5 的 5 篇跨题材，`--batch-induction --out-dir data/trial5_none`；**93.9s（18.8s/篇）vs 基线 1282s（256.4s/篇）→ 提速约 13.6 倍**；47 obs / 5 functions（与基线数量一致）；闭环 PASS 5/6（第 1 轮 4/6 → 修订 1 / 拆分 1 → 第 2 轮 5/6；evidence 因 5 篇小样本不达标，符合预期）；LLM 15 次调用 / 89,791 tok / 88.8s。
 - **3 篇样本量警告**：同配置 3 篇试跑（trial_none）只归纳出 1 个 function（34 obs）——跨故事相似分量过少导致，非配置退化；5 篇即恢复 5 个 function，支撑"质量持平"结论。
 - **删除 `positive_examples`**：inducer.py / revise.py / Inducer_prompt.py 已清理（零读取字段）；回归测试全过。

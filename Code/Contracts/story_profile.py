@@ -81,6 +81,20 @@ class StoryProfile(BaseModel):
     core_conflict: str = Field(min_length=1)
     ending_state: str = Field(default="")
 
+    @model_validator(mode="before")
+    @classmethod
+    def ignore_legacy_ending_fields(cls, value):
+        if isinstance(value, dict):
+            return {
+                key: item for key, item in value.items()
+                if key not in {
+                    "ending_resolution_actions",
+                    "ending_evidence_sentence_indices",
+                    "ending_closure",
+                }
+            }
+        return value
+
     @model_validator(mode="after")
     def validate_graph(self):
         ids = [character.id for character in self.characters]

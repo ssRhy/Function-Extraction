@@ -9,8 +9,10 @@ def _digest(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def story_version_id(story_id: str, text: str) -> str:
-    return "SV_" + _digest(f"{story_id}|{text}")[:24]
+def story_version_id(story_id: str, text: str, revision: str | None = None) -> str:
+    revision = str(revision or "").strip()
+    anchor = f"{story_id}|{text}" + (f"|{revision}" if revision else "")
+    return "SV_" + _digest(anchor)[:24]
 
 
 def observation_version_id(story_version: str, observation: dict) -> str:

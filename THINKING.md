@@ -1440,3 +1440,51 @@ Function 集合 + 规则/状态/故事目标
 - 用户要求处理真实正文链复现的“场景计划引用 seed 未定义人物”问题。根因不是正文写作，而是 `SCENE_PLAN_PROMPT` 只禁止新增“核心人物”，却没有限制 `SceneDraft.characters` 的 ID 集合；模型因此输出了“P3 的手下”“村长”等临时角色。
 - 最小修复是沿用现有 `_scene_plan_issues()` 硬校验，同时把 seed 的 `allowed_character_ids` 显式传入场景计划 Prompt，并禁止自然语言/临时角色进入 `characters`。对该确定性错误最多重试一次，避免静默删项或猜测角色映射；非核心人物仍可在 beats/setting 中被描述。
 - 离线回归 `51 passed`。针对原失败 Outline 的真实 Story_Agent 重跑最终成功：4 个场景的角色列表只包含 `P1/P2/P3`，正文 `5060` 字符，独立质量诊断 `ending_closure=5/5`、`conflict_resolution=5/5`，无诊断问题。第一次重跑出现的是场景段对齐波动，不属于人物边界修复，未扩展为新的通用重试层。
+
+## 217. 结局证据必须先进入 Pattern 输入，再判断是否值得扩 schema（2026-09-06）
+
+- 用户要求按“接通既有 Profile → 小规模隔离 Pattern → 信息不足才扩 Profile → 正式重建”的顺序执行。验证显示，现有 `core_conflict`/`ending_state` 接入后确实让隔离 Pattern 产生了 `3/10` 个非空 `ending_spec`，但只有 `15/101` 条 motif evidence 触达故事尾部，且非尾部证据仍会混入摘要；不能把这一步误判为结局归纳已经可靠。
+- 最小缺口不是新的 Function，也不是第二套 StoryEndingProfile，而是现有 StoryProfile 的三个字段：可观察解决动作、结局证据句子下标、`resolved/partial/open` 收束状态。`ending_spec` 暂不引入 obligation 字段，避免提前建立第二套义务系统。
+- 3 篇真实故事的临时 Evolve 成功发布带新字段的不可变 Snapshot，但 Pattern 没有候选 cluster 达到发布门槛（`published_patterns=0`）。因此当前结论是“证据链已接通、样本不足以证明 Pattern 结局语义”，不是“需要继续盲跑全量 92 篇”；正式全量重建应等待 Observer 的既有越界失败先被单独处理或可控重试。
+
+## 218. 先限制 Observer 越界，再完成同 namespace 正式重建（2026-09-06）
+
+- 用户要求把 Observer 的证据下标越界作为前置边界处理，然后正式重提取 92 篇、复用 Function ID、重建 ObservationVersion/Occurrence、发布不可变 Snapshot，再重建 motif/Pattern；明确不重建 Function 本体，也不新增第二套结局或 obligation 系统。
+- 首次 92 篇正式尝试暴露了 freeze 分支的真实缺陷：它清空了 pending MATCH/EXTEND，却没有把这些证据应用到现有 Function，导致最终评估支持数为零而不发布 Snapshot。修正为“冻结 Function 维护、仍应用 pending evidence”后，第二次 Run `FR_cf8b4b842ee44940` 成功发布新 Snapshot。
+- 新 Snapshot 保持 14 个 Function 的稳定 ID/本体，生成 92 Profile 和 741 Occurrence；Pattern 成功发布 7 个 Pattern。由于全批没有至少两个跨故事证据同时满足确定性尾部触达、resolved、resolution actions 和 evidence indices，最终 `ending_spec=0/7`。这是证据不足的可审计结果，不以 LLM 猜测或人工补写填空。
+
+## 219. 暂停 Pattern 结局归纳而不重建历史数据（2026-09-07）
+
+- 用户确认当前最小行为是让 Pattern 停止生产 `ending_spec`，而不是继续补强结局证据链；故事结局仍由 Seed → Outline `ending` → Validator 负责。
+- 因此删除三个结局证据字段在 Observer/Pattern 中的主动生产与传播，保留 `StoryProfile.core_conflict`/`ending_state`、`ending_spec` 读取兼容和下游 seed 回退；历史 Snapshot 中已有字段只在模型边界被忽略，不做数据库或不可变 Snapshot 重写。
+- 该决策把“Pattern 无结局规范”和“故事没有结局”明确分开：新摘要固定 `ending_spec=null`，Outline 仍必须输出完整 `ending`。验证只覆盖固定摘要、seed 回退、Outline 结局、全量离线回归和当前 Snapshot/SQLite 只读完整性。
+
+## 220. 结构审计应先处理持久边界，再做删除（2026-09-07）
+
+- 用户要求同时检查结构冗余、代码冗余、多余测试和数据流一致性。审计结果显示，当前 SQLite/Snapshot/Pattern 的引用完整性通过，但“完整性通过”不等于所有持久工作态一致：Registry 保留的是父 Snapshot 的 14 个 Function payload，而 canonical Knowledge DB 已发布更新后的 14 个 payload。
+- 这暴露出 Registry 作为持久 mutable workspace 的生命周期问题：Evolve 开始时会从父 Snapshot 重置，失败路径可能留下非 canonical 的 idle 状态。下一步若要改，应优先选择 run-scoped 临时 Registry，或在成功/失败边界明确同步与恢复；不应通过删除 Registry 或绕过 Snapshot 来掩盖漂移。
+- 同一类问题出现在 ObservationBank：代码默认路径与 README 约定不同，现有嵌套 Chroma 还是空 collection/孤立物理目录，而 Evolve 已通过 Knowledge DB view 走另一条数据路径。应先决定保留 Bank 还是收敛到 Knowledge DB，再删除或迁移生成物；不能在未确定 canonical store 前清理 tracked Chroma 文件。
+- 三套编排入口（Coordinator、StoryCLI、Pipeline）属于结构重复风险，但不是已证明的死代码；其差异在子进程协议、重试、Pattern 调用和 CLI 合同上，暂时保留。真正可删的代码只收敛到无调用的 `ScenePlanItem/ScenePlan` 与一个 unused import；没有找到可证明重复的 pytest 测试。
+
+## 221. 先收敛持久边界，再做小样本重跑（2026-09-07）
+
+- 用户要求优先清空重跑或保持最简洁，并明确少量验证即可。最终选择不清空正式库：Bank 默认路径改到 `Code/data/bank`，Evolve 在正常结束时把持久 Registry 对齐到发布 Snapshot，失败时恢复父 Snapshot；正式数据只用临时副本验证。
+- 一篇真实 Evolve 在临时副本中成功发布子 Snapshot，保留 14 个 Function ID；SQLite 完整性通过，正式库未变化。该样本的 `MATCHED=358/739` 与 `UNCERTAIN=381` 说明流程门禁通过和语义分配质量必须分开报告。
+- 清理范围收敛为两个无调用模型和一个 unused import；pytest 行为测试全部保留。后续若要清理旧嵌套 Bank 生成物，应先确认是否需要保留当前工作树中的 tracked Chroma，再进行可恢复迁移或删除。
+
+## 222. 临时产物不再作为项目资产保留（2026-09-07）
+
+- 用户明确不需要临时代码和数据，因此以正式数据流为边界清理：统一 SQLite 的 `knowledge/registry`、不可变 `ontology_snapshots`、正式 `checkpoints/evaluation` 和当前正式 run 产物保留；实验、smoke、retry、validation、eval、e2e、旧 rebuild 和重复 StoryCLI 输出移入 Trash。
+- 旧嵌套 Bank 已确认是空 collection 加孤立物理目录，且 Evolve 使用 Knowledge DB 的 run-scoped view；清除它不会切断当前发布链，`Code/data/bank` 仅保留正式运行根目录。
+- 一次性 harness 与缓存不属于正式代码；但 `clean_corpus.py` 是正式语料入口，`build_transition_index.py`/`story_pattern_loader.py` 仍被测试使用，所以继续保留。所有 pytest 测试按用户此前决定完整保留。
+
+## 223. Serving 验证必须在 main 的真实运行上下文完成（2026-09-07）
+
+- 用户要求把 Serving 修改同步到 main 后再验证。main 已有正式 StoryProfile 兼容字段和真实 `.env` 运行上下文；隔离 worktree 的失败分别来自缺少 `.env` 与旧 Profile schema，不代表 Serving 机制失败。
+- 在 main 正式库完成真实链路：Evolve 默认读取旧 serving 并发布候选；提交后 serving 不变，默认 Planner 仍读旧版本；显式 promote 后 serving 和默认 Planner 一起切换到候选。这个顺序才是本次验证的有效证据。
+- 验证过程只使用进程内 checkpointer 占位，没有修改仓库依赖；正式库新增的是受控验证 Run、候选 Snapshot 和一次明确 promote，所有结果以 SQLite 与 Planner 返回的 Snapshot ID 为准。
+
+## 223. Serving 机制应在 main 的真实运行上下文验证（2026-09-07）
+
+- 用户要求将 serving 相关修改同步到 main，再在 main 上执行正式库验证；原因是 main 已包含正式 StoryProfile 兼容字段和真实运行配置，隔离 worktree 的 Evolve 验证会被上下文差异阻断。
+- 合并边界只包含 `serving_snapshots`、显式 promote、默认 serving 解析和对应测试；main 原有未提交改动不覆盖、不回滚。正式 Evolve 的候选提交、serving 保持和 promote 切换仍需以 main 实际运行结果为准。

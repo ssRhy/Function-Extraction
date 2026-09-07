@@ -304,9 +304,10 @@ def preprocessor_node(state: NarrativePipelineState) -> NarrativePipelineState:
     sentences = result.sentences
     paragraph_count = result.paragraph_count or len(segments)
 
+    revision = story_config.get("story_version_revision")
     metadata = {
         "story_id": story_id,
-        "story_version_id": story_version_id(story_id, raw_text),
+        "story_version_id": story_version_id(story_id, raw_text, revision),
         "content_sha256": hashlib.sha256(raw_text.encode("utf-8")).hexdigest(),
         "story_type": story_type,
         "title": title,

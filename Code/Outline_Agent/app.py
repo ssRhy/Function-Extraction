@@ -56,14 +56,22 @@ _GENRE_KEYS = ["01_悬疑惊悚", "02_古风仙侠", "03_现代情感", "04_末�
 
 # ---------- 输入加载 ----------
 
-def load_catalog(snapshot_id, knowledge_db=DEFAULT_DB_PATH):
-    return StoryKnowledgeStore(knowledge_db).load_pattern_catalog(snapshot_id)
+def resolve_snapshot_id(snapshot_id=None, knowledge_db=DEFAULT_DB_PATH):
+    if snapshot_id:
+        return snapshot_id
+    return StoryKnowledgeStore(knowledge_db).serving_snapshot_id()
 
 
-def load_contracts(snapshot_id, knowledge_db=DEFAULT_DB_PATH):
+def load_catalog(snapshot_id=None, knowledge_db=DEFAULT_DB_PATH):
+    store = StoryKnowledgeStore(knowledge_db)
+    return store.load_pattern_catalog(resolve_snapshot_id(snapshot_id, knowledge_db))
+
+
+def load_contracts(snapshot_id=None, knowledge_db=DEFAULT_DB_PATH):
+    store = StoryKnowledgeStore(knowledge_db)
     return {
         item["function_id"]: item
-        for item in StoryKnowledgeStore(knowledge_db).load_contracts(snapshot_id)
+        for item in store.load_contracts(resolve_snapshot_id(snapshot_id, knowledge_db))
     }
 
 
@@ -169,6 +177,7 @@ def _instance_cases(functions, occurrences, chain):
 def load_planner_references(snapshot_id, pattern, chain, knowledge_db=DEFAULT_DB_PATH):
     """读取 Planner 的三类只读参考：转移、所选 motif 和真实实例。"""
     store = StoryKnowledgeStore(knowledge_db)
+    snapshot_id = resolve_snapshot_id(snapshot_id, knowledge_db)
     functions = store.load_functions(snapshot_id)
     occurrences = store.load_occurrences(snapshot_id)
     motifs = _motif_references(pattern, store.load_motif_evidence(snapshot_id))
@@ -551,7 +560,8 @@ def dynamic_seed_node(state):
     return {"seed": seed}
 
 def planner_node(state):
-    catalog = load_catalog(state["snapshot_id"], state["knowledge_db"])
+    snapshot_id = resolve_snapshot_id(state.get("snapshot_id"), state["knowledge_db"])
+    catalog = load_catalog(snapshot_id, state["knowledge_db"])
     all_candidates = candidate_patterns(catalog, state["genre"])
     available = available_patterns(catalog, state["genre"], state["knowledge_db"])
     pattern_request = state.get("pattern_request")
@@ -564,7 +574,7 @@ def planner_node(state):
     if not available:
         raise ValueError(f"题材 {state['genre']} 没有可用 Pattern")
     catalog = {**catalog, "published_patterns": available}
-    contracts = load_contracts(state["snapshot_id"], state["knowledge_db"])
+    contracts = load_contracts(snapshot_id, state["knowledge_db"])
     selected = next(
         pattern for pattern in available
         if pattern.get("pattern_name") == pattern_request
@@ -574,7 +584,7 @@ def planner_node(state):
         for step in selected["core_function_chain"]
     ]
     references = load_planner_references(
-        state["snapshot_id"], selected, base_chain, state["knowledge_db"],
+        snapshot_id, selected, base_chain, state["knowledge_db"],
     )
     pattern, chain = planner(
         catalog, state["genre"], pattern_request, contracts, references,
@@ -583,6 +593,7 @@ def planner_node(state):
     if not pattern_id:
         raise ValueError(f"Pattern 缺少稳定 ID: {pattern['pattern_name']}")
     return {
+        "snapshot_id": snapshot_id,
         "pattern_source": "published",
         "pattern_id": pattern_id,
         "pattern_name": pattern["pattern_name"],
@@ -595,6 +606,7 @@ def planner_node(state):
 def dynamic_planner_node(state):
     references, candidates, selected = plan_dynamic_outline(state, chat_structured)
     return {
+        "snapshot_id": references.get("snapshot_id") or state.get("snapshot_id"),
         "pattern_source": "dynamic",
         "pattern_id": None,
         "pattern_name": selected["candidate_id"],
@@ -913,7 +925,7 @@ def main():
     parser.add_argument("--genre", required=True, help="题材（如 悬疑惊悚 或 01_悬疑惊悚）")
     parser.add_argument("--pattern", default=None, help="指定 pattern 名称（题材内，配合 --list-patterns 查看）")
     parser.add_argument("--list-patterns", action="store_true", help="列出题材下的候选 pattern 后退出")
-    parser.add_argument("--snapshot-id", required=True)
+    parser.add_argument("--snapshot-id", default=None)
     parser.add_argument("--knowledge-db", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--request", default=None, help="用户故事要求")
     parser.add_argument(
@@ -926,17 +938,18 @@ def main():
     genre = normalize_genre(args.genre)
     if args.planner_mode == "dynamic" and args.pattern:
         raise ValueError("dynamic Planner 不接受 --pattern")
+    snapshot_id = resolve_snapshot_id(args.snapshot_id, args.knowledge_db)
     if args.list_patterns:
         for index, pattern in enumerate(available_patterns(
-            load_catalog(args.snapshot_id, args.knowledge_db), genre, args.knowledge_db,
+            load_catalog(snapshot_id, args.knowledge_db), genre, args.knowledge_db,
         ), 1):
             chain = [step["function_name"] for step in pattern["core_function_chain"]]
             print(f"{index}. {pattern['pattern_name']} (support={pattern['story_support']}) -> {' -> '.join(chain)}")
         return
-    out_dir = args.out_dir or os.path.join(_DATA, "outlines", args.snapshot_id)
+    out_dir = args.out_dir or os.path.join(_DATA, "outlines", snapshot_id)
     app = _build_graph()
     result = app.invoke({
-        "snapshot_id": args.snapshot_id,
+        "snapshot_id": snapshot_id,
         "knowledge_db": args.knowledge_db,
         "genre": genre,
         "out_dir": out_dir,

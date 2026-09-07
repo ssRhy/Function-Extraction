@@ -16,6 +16,7 @@ class NarrativePipelineState(TypedDict):
     # ---- 故事输入 ----
     raw_text: str | None
     story_config: dict | None  # story_id, title, story_type
+    story_version_revision: str | None  # 显式重提取时的版本盐；缺省保持原 ID
 
     # ---- Pre-Processor 输出 ----
     normalized_story: dict | None  # NormalizedStory
@@ -74,6 +75,7 @@ class NarrativePipelineState(TypedDict):
     induction_index: int        # 当前分量下标
     errors: list[str]           # 逐篇/每分量失败记录（不中断）
     no_revise: bool             # 仅评估，跳过修订闭环
+    freeze_functions: bool      # Evolve 只重建故事证据，不修改 Function Registry
     namespace: str              # Registry 命名空间
     out_dir: str                # 快照输出目录
     discarded: bool             # 逐函数舍弃后无幸存者（O_0 为空）时置 True

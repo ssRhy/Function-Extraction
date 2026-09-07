@@ -29,6 +29,12 @@ CREATE TABLE IF NOT EXISTS snapshots (
     payload_json       TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS serving_snapshots (
+    pointer_id  INTEGER PRIMARY KEY CHECK (pointer_id = 1),
+    snapshot_id TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    promoted_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS pipeline_runs (
     run_id             TEXT PRIMARY KEY,
     workflow           TEXT NOT NULL CHECK (workflow IN ('bootstrap', 'evolve')),
@@ -463,10 +469,15 @@ class StoryKnowledgeStore:
 
     @staticmethod
     def _profile_record(story_id: str, story_version_id: str, payload: dict) -> dict:
+        raw_profile = payload.get("story_profile")
+        profile = (
+            StoryProfile.model_validate(raw_profile).model_dump()
+            if raw_profile is not None else None
+        )
         return {
             "story_id": story_id,
             "story_version_id": story_version_id,
-            "profile": payload.get("story_profile"),
+            "profile": profile,
         }
 
     def load_story_profiles(self, snapshot_id: str) -> list[dict]:
@@ -665,7 +676,13 @@ class StoryKnowledgeStore:
             if not row or row["story_version_id"] != record["story_version_id"]:
                 raise ValueError(f"Snapshot Profile 没有对应的 story version: {record['story_id']}")
             payload = json.loads(row["payload_json"])
-            if payload.get("story_profile") != record.get("profile"):
+            try:
+                stored_profile = StoryProfile.model_validate(
+                    payload.get("story_profile")
+                ).model_dump()
+            except (TypeError, ValueError) as exc:
+                raise ValueError(f"Story version 的 Profile 无效: {record['story_id']}") from exc
+            if stored_profile != record.get("profile"):
                 raise ValueError(f"Snapshot Profile 与 story version 不一致: {record['story_id']}")
         for position, function in enumerate(functions, 1):
             conn.execute(
@@ -1202,11 +1219,13 @@ class StoryKnowledgeStore:
             "observations", "observation_versions", "run_observations",
             "snapshot_story_versions", "snapshot_observation_versions",
             "functions", "function_versions", "function_evolution_events", "snapshots",
+            "serving_snapshots",
             "function_occurrences", "function_contracts", "patterns", "pattern_versions",
             "pattern_runs", "pattern_story_sequences", "motif_evidence",
             "motif_pair_reviews", "motif_clusters", "snapshot_patterns",
             "outlines", "pattern_usage",
         )
+        self.initialize()
         with self.connect() as conn:
             counts = {table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0] for table in tables}
             workflows = {
@@ -1225,6 +1244,51 @@ class StoryKnowledgeStore:
             "workflows": workflows,
             "pattern_status": pattern_status,
         }
+
+    def serving_snapshot(self) -> dict:
+        """读取当前 serving Snapshot 及其发布时间信息。"""
+        self.initialize()
+        with self.connect() as conn:
+            row = conn.execute(
+                """SELECT ss.snapshot_id, ss.promoted_at,
+                          s.created_at AS snapshot_created_at, s.namespace
+                   FROM serving_snapshots ss
+                   JOIN snapshots s ON s.snapshot_id=ss.snapshot_id
+                   WHERE ss.pointer_id=1"""
+            ).fetchone()
+        if not row:
+            raise ValueError("知识库没有 serving Snapshot，请先显式 promote_snapshot")
+        return dict(row)
+
+    def serving_snapshot_id(self) -> str:
+        return self.serving_snapshot()["snapshot_id"]
+
+    def resolve_snapshot_id(self, snapshot_id: str | None = None) -> str:
+        return snapshot_id or self.serving_snapshot_id()
+
+    def promote_snapshot(self, snapshot_id: str) -> dict:
+        """显式切换 serving 指针；Snapshot 本身保持不可变。"""
+        self.initialize()
+        with self.connect() as conn:
+            if not conn.execute(
+                "SELECT 1 FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
+            ).fetchone():
+                raise ValueError(f"知识库中不存在 Snapshot: {snapshot_id}")
+            conn.execute(
+                """INSERT INTO serving_snapshots(pointer_id, snapshot_id, promoted_at)
+                   VALUES (1, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+                   ON CONFLICT(pointer_id) DO UPDATE SET
+                   snapshot_id=excluded.snapshot_id, promoted_at=excluded.promoted_at""",
+                (snapshot_id,),
+            )
+            row = conn.execute(
+                """SELECT ss.snapshot_id, ss.promoted_at,
+                          s.created_at AS snapshot_created_at, s.namespace
+                   FROM serving_snapshots ss
+                   JOIN snapshots s ON s.snapshot_id=ss.snapshot_id
+                   WHERE ss.pointer_id=1"""
+            ).fetchone()
+        return dict(row)
 
     def latest_snapshot_id(self, namespace: str | None = None) -> str:
         with self.connect() as conn:
@@ -1316,7 +1380,6 @@ class StoryKnowledgeStore:
             "contracts": self.load_contracts(snapshot_id),
             "observations": observations,
             "story_metadata": metadata,
-            "story_profiles": self.load_story_profiles(snapshot_id),
             "occurrences": occurrences,
         }
 

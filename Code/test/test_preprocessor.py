@@ -91,6 +91,18 @@ def test_stable_story_id():
     print(f"稳定 story_id: {sid1} / 显式覆盖 OK")
 
 
+def test_story_version_revision_is_explicit_and_deterministic():
+    fake = PreCorrection(merges=[], splits=[])
+    result = _with_mock_llm(fake, lambda: preprocessor_node({
+        "raw_text": "同样的故事开头。",
+        "story_config": {"story_id": "s1", "story_version_revision": "ending_evidence_v1"},
+    }))
+    from Contracts.versioning import story_version_id
+    revised = result["normalized_story"]["metadata"]["story_version_id"]
+    assert revised == story_version_id("s1", "同样的故事开头。", "ending_evidence_v1")
+    assert revised != story_version_id("s1", "同样的故事开头。")
+
+
 def test_prompt_import():
     from FunctionExtract_Agent.Prompt.Pre_prompt import PRE_HYBRID_SYSTEM_PROMPT
     assert "merges" in PRE_HYBRID_SYSTEM_PROMPT and "splits" in PRE_HYBRID_SYSTEM_PROMPT

@@ -249,7 +249,14 @@ def update_motif_evidence(state: StoryPatternState) -> dict:
             "length": row["length"],
             "evidence": [],
         })
-        motif["evidence"].append(dict(row["evidence"]))
+        evidence = row["evidence"]
+        motif["evidence"].append({
+            key: evidence[key]
+            for key in (
+                "story_id", "category", "structural_orders", "repeat_counts", "occurrence_ids",
+            )
+            if key in evidence
+        })
     candidates = []
     for motif in grouped.values():
         function_names = []

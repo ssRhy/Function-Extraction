@@ -8,7 +8,7 @@ import json
 
 from FunctionExtract_Agent.llm import chat_structured
 from FunctionExtract_Agent.Registry.registry import get_active_store
-from FunctionExtract_Agent.Prompt.Critic_prompt import CRITIC_SYSTEM_PROMPT, CriticResponse, CriticReview
+from FunctionExtract_Agent.Prompt.Critic_prompt import CRITIC_SYSTEM_PROMPT, CriticResponse
 
 CRITIC_BATCH_SIZE = 10
 
