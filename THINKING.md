@@ -1537,3 +1537,35 @@ Function 集合 + 规则/状态/故事目标
 - Direct LLM 9 个逻辑基线中 8 个结构化成功、1 个因角色字段缺失失败。该失败属于流程/格式结果，不能直接当作语义质量结论；基线没有读 Function、Pattern、motif、Instance Case、Outline、正文或 Knowledge DB，正式 DB 前后哈希一致。
 - 盲化过程中先发现人物 ID 未完全脱敏，后发现总体胜负聚合把 `A/B` 与 `full/direct` 混比；两处均在最终采用前修正。修正版 8 对中 A/B 各半，最终总体 `full=4、direct=4、tie=0`；full 在结构和人物动机各低 `0.375`，因果与冲突/结局持平，模板化/雷同低 `0.75`。
 - 结论是“当前自动评审没有证明完整系统有明确、可解释的语义收益”，不是证明 Direct LLM 普遍更好，也不是证明完整系统失败。按门槛不进入增量 Evolve → Pattern，不改变 serving；当前缺口是有效创作要求样本和人工多人盲评，不能用一次小样本自动评审结果扩建 Supervisor 或新的质量层。
+
+## 232. 先证明副本机械闭环，再讨论正式自动发布（2026-09-07）
+
+- 用户把“全程自动化”与“优于 Direct LLM 的语义质量”明确拆开；因此新增的是薄控制入口，不新增 Supervisor、质量评分层或数据库。
+- 真实副本运行证明：新故事能自动完成 Evolve → Pattern → 候选门禁 → promote → 默认 serving Outline → Story → Outcome；正式库前后 SHA-256 相同，旧 serving/Outcome/Pattern Usage 不变。候选可服务不等于候选质量更好。
+- 实现中保留一个必要的安全边界：promote 后下游失败时回滚副本 serving；正式生产仍应把确定性检查后的候选标为 READY_TO_PROMOTE，人工确认最后一次 promote。
+- 本次正文导出成功但 `length_ok=false`，说明流程自动化验收和正文语义/长度质量仍需分开报告；不能为了让“端到端成功”好看而把长度标志静默升级为通过。
+
+## 233. 78 个旧故事变化来自 Contract 重算，先做候选回归拒绝（2026-09-07）
+
+- 用户指出：新增 1 篇故事却让 78 篇旧故事 changed、MATCHED 从 353 降到 205、Published Pattern 从 7 降到 1，说明“Pattern Run 成功 + 至少 1 个 Published Pattern”不是安全发布门禁。
+- 追查父子正式副本数据后，14 个 Function 的本体字段没有变化；副本 Pipeline 使用的临时 `snapshot_root` 没有父 Snapshot 目录，Evolve 的最终 `build_function_contracts()` 因而没有继承父 Contract，重新生成了 14 个 Contract。候选 Contract 的 role slot/precondition/effect 改变，`align_occurrences()` 按最终 supporting obs 和 Contract 重算旧 Observation，造成 218 条旧 Occurrence 状态变化，最终形成 78 个旧序列变化。这是当前退化的具体机制，不把它误判为新增故事本身改写 Function 本体。
+- 因此本轮只把安全边界放在 Release Pipeline：smoke 使用显式 candidate Snapshot，父子指标检查后最后才 promote；旧故事变化超过约 10%、coverage 低于父值 90%、Published Pattern 低于父值 50%，或 Story `length_ok=false`，自动返回 `REJECTED_CANDIDATE`，Serving 不变。流程异常返回 `FAILED`，全部通过才返回 `PROMOTED`。
+- 暂不修 Contract 生成器、不新增质量评分、Supervisor、自动修复或数据库；先用这个门禁继续积累明确的拒绝样本，再决定是否局部修复 Contract 生命周期。
+
+## 234. 父 Snapshot 缺失是 Release Pipeline 的确定性输入缺陷（2026-09-07）
+
+- 用户指出：临时 `snapshot_root` 每次都是空目录，因此父 Snapshot Contract 缺失会稳定复现；如果不处理，新增回归门禁后自动发布会变成稳定自动拒绝。
+- 最小修复不是改 Evolve Contract 生命周期，而是在 Release Pipeline 准备阶段读取正式当前 serving Snapshot，先 `validate_snapshot()`，再复制完整父目录到副本 `snapshot_root`，并校验复制结果。这样 Evolve 能读取与正式运行一致的父 Contract 和 manifest。
+- 现有回归门禁、`REJECTED_CANDIDATE` 和最后 promote 保持不变；本轮只修输入准备边界，不把父 Snapshot 复制失败误判为候选质量拒绝。
+
+## 235. 父 Snapshot 复制修复通过真实全链路验证（2026-09-07）
+
+- 第一轮修复后运行虽在 Pattern 外部连接错误处失败，但候选数据已显示 Function Contract 变化 `0`、旧故事 changed `0`；说明父目录复制已经切断了之前的 Contract 重算根因。
+- 第二轮完整副本运行最终 `PROMOTED`：旧故事 changed `0`，coverage `0.4764 → 0.4727`，Published Pattern `7 → 6`，Story `length_ok=true`，Outline、Outcome、副本完整性和最后 promote 均通过。
+- 因此当前 Release Pipeline 的结论是：父 Contract 复制、保守父子回归门禁和最后 promote 顺序已经同时成立；正式库仍未被副本验证改写。后续不把这次 `PROMOTED` 解读为候选语义质量优于 Direct LLM。
+
+## 236. Pattern Connection error 只重试 Pattern，不重跑 Evolve（2026-09-07）
+
+- 用户要求把真实运行中的 `Connection error` 归类为暂时错误，并把 Release Pipeline 的 Coordinator 重试从 `0` 调整为 `1`。
+- 复用 Coordinator 已有的 `retryable` 路由，不新增通用异常层；测试确认第一次 Pattern 连接失败、第二次成功时，Evolve 只运行一次，Pattern 才执行第二次。
+- 现有新增测试和 helper 均仍对应正式备份、父 Snapshot、回滚或候选门禁边界，没有找到可安全删除的孤立测试；不为“清理”删除这些保护性覆盖。

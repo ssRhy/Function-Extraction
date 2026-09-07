@@ -50,6 +50,8 @@ def _function_command(state: FunctionCoordinatorState) -> list[str]:
         command.extend(["--limit", str(state["limit"])])
     if state["mode"] == "evolve" and state.get("base_snapshot_id"):
         command.extend(["--base-snapshot", state["base_snapshot_id"]])
+    if state.get("registry_db"):
+        command.extend(["--registry-db", state["registry_db"]])
     if state["mode"] == "bootstrap" and state.get("no_revise"):
         command.append("--no-revise")
     if state["mode"] == "evolve":
@@ -90,7 +92,7 @@ def _is_transient_failure(output: str) -> bool:
     text = output.lower()
     return any(item in text for item in (
         "timeout", "timed out", "rate limit", "429", "connection reset",
-        "temporarily unavailable", "超时", "连接被重置", "限流",
+        "connection error", "temporarily unavailable", "超时", "连接被重置", "限流",
     ))
 
 
@@ -300,6 +302,10 @@ def run_coordinator(**kwargs) -> dict:
         "namespace": namespace,
         "base_snapshot_id": kwargs.get("base_snapshot_id"),
         "knowledge_db": os.path.abspath(kwargs["knowledge_db"]),
+        "registry_db": (
+            os.path.abspath(kwargs["registry_db"])
+            if kwargs.get("registry_db") else None
+        ),
         "out_dir": os.path.abspath(kwargs["out_dir"]),
         "snapshot_root": os.path.abspath(kwargs["snapshot_root"]),
         "no_revise": kwargs.get("no_revise", False),
@@ -323,6 +329,7 @@ def main(argv=None) -> int:
     parser.add_argument("--namespace", required=True)
     parser.add_argument("--base-snapshot", dest="base_snapshot_id", default=None)
     parser.add_argument("--knowledge-db", required=True)
+    parser.add_argument("--registry-db", default=None)
     parser.add_argument("--out-dir", default=None)
     parser.add_argument("--snapshot-root", required=True)
     parser.add_argument("--no-revise", action="store_true")
@@ -345,6 +352,7 @@ def main(argv=None) -> int:
             namespace=args.namespace,
             base_snapshot_id=args.base_snapshot_id,
             knowledge_db=args.knowledge_db,
+            registry_db=args.registry_db,
             out_dir=out_dir,
             snapshot_root=args.snapshot_root,
             no_revise=args.no_revise,

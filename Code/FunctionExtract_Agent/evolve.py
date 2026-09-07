@@ -579,6 +579,7 @@ def main() -> int:
     parser.add_argument("--base-snapshot", type=str, default=None,
                         help="基础 Snapshot ID；缺省读取当前 serving Snapshot")
     parser.add_argument("--knowledge-db", type=str, default=str(DEFAULT_DB_PATH))
+    parser.add_argument("--registry-db", type=str, default=None)
     parser.add_argument("--out-dir", type=str, default=None, help="输出目录（缺省 data/evolve）")
     parser.add_argument("--snapshot-root", type=str, default=str(DEFAULT_SNAPSHOT_ROOT))
     parser.add_argument("--limit", type=int, default=None, help="只处理前 N 个故事")
@@ -600,7 +601,7 @@ def main() -> int:
             "CORPUS_NOT_FOUND", f"语料目录不存在: {stories_dir}",
             namespace=args.namespace,
         )
-    store = RegistryStore(namespace=args.namespace)
+    store = RegistryStore(db_path=args.registry_db, namespace=args.namespace)
     set_active_store(store)
     out_dir = os.path.abspath(args.out_dir) if args.out_dir else DEFAULT_OUT_DIR
     os.makedirs(out_dir, exist_ok=True)
@@ -684,6 +685,7 @@ def main() -> int:
         "function_contracts": [],
         "ontology_snapshot": None,
         "knowledge_db": args.knowledge_db,
+        "registry_db": args.registry_db,
         "run_id": run_id,
         "base_snapshot_id": base_snapshot_id,
         "evaluation_context": {

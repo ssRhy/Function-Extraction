@@ -81,6 +81,32 @@ def test_pattern_failure_does_not_hide_function_snapshot(monkeypatch):
     assert result["pattern_result"]["error_code"] == "PATTERN_FAILED"
 
 
+def test_transient_pattern_connection_failure_retries_pattern_only(monkeypatch):
+    function_command = _real_child({"status": "PASS", "snapshot_id": "snapshot_x"})
+    pattern_commands = iter([
+        _real_child({"status": "FAILED", "error": "Connection error"}, 1),
+        _real_child({"status": "SUCCESS", "run_id": "pattern_x"}),
+    ])
+    calls = []
+    real_run_stage = app._run_stage
+
+    monkeypatch.setattr(app, "_function_command", lambda _state: function_command)
+    monkeypatch.setattr(app, "_pattern_command", lambda _state: next(pattern_commands))
+    monkeypatch.setattr(
+        app,
+        "_run_stage",
+        lambda command, stage, attempt, timeout: (
+            calls.append((stage, attempt)) or real_run_stage(command, stage, attempt, timeout)
+        ),
+    )
+
+    result = app.run_coordinator(**_kwargs())
+
+    assert result["status"] == "SUCCESS"
+    assert calls == [("BOOTSTRAP", 1), ("PATTERN", 1), ("PATTERN", 2)]
+    assert result["attempts"] == {"function": 1, "pattern": 2}
+
+
 def test_parse_run_result_ignores_non_json_output():
     output = "progress\n{\"run_result\": {\"status\": \"SUCCESS\"}}\n"
     assert app._parse_run_result(output) == {"status": "SUCCESS"}

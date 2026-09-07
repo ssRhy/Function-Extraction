@@ -9,6 +9,7 @@ class FunctionCoordinatorState(TypedDict, total=False):
     namespace: str
     base_snapshot_id: str | None
     knowledge_db: str
+    registry_db: str | None
     out_dir: str
     snapshot_root: str
     no_revise: bool

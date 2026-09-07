@@ -123,6 +123,21 @@ python -m FunctionCoordinator_Agent --mode evolve --corpus <新语料目录> \
 - 三个子 Agent 的失败结果统一为 `status=FAILED`，并包含 `stage`、`workflow`、`run_id`、`namespace`、`snapshot_id`、`parent_snapshot_id`、`error_code`、`error` 和 `retryable`；数据库内部仍按各自表的 `FAIL/FAILED` 状态记录。
 - Coordinator 测试包含真实 Python 子进程协议：实际读取 stdout 的 `run_result`，并验证非零退出码会覆盖子 Agent 报告的成功状态。
 
+### 副本端到端 Release Pipeline
+
+把新故事、Evolve、Pattern、候选 Snapshot 的显式 Outline/Story smoke、父子回归门禁和最后的 promote 串成一次运行；正式 Knowledge DB、Registry 和 Snapshot 只读，写入副本和运行目录。启动时会先校验并复制当前 serving Snapshot 到副本 `snapshot_root`，让 Evolve 继承父 Contract/manifest：
+
+```bash
+cd Code
+python -X utf8 -m release_pipeline \
+  --story ../path/to/new_story.txt \
+  --genre 现代情感 \
+  --request "克制地写出一次家庭关系修复，结局要有可观察的解决行动" \
+  --out-dir data/release_runs/demo
+```
+
+运行目录中的 `release_report.json` 汇总 Function Run、候选 Snapshot、Pattern Run/数量、Outline、Story、Outcome、`pattern_usage`、父子回归指标和 SQLite 完整性检查。默认结果为 `PROMOTED`、`REJECTED_CANDIDATE` 或 `FAILED`；回归指标或 `length_ok=false` 会拒绝候选并保持旧 serving，`--force-promote` 只作为人工显式覆盖。Outline/Story smoke 使用显式候选 Snapshot，只有全部通过后才切换副本 serving；该入口不把 LLM 盲评放进自动发布门禁。
+
 ### Snapshot 与 Serving
 
 默认读取统一 SQLite 中的 serving Snapshot；用 `--snapshot-id` 可显式读取其他已发布 Snapshot。查看当前库状态和 serving 指针：

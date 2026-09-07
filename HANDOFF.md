@@ -1886,3 +1886,39 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 修正版盲化证据位于 `blind_pairs.jsonl`、`blind_reviews.jsonl`、`blind_eval_report.json`；A/B 随机种子为 `20260907`，4 对 A=full、4 对 A=direct。发现并舍弃了第一版人物 ID 匿名化缺口及一次错误的胜负聚合，最终只采用修正版结果；评审员未收到来源、Pattern、Function、ID 或文件路径。
 - 最终 8 对可评分，单一 `deepseek-v4-flash` 评审的总体优选为 `full=4 / direct=4 / tie=0`。full−direct 均分：结构完整性 `-0.375`、因果连贯性 `0`、人物动机 `-0.375`、冲突/结局兑现 `0`、模板化/雷同 `-0.75`；平均置信度 `4.375`。这不是完整系统收益，且单评审/小样本不能替代人工多人盲评。
 - 阶段 4 条件不满足：未执行正式增量 Evolve、Pattern、候选 Snapshot、promote 或正常生成；Run/Snapshot/Pattern/Serving ID 无新增，当前 serving、Outcome=`18`、Pattern Usage=`18` 保持不变。正式 SQLite 只读检查仍为 `integrity_check=ok`、`foreign_key_check=[]`。后续只有提供有明确创作要求的新固定题目并完成更合适的人工盲评，或出现新的真实触发条件，才重新考虑增量。
+
+## 本轮（2026-09-07）：副本 Release Pipeline 零人工端到端验证
+
+- 新增 `Code/release_pipeline.py`：复制并检查正式 Knowledge DB/Registry → 单篇新故事 Evolve → Pattern → 候选 Snapshot/Published Pattern/Planner/SQLite 门禁 → promote → 默认 serving Outline → Story → Outcome/Pattern Usage 统一报告。新增 `--registry-db` 只用于把副本 Evolve 的 Registry 写入隔离文件，不改变正式 Registry。
+- promote 后的 Outline/Story 失败会在副本内恢复旧 serving 指针；候选 Run、Snapshot 和 Outcome 仍保留审计。SQLite 备份使用 `Connection.backup()`，不能比较原始文件 SHA-256；备份与工作副本分别做 integrity/FK 检查，正式库用前后 SHA-256 验证未变。
+- 真实副本运行：输入 `1855126386_455531791.txt` + 明确古风创作要求；`FR_f020b08ef52545ad` → 候选 `real_coordinator_rebuild_v5_20260904_20260907T080942479176Z_9812b048a4e9` → `PR_9b025395b809a8ab`；Published Pattern=`1`；promote 后默认 Planner 读取候选；Outline=`OUT_16394a3f9987c110`，Outcome=`GO_c2fa83ccdeb14f83`，Story JSON 成功导出。
+- 副本报告：`Code/data/release_runs/release_validation_20260907_real/release_report.json`；副本 `integrity_check=ok`、外键为空，`source_unchanged=true`。正式库仍为旧 serving，Outcome/Pattern Usage=`18/18`，正式 DB SHA-256=`1d4f5ca5634a54dc15aab884110479602d2f7063b93b5664968dfe8399d28f90`。该 Story 产物的现有 `length_ok=false`，因此只证明正文机械导出/场景非空，不证明正文长度或语义质量达标。
+- 回归：全仓 `364 passed, 1 skipped`，compileall 和 `git diff --check` 通过。后续仍不把该入口扩成 Supervisor 或质量自动发布系统；正式生产策略继续采用候选 READY 后人工确认 promote。
+
+## 本轮（2026-09-07）：候选 Snapshot 回归退化根因与保守发布门禁
+
+- 复查真实副本候选 `real_coordinator_rebuild_v5_20260904_20260907T080942479176Z_9812b048a4e9`：父/子均为 14 个 Function，Function 语义本体字段未变；副本给 Evolve 的临时 `snapshot_root` 只有候选目录，没有父 Snapshot 的 `function_contracts.jsonl`，所以 Evolve 最终重新生成了全部 14 个 Function Contract。Contract 的 role slot/precondition/effect 变化使 `align_occurrences()` 重算旧 Observation，旧 `MATCHED → UNCERTAIN` 等共 `218` 条 Occurrence 变化，Pattern 因此报告 `78` 个旧故事 changed。
+- 父子实际指标为 `assignment_coverage=0.4764 → 0.2730`、Published Pattern `7 → 1`、旧故事 changed `78/92`；这不是“新增故事自然带来少量增量”的可接受波动。原因已明确，但本轮不改 Evolve/Contract 生成器，先在 Release Pipeline 拦截。
+- `Code/release_pipeline.py` 现在按 `Evolve → Pattern → 显式 candidate Snapshot Outline/Story smoke → Outcome/回归检查 → promote` 执行。默认父子门禁为：Function 本体未变时旧未输入故事变化不超过父故事的 `10%`，coverage 至少为父值的 `90%`，Published Pattern 至少为父值的 `50%`；`length_ok=false` 也拒绝自动发布。
+- 门禁结果分为 `PROMOTED`、`REJECTED_CANDIDATE`、`FAILED`。拒绝发生在 promote 前，副本 serving 保持旧 ID；`--force-promote` 只作为人工显式覆盖父子回归与 `length_ok`，Outline Validator/正文导出等机械 smoke 仍必须通过，不改变自动路径的保守默认。当前真实候选用新比较函数重算为 `REJECTED_CANDIDATE`，三个回归原因均命中，Story 另有 `length_ok=false`。
+- 定向测试 `3 passed`；未再次运行昂贵的 Evolve/Pattern/LLM。正式库保持只读，未新增数据库或表。
+
+## 本轮（2026-09-07）：Release Pipeline 复制父 Snapshot Contract
+
+- 确认父 Snapshot Contract 缺失不是数据偶发问题：每次 Release Pipeline 使用新的临时 `snapshot_root` 都会让 Evolve 找不到父目录并重新生成 Contract。
+- `Code/release_pipeline.py` 现在在 Evolve 前从正式 `--snapshot-root` 读取当前 serving Snapshot，先调用 `validate_snapshot()`，再完整复制到运行目录的 `snapshots/<serving_id>`，并对复制结果再次校验。默认正式根目录仍为 `Code/data/ontology_snapshots`，可用 `--snapshot-root` 显式指定。
+- 当前正式 serving `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77` 的实际复制 smoke 通过；父 `function_contracts.jsonl` 已进入临时目录。既有 `REJECTED_CANDIDATE`、父子回归门禁和最后 promote 顺序保持不变。
+- 定向 Release Pipeline 测试 `4 passed`；修复后的第一轮真实运行在 Pattern 外部连接错误处返回 `FAILED`，但已验证父 Contract 复制生效：Function Contract 变化 `0`、旧故事 changed `0`。该次正式库未写入。
+
+## 本轮（2026-09-07）：父 Snapshot 复制后的真实 Release Pipeline 通过
+
+- 使用同一正式 serving 父 Snapshot 和一篇未入库真实故事完成第二轮完整副本运行：`release_id=RP_a3ac4866bf7baff6`，`FR_b902cd6e213c4b25` → `PR_fa289799e467cd03` → 候选 `real_coordinator_rebuild_v5_20260904_20260907T085942454627Z_a3887075f99a`，最终 `PROMOTED`。
+- 父子回归指标通过：Function 本体未变，未参与输入的旧故事 `changed=0/10`；assignment coverage `0.4764 → 0.4727`，阈值 `0.4288`；Published Pattern `7 → 6`，阈值 `4`。这次没有复现之前的 Contract 重算、78 个旧故事变化或 Pattern 坍缩。
+- 顺序和下游门禁均实际通过：候选 Snapshot 校验、Planner 显式读取、Outline Validator、Story export、`length_ok=true`、Outcome `GO_a4d4a169deb2b966`、副本最终 SQLite integrity/FK 检查和最后 promote 全部 PASS。Outline=`OUT_59c0e6ded5c896e5`。
+- 正式库只读边界保持成立：正式 DB SHA-256 前后均为 `1d4f5ca5634a54dc15aab884110479602d2f7063b93b5664968dfe8399d28f90`，Serving 仍为父 Snapshot，`generation_outcomes=18`、`pattern_usage=18`，`integrity_check=ok`、`foreign_key_check` 为空。完整报告：`Code/data/release_runs/release_validation_20260907_parent_copy_retry/release_report.json`。
+
+## 本轮（2026-09-07）：Release Pipeline 暂时连接错误收尾
+
+- Coordinator 的现有暂时错误识别补充 `Connection error`；Release Pipeline 调用 Coordinator 时将 `max_retries` 设为 `1`，只允许同一阶段再尝试一次。
+- 新增回归测试：第一次 Pattern 子进程返回 `Connection error`，第二次成功；调用序列为 `BOOTSTRAP=1、PATTERN=1、PATTERN=2`，Evolve 没有重复执行。
+- 审计新增 Release Pipeline 测试和 helper 后，没有发现可证明无用的代码或测试；SQLite 备份、父 Snapshot 复制、Story 失败不 promote、父子回归门禁均保留为有效边界。
