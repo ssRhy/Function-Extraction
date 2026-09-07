@@ -1587,3 +1587,8 @@ Function 集合 + 规则/状态/故事目标
 - 用户指出：自修复的主要判断和修复应由 LLM 完成；门禁只限制次数并停止错误输出，不应借助状态词表或一组确定性故事规则替代 Validator。
 - 因此只在 `StoryValidation` 增加 `repairable`，并要求 Validator 先检查固定 Outline、Function constraints、scene plan 和结局目标是否自相矛盾。固定输入矛盾返回 `repairable=false`；固定输入一致且正文可定向修复才返回 `repairable=true`。
 - 代码删除六个语义字段到 `overall_ok` 的确定性聚合，保留 Schema、长度、人物/scene ID 和一次修复上限。若 Prompt 仍漏判，下一步优先考虑更强模型，不先扩张规则系统。
+
+## 240. 一次真实三样本 smoke 没有自然覆盖 rewritten 路径（2026-09-07）
+
+- 用户要求只做一次正式数据库副本上的真实 LLM 小批次。实际普通样本被 Validator 判为 `repairable=false` 后直接 rejected，寻药样本直接 accepted，固定输入互斥样本正确 rejected；三条都没有进入自动重写和复验。
+- 这次结果不能证明自修复失败，也不能把回归测试替代为真实证据：它只证明当前模型在该批次没有产生可修复判断，且对固定输入矛盾完成了不可修复停止。若后续需要闭合 `rewritten`/二次失败证据，应先明确新的真实样本或模型选择，不在门禁层补规则。
