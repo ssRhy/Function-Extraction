@@ -294,6 +294,36 @@ def test_outline_round_trip_is_idempotent(tmp_path):
     assert store.status()["counts"]["outlines"] == 1
 
 
+def test_generation_outcome_feedback_is_snapshot_scoped(tmp_path):
+    snapshot = _snapshot(tmp_path, _function())
+    corpus, meta, observations = _corpus(tmp_path)
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    _commit_function_snapshot(store, snapshot, corpus, meta, observations)
+    snapshot_id = os.path.basename(snapshot)
+    _insert_pattern(store, snapshot_id)
+    outline = {
+        "snapshot_id": snapshot_id, "pattern_id": "PAT_1", "pattern_name": "模式一",
+        "genre": "03_现代情感", "generated_at": "2026-08-30T10:00:00",
+        "validation": {"overall_ok": True}, "outline": {"segments": []},
+    }
+    outline_id = store.record_outline(outline, "# 大纲\n")
+
+    for attempt in (1, 2):
+        store.record_generation_outcome(
+            snapshot_id, "PAT_1", outline_id, "published", False, False,
+            "semantic", "rejected", {"attempt": attempt},
+        )
+
+    outcomes = store.load_generation_outcomes(snapshot_id)
+    assert len(outcomes) == 2
+    assert outcomes[0]["outline_id"] == outline_id
+    assert outcomes[0]["validation_ok"] is False
+    feedback = store.load_pattern_feedback(snapshot_id)
+    assert feedback["PAT_1"]["failure_count"] == 2
+    assert feedback["PAT_1"]["priority_delta"] == -1
+    assert store.status()["counts"]["generation_outcomes"] == 2
+
+
 def test_record_outline_claims_pattern(tmp_path):
     snapshot = _snapshot(tmp_path, _function())
     corpus, meta, observations = _corpus(tmp_path)

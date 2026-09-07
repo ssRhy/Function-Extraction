@@ -315,8 +315,10 @@ def batch_outlines(
         print(f"[StoryCLI] outline_batch={path}")
         return path
     catalog = outline_app.load_catalog(snapshot_id, knowledge_db)
-    all_candidates = outline_app.candidate_patterns(catalog, genre)
-    used_ids = StoryKnowledgeStore(knowledge_db).used_pattern_ids()
+    store = StoryKnowledgeStore(knowledge_db)
+    feedback = store.load_pattern_feedback(snapshot_id)
+    all_candidates = outline_app.candidate_patterns(catalog, genre, feedback)
+    used_ids = store.used_pattern_ids()
     available = [
         pattern for pattern in all_candidates
         if pattern.get("pattern_id") not in used_ids

@@ -208,21 +208,23 @@ def normalize_genre(genre):
     raise ValueError(f"未知题材: {genre}（可选：{', '.join(_GENRE_KEYS)}）")
 
 
-def candidate_patterns(catalog, genre):
+def candidate_patterns(catalog, genre, feedback=None):
+    feedback = feedback or {}
     published = catalog["published_patterns"]
     candidates = [p for p in published if genre in p.get("category_counts", {})]
     pool = candidates or published
     return sorted(pool, key=lambda p: (
         not bool(p.get("ending_spec")),
+        -feedback.get(p.get("pattern_id"), {}).get("priority_delta", 0),
         -p.get("story_support", 0),
         p.get("pattern_name", ""),
     ))
 
 
-def available_patterns(catalog, genre, knowledge_db=DEFAULT_DB_PATH):
+def available_patterns(catalog, genre, knowledge_db=DEFAULT_DB_PATH, feedback=None):
     used = StoryKnowledgeStore(knowledge_db).used_pattern_ids()
     return [
-        pattern for pattern in candidate_patterns(catalog, genre)
+        pattern for pattern in candidate_patterns(catalog, genre, feedback)
         if pattern.get("pattern_id") not in used
     ]
 
@@ -516,7 +518,11 @@ def select_pattern_node(state):
     if state.get("pattern_request") or not state.get("user_request"):
         return {}
     catalog = load_catalog(state["snapshot_id"], state["knowledge_db"])
-    candidates = available_patterns(catalog, state["genre"], state["knowledge_db"])
+    store = StoryKnowledgeStore(state["knowledge_db"])
+    feedback = store.load_pattern_feedback(state["snapshot_id"])
+    candidates = available_patterns(
+        catalog, state["genre"], state["knowledge_db"], feedback,
+    )
     if not candidates:
         raise ValueError(f"题材 {state['genre']} 没有可用 Pattern")
     user = {
@@ -562,8 +568,12 @@ def dynamic_seed_node(state):
 def planner_node(state):
     snapshot_id = resolve_snapshot_id(state.get("snapshot_id"), state["knowledge_db"])
     catalog = load_catalog(snapshot_id, state["knowledge_db"])
-    all_candidates = candidate_patterns(catalog, state["genre"])
-    available = available_patterns(catalog, state["genre"], state["knowledge_db"])
+    store = StoryKnowledgeStore(state["knowledge_db"])
+    feedback = store.load_pattern_feedback(snapshot_id)
+    all_candidates = candidate_patterns(catalog, state["genre"], feedback)
+    available = available_patterns(
+        catalog, state["genre"], state["knowledge_db"], feedback,
+    )
     pattern_request = state.get("pattern_request")
     if pattern_request and not any(
         pattern.get("pattern_name") == pattern_request for pattern in available
@@ -845,6 +855,22 @@ def _render_markdown(result):
     return "\n".join(lines) + "\n"
 
 
+def generation_failure_type(validation):
+    if validation.get("overall_ok"):
+        return None
+    if validation.get("contract_issues"):
+        return "contract"
+    if validation.get("rule_issues"):
+        return "rule"
+    return "semantic"
+
+
+def generation_follow_up(validation_ok, retry_occurred):
+    if not validation_ok:
+        return "rejected"
+    return "rewritten" if retry_occurred else "accepted"
+
+
 def export_node(state):
     result = {
         "schema_version": 1,
@@ -873,8 +899,18 @@ def export_node(state):
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
     markdown = _render_markdown(result)
-    outline_id = StoryKnowledgeStore(state["knowledge_db"]).record_outline(result, markdown)
+    store = StoryKnowledgeStore(state["knowledge_db"])
+    outline_id = store.record_outline(result, markdown)
     result["outline_id"] = outline_id
+    validation = state["validation"] or {}
+    retry_occurred = bool(state.get("realize_retry_count"))
+    store.record_generation_outcome(
+        state["snapshot_id"], state.get("pattern_id"), outline_id,
+        state.get("planner_mode", "published"), bool(validation.get("overall_ok")),
+        retry_occurred, generation_failure_type(validation),
+        generation_follow_up(bool(validation.get("overall_ok")), retry_occurred),
+        {"validation": validation, "pattern_name": state["pattern_name"]},
+    )
     os.makedirs(state["out_dir"], exist_ok=True)
     base = f"{state['genre'].split('_', 1)[1]}_{time.strftime('%Y%m%dT%H%M%S')}"
     json_path = os.path.join(state["out_dir"], base + ".json")
@@ -940,8 +976,9 @@ def main():
         raise ValueError("dynamic Planner 不接受 --pattern")
     snapshot_id = resolve_snapshot_id(args.snapshot_id, args.knowledge_db)
     if args.list_patterns:
+        feedback = StoryKnowledgeStore(args.knowledge_db).load_pattern_feedback(snapshot_id)
         for index, pattern in enumerate(available_patterns(
-            load_catalog(snapshot_id, args.knowledge_db), genre, args.knowledge_db,
+            load_catalog(snapshot_id, args.knowledge_db), genre, args.knowledge_db, feedback,
         ), 1):
             chain = [step["function_name"] for step in pattern["core_function_chain"]]
             print(f"{index}. {pattern['pattern_name']} (support={pattern['story_support']}) -> {' -> '.join(chain)}")

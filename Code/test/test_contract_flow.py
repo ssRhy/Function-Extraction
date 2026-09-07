@@ -241,6 +241,9 @@ def test_outline_graph_consumes_contract_and_exports_closed_ledger(tmp_path, mon
         def __init__(self, _path):
             pass
 
+        def load_pattern_feedback(self, _snapshot_id):
+            return {}
+
         def used_pattern_ids(self):
             return set()
 
@@ -250,6 +253,9 @@ def test_outline_graph_consumes_contract_and_exports_closed_ledger(tmp_path, mon
 
         def record_outline(self, _document, _markdown):
             return "OUT_CONTRACT"
+
+        def record_generation_outcome(self, *args, **kwargs):
+            assert args[2] == "OUT_CONTRACT"
 
     monkeypatch.setattr(outline, "StoryKnowledgeStore", FakeStore)
     result = outline._build_graph().invoke({

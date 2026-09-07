@@ -78,6 +78,23 @@ def test_candidate_patterns_sorted():
     assert names == ["A", "C", "B"]
 
 
+def test_candidate_patterns_use_repeated_failure_feedback():
+    catalog = {"published_patterns": [
+        _pattern("失败", 9, {"01_悬疑惊悚": 1}, ["F1"]),
+        _pattern("无反馈", 1, {"01_悬疑惊悚": 1}, ["F2"]),
+        _pattern("通过", 2, {"01_悬疑惊悚": 1}, ["F3"]),
+    ]}
+    feedback = {
+        "PAT_失败": {"priority_delta": -1},
+        "PAT_通过": {"priority_delta": 1},
+    }
+    names = [
+        p["pattern_name"]
+        for p in app.candidate_patterns(catalog, "01_悬疑惊悚", feedback)
+    ]
+    assert names == ["通过", "无反馈", "失败"]
+
+
 def test_planner_explicit_pattern():
     catalog = {"published_patterns": [
         _pattern("高支持", 9, {"01_悬疑惊悚": 1}, ["F1"]),
@@ -178,6 +195,9 @@ def test_planner_node_skips_used_pattern(monkeypatch):
         def used_pattern_ids(self):
             return {"PAT_已用"}
 
+        def load_pattern_feedback(self, _snapshot_id):
+            return {}
+
         def claim_pattern(self, snapshot_id, pattern_id):
             assert snapshot_id == "snapshot_x"
             assert pattern_id == "PAT_可用"
@@ -207,6 +227,9 @@ def test_planner_node_rejects_explicitly_used_pattern(monkeypatch):
 
         def used_pattern_ids(self):
             return {"PAT_已用"}
+
+        def load_pattern_feedback(self, _snapshot_id):
+            return {}
 
     monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
     monkeypatch.setattr(app, "load_catalog", lambda *_args: catalog)
@@ -667,6 +690,9 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
         def __init__(self, _path):
             pass
 
+        def load_pattern_feedback(self, _snapshot_id):
+            return {}
+
         def used_pattern_ids(self):
             return set()
 
@@ -678,6 +704,10 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             assert document["pattern_name"] == "P"
             assert markdown.startswith("# 大纲：P")
             return "OUT_TEST"
+
+        def record_generation_outcome(self, *args, **kwargs):
+            assert args[0] == "x"
+            assert args[2] == "OUT_TEST"
 
     monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
     result = app._build_graph().invoke({

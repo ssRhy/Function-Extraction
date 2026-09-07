@@ -1488,3 +1488,9 @@ Function 集合 + 规则/状态/故事目标
 
 - 用户要求将 serving 相关修改同步到 main，再在 main 上执行正式库验证；原因是 main 已包含正式 StoryProfile 兼容字段和真实运行配置，隔离 worktree 的 Evolve 验证会被上下文差异阻断。
 - 合并边界只包含 `serving_snapshots`、显式 promote、默认 serving 解析和对应测试；main 原有未提交改动不覆盖、不回滚。正式 Evolve 的候选提交、serving 保持和 promote 切换仍需以 main 实际运行结果为准。
+
+## 224. 先建立 Generation Outcome，再决定是否需要 Supervisor（2026-09-07）
+
+- 用户明确下一步先做生成经验反馈的最小闭环：真实 Outline 结果写入现有 SQLite，由有限规则影响后续 Pattern/Planner 选择；暂不做通用自动修复 Supervisor，也不让反馈层修改 Corpus。
+- 本轮将反馈边界收敛为单表 `generation_outcomes` 和 Snapshot 内聚合分数。首次验证失败不惩罚，重复失败才降权；通过或重写成功保留/提高优先级；没有反馈的 Pattern 使用原有排序。
+- 正式 Outline 真实验证已证明 outcome 写入、候选排序读取和知识边界隔离成立。当前 Pattern 仍有既有单次消费约束，因此反馈只影响尚未消费的候选，不绕过 `pattern_usage` 重新启用旧 Pattern。

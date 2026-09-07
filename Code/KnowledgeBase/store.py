@@ -273,6 +273,24 @@ CREATE TABLE IF NOT EXISTS pattern_usage (
     FOREIGN KEY (snapshot_id, pattern_id) REFERENCES patterns(snapshot_id, pattern_id),
     FOREIGN KEY (outline_id) REFERENCES outlines(outline_id)
 );
+
+CREATE TABLE IF NOT EXISTS generation_outcomes (
+    outcome_id       TEXT PRIMARY KEY,
+    snapshot_id      TEXT NOT NULL REFERENCES snapshots(snapshot_id),
+    pattern_id       TEXT,
+    outline_id       TEXT REFERENCES outlines(outline_id),
+    planner_mode     TEXT NOT NULL CHECK (planner_mode IN ('published', 'dynamic')),
+    validation_ok    INTEGER NOT NULL CHECK (validation_ok IN (0, 1)),
+    retry_occurred   INTEGER NOT NULL CHECK (retry_occurred IN (0, 1)),
+    failure_type     TEXT,
+    follow_up_action TEXT NOT NULL CHECK (follow_up_action IN ('accepted', 'rejected', 'rewritten')),
+    created_at       TEXT NOT NULL,
+    payload_json     TEXT NOT NULL,
+    FOREIGN KEY (snapshot_id, pattern_id) REFERENCES patterns(snapshot_id, pattern_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_generation_outcomes_pattern
+    ON generation_outcomes (snapshot_id, pattern_id);
 """
 
 
@@ -1164,6 +1182,108 @@ class StoryKnowledgeStore:
             self._check(conn)
         return outline_id
 
+    def record_generation_outcome(
+        self,
+        snapshot_id: str,
+        pattern_id: str | None,
+        outline_id: str | None,
+        planner_mode: str,
+        validation_ok: bool,
+        retry_occurred: bool,
+        failure_type: str | None,
+        follow_up_action: str,
+        payload: dict | None = None,
+    ) -> str:
+        """在当前 Snapshot 范围记录一次 Outline 生成反馈。"""
+        if planner_mode not in {"published", "dynamic"}:
+            raise ValueError(f"未知 Planner 模式: {planner_mode}")
+        if follow_up_action not in {"accepted", "rejected", "rewritten"}:
+            raise ValueError(f"未知生成后续动作: {follow_up_action}")
+        body = dict(payload or {})
+        body.update({
+            "snapshot_id": snapshot_id,
+            "pattern_id": pattern_id,
+            "outline_id": outline_id,
+            "planner_mode": planner_mode,
+            "validation_ok": bool(validation_ok),
+            "retry_occurred": bool(retry_occurred),
+            "failure_type": failure_type,
+            "follow_up_action": follow_up_action,
+        })
+        outcome_id = "GO_" + _digest(_json(body))[:16]
+        self.initialize()
+        with self.connect() as conn:
+            conn.execute(
+                """INSERT OR IGNORE INTO generation_outcomes
+                   (outcome_id, snapshot_id, pattern_id, outline_id, planner_mode,
+                    validation_ok, retry_occurred, failure_type, follow_up_action,
+                    created_at, payload_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
+                           strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), ?)""",
+                (
+                    outcome_id, snapshot_id, pattern_id, outline_id, planner_mode,
+                    int(validation_ok), int(retry_occurred), failure_type,
+                    follow_up_action, _json(body),
+                ),
+            )
+            self._check(conn)
+        return outcome_id
+
+    def load_generation_outcomes(self, snapshot_id: str | None = None) -> list[dict]:
+        self.initialize()
+        with self.connect() as conn:
+            if snapshot_id:
+                rows = conn.execute(
+                    """SELECT * FROM generation_outcomes
+                       WHERE snapshot_id=? ORDER BY created_at, outcome_id""",
+                    (snapshot_id,),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM generation_outcomes ORDER BY created_at, outcome_id"
+                ).fetchall()
+        outcomes = []
+        for row in rows:
+            item = dict(row)
+            item["validation_ok"] = bool(item["validation_ok"])
+            item["retry_occurred"] = bool(item["retry_occurred"])
+            item["payload"] = json.loads(item.pop("payload_json"))
+            outcomes.append(item)
+        return outcomes
+
+    def load_pattern_feedback(self, snapshot_id: str) -> dict[str, dict]:
+        """按 Snapshot 聚合反馈；首次失败不降权，重复失败才产生负分。"""
+        self.initialize()
+        with self.connect() as conn:
+            rows = conn.execute(
+                """SELECT pattern_id,
+                          COUNT(*) AS outcome_count,
+                          SUM(CASE WHEN validation_ok=1 THEN 1 ELSE 0 END) AS pass_count,
+                          SUM(CASE WHEN validation_ok=0 THEN 1 ELSE 0 END) AS failure_count,
+                          SUM(CASE WHEN follow_up_action='accepted' THEN 1 ELSE 0 END) AS accepted_count,
+                          SUM(CASE WHEN follow_up_action='rewritten' THEN 1 ELSE 0 END) AS rewritten_count,
+                          SUM(CASE WHEN follow_up_action='rejected' THEN 1 ELSE 0 END) AS rejected_count
+                   FROM generation_outcomes
+                   WHERE snapshot_id=? AND pattern_id IS NOT NULL
+                   GROUP BY pattern_id""",
+                (snapshot_id,),
+            ).fetchall()
+        feedback = {}
+        for row in rows:
+            accepted_count = row["accepted_count"] or 0
+            rewritten_count = row["rewritten_count"] or 0
+            failure_count = row["failure_count"] or 0
+            feedback[row["pattern_id"]] = {
+                "outcome_count": row["outcome_count"],
+                "pass_count": row["pass_count"] or 0,
+                "failure_count": failure_count,
+                "accepted_count": accepted_count,
+                "rewritten_count": rewritten_count,
+                "rejected_count": row["rejected_count"] or 0,
+                "priority_delta": accepted_count + rewritten_count - max(failure_count - 1, 0),
+            }
+        return feedback
+
     def claim_pattern(self, snapshot_id: str, pattern_id: str) -> None:
         self.initialize()
         with self.connect() as conn:
@@ -1223,7 +1343,7 @@ class StoryKnowledgeStore:
             "function_occurrences", "function_contracts", "patterns", "pattern_versions",
             "pattern_runs", "pattern_story_sequences", "motif_evidence",
             "motif_pair_reviews", "motif_clusters", "snapshot_patterns",
-            "outlines", "pattern_usage",
+            "outlines", "pattern_usage", "generation_outcomes",
         )
         self.initialize()
         with self.connect() as conn:

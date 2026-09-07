@@ -148,6 +148,9 @@ def test_batch_outlines_skips_used_and_stops_at_valid_count(tmp_path, monkeypatc
         def used_pattern_ids(self):
             return {"PAT_USED"}
 
+        def load_pattern_feedback(self, _snapshot_id):
+            return {}
+
     class FakeGraph:
         def invoke(self, state):
             assert state["knowledge_db"] == str(app.KNOWLEDGE_DB)

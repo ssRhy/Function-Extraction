@@ -332,6 +332,9 @@ def test_dynamic_graph_keeps_candidate_in_memory_and_exports_null_pattern_id(tmp
             assert document["dynamic_candidate"]["candidate_id"] == "DYN_TEST"
             return "OUT_DYNAMIC"
 
+        def record_generation_outcome(self, *args, **kwargs):
+            assert args[2] == "OUT_DYNAMIC"
+
     monkeypatch.setattr(outline, "StoryKnowledgeStore", FakeStore)
     result = outline._build_graph().invoke({
         "snapshot_id": "snapshot_x", "knowledge_db": str(tmp_path / "knowledge.db"),

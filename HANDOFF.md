@@ -1817,3 +1817,11 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 在 main 上对正式库执行单篇真实 Evolve（`--freeze-functions`，仅冻结 Function 本体，不跳过 Observation/Matcher/Evaluator/Snapshot 提交）。Run `FR_2b6442e4f79543c0` 以旧 serving `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77` 为父版本，`6/6` 评估通过，发布候选 `serving_verification_main_20260907_20260907T025642311869Z_aaef6bcfe669`。
 - 候选提交后 serving 仍保持旧 ID；默认 Outline Resolver 和 dynamic Planner 都读取旧 ID，显式传候选 ID 才读取候选。旧 Snapshot 故事数 `92`，候选为 `93`，证明默认路径没有偷偷读取最新候选。
 - 显式 `promote_snapshot()` 后，唯一 serving 指针切换到候选，默认 Planner 随之切换；最终正式库 `Snapshot=9`、`integrity_check=ok`、`foreign_key_check` 为空。验证前备份为 `Code/data/knowledge/story_knowledge_before_main_serving_verification_20260907.db`。
+
+## 本轮（2026-09-07）：Generation Outcome 最小反馈闭环
+
+- 在现有 Knowledge SQLite 增加逻辑隔离的 `generation_outcomes`，记录 `snapshot_id`、`pattern_id`、`outline_id`、Planner 模式、验证结果、是否重试、失败类型和后续动作；不新增数据库，不回写 Corpus、Function、Pattern 或 Snapshot。
+- `export_node` 在现有 Outline 落库后写入 outcome；验证成功且未重写记为 `accepted`，验证成功且发生一次重写记为 `rewritten`，最终未通过记为 `rejected`。失败类型只按现有结果确定性归类为 `contract`、`rule` 或 `semantic`。
+- `load_pattern_feedback(snapshot_id)` 按 Snapshot 聚合：首次失败不降权，重复失败产生负分，accepted/rewritten 产生正分；Outline Planner、候选 Pattern 列表和 StoryCLI 批量入口复用这个排序信号。现有 `pattern_usage` 的单次使用边界保持不变，反馈不负责重新启用已消费 Pattern。
+- 离线全仓回归 `356 passed, 1 skipped`。正式库用父 Snapshot `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77` 的 `PAT_7d0b26b318f228c1` 完成一次真实 Outline：生成 `OUT_07509ac2dd6a3a01`，写入 `GO_72e2e9e256ba9168`，验证通过、未重试、`accepted`；反馈读取后候选排序由第 3 提升到第 1。
+- 与运行前正式库备份逐表对比，Corpus、Function、Pattern、Snapshot 及 serving 指针均无变化；SQLite `integrity_check=ok`、`foreign_key_check=0`。当前 serving 仍是 `serving_verification_main_20260907_20260907T025642311869Z_aaef6bcfe669`。
