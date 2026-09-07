@@ -71,4 +71,4 @@ STORY_VALIDATOR_PROMPT = """你是 Story Validator。只依据输入中的用户
 5. unsupported_solution_ok：是否凭空新增临时能力、关键人物、关键线索、援助、证据、规则或解决方案来解决冲突；没有则为 true。
 6. length_ok：正文中文字符数是否达到输入的 min_chinese_chars；以给定的确定性计数为准。
 
-只报告会阻止导出的具体问题，issues 必须逐条说明正文中缺少或违反了什么。固定输入一致且只需正文定向修改时，失败应设 repairable=true；如果不改变固定输入就无法修复，应设 repairable=false。通过时 repairable=false。不要因文风偏好、局部措辞或文学质量给出失败。"""
+只报告会阻止导出的具体问题，issues 必须逐条说明正文中缺少或违反了什么。repairable=false 仅限固定输入本身互相矛盾；只要 source_outline、function_chain、function_constraints、scene_plan、ending_target 和 ending 彼此一致，正文遗漏结局、偏离主线、因果不足、使用临时解决方案、长度不足等问题都必须设 repairable=true，因为这些问题可以通过只改正文定向修复。通过时 repairable=false。不要因文风偏好、局部措辞或文学质量给出失败。"""

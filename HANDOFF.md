@@ -1952,3 +1952,10 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 三条都只调用 1 次正文生成，均未实际走到重写/复验路径；Outcome payload 均包含 `first_validation`、`revalidation`、`repair_occurred` 和最终状态字段，但本批次的 `revalidation` 均为 `null`。固定 Outline、ending target、Function constraints、人物/scene ID 核验均保持不变。
 - 副本最终为 `outlines=29`、`generation_outcomes=37`、`pattern_usage=26`、`snapshots=9`，`integrity_check=ok`、外键为空，Serving 仍为 `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`。正式库 SHA-256 仍为 `e7c6f2cf905c3b19e7cd1ab3aa4848a00fab16f3a655cb8596a0431fffb8d8c0`，正式计数和 Serving 未变。
 - 因此本次 smoke 证明了不可修复停止和正式库隔离，但没有证明一次自动修复或二次失败路径；不把自修复功能标记为收尾，也不为凑齐期望状态追加第二批真实调用。
+
+## 本轮（2026-09-07）：收窄 repairable 定义并重跑两条失败判定
+
+- Validator Prompt 只做一处语义修正：`repairable=false` 仅表示固定输入本身互相矛盾；只要固定 Outline、Function constraints、scene plan 和 ending 一致，正文遗漏结局、主线偏离、因果不足、临时解决方案或长度不足均必须返回 `repairable=true`。
+- 在新的正式数据库副本 `/var/folders/6v/9d5z229x1zxflc81pfcfgxrw0000gn/T/tmp.XiEmhokoTL/knowledge.db` 中只重跑两个样本。普通样本 `OUT_e81b0f1759471150` 首次返回 `overall_ok=false、repairable=true`，触发且只触发一次重写，复验通过，最终 `rewritten`，Outcome=`GO_5a706420f7759583`。
+- 寻药样本第一次正文输出的 `scene_id` 与固定 scene plan 不完整对应，在进入 Validator 前被既有 Schema/scene ID 硬门禁停止，因此本次没有产生该样本的 Validator 判定或 Outcome；按用户要求不追加随机重跑。该样本不能作为“寻药偏离被 Validator 判定并修复”的证据。
+- 普通样本的固定 Outline、ending target、Function constraints、人物/scene ID 在两次生成之间不变，Outcome 的 `first_validation`、`revalidation`、`repair_occurred` 和最终状态完整。副本 `integrity_check=ok`、外键为空；正式库 SHA-256、计数和 Serving 未变。
