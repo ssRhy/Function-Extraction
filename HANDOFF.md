@@ -1937,3 +1937,10 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 首次未通过时只携带具体 issues 定向重写一次；重写固定原始 Outline、Function chain/constraints、seed 人物、核心冲突和结局目标，并锁定 title、人物映射和 scene_id；第二次仍失败直接导出 `rejected` 和 `needs_human_review=true`，没有循环。
 - 复用现有 `generation_outcomes`，payload 保存来源 Pattern、首次问题、首次验证、是否修复、复验结果和最终状态；正文 Outcome 的关系列不绑定 Pattern，避免污染既有 Pattern 反馈排序。不写 Function、Pattern、Serving Snapshot，也不执行 Evolve/promote。
 - 新增 3 条 Story Agent 回归覆盖首次通过、一次重写后通过、二次失败停止；定向回归 `14 passed`，全仓回归 `369 passed, 1 skipped`。未执行真实 LLM smoke，正式数据库未写入。
+
+## 本轮（2026-09-07）：Validator 负责语义修复性，门禁只负责停止
+
+- 真实 smoke 暴露出固定输入本身存在互斥结局目标时，原 Validator 可能误判为 `accepted`。按用户边界收敛：Validator Prompt 先检查 `source_outline`、Function constraints、scene plan 和 ending target 是否自相矛盾；矛盾时必须返回 `overall_ok=false、repairable=false`。
+- `StoryValidation` 只新增 `repairable`；代码不再根据六个语义布尔字段重新计算 `overall_ok`，只保留 structured schema、确定性长度、人物/scene ID 校验和最多一次重写。`overall_ok=false && repairable=true` 才回写重写；不可修复或二次失败直接 `rejected + needs_human_review=true`。
+- 首次验证、修复后复验和最终状态仍完整写入 `generation_outcomes`；本轮没有修改正式数据库、Serving Snapshot、Function、Pattern 或发布流程。
+- Story Agent 定向回归 `15 passed`，全仓回归 `370 passed, 1 skipped`；compileall、`git diff --check` 通过。本轮未重复真实 LLM smoke。

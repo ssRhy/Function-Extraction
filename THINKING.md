@@ -1581,3 +1581,9 @@ Function 集合 + 规则/状态/故事目标
 - 用户把自修复范围限定为生成级正文质量闭环，而不是通用 Supervisor：因此复用现有 LLM structured output、StoryState 和 `generation_outcomes`，只加一个 Validator 节点和一次条件回边。
 - Validator 的语义检查覆盖用户主线、Function/Outline 因果、人物身份与动机、结局兑现、无依据临时方案；长度由确定性中文字符计数覆盖。重写只接收问题并固定上游结构，第二次失败不再尝试。
 - 首次问题、修复发生、复验和最终 accepted/rewritten/rejected 都进入现有 Outcome payload；正文 Outcome 保留来源 Pattern 但不填 `pattern_id` 关系列，避免被现有 Pattern 反馈聚合重复计数。拒绝结果仍导出正文供人工处理，不把失败升级为 Pattern、Function 或 Serving 的修改。
+
+## 239. 语义判断归 Validator，门禁不理解故事（2026-09-07）
+
+- 用户指出：自修复的主要判断和修复应由 LLM 完成；门禁只限制次数并停止错误输出，不应借助状态词表或一组确定性故事规则替代 Validator。
+- 因此只在 `StoryValidation` 增加 `repairable`，并要求 Validator 先检查固定 Outline、Function constraints、scene plan 和结局目标是否自相矛盾。固定输入矛盾返回 `repairable=false`；固定输入一致且正文可定向修复才返回 `repairable=true`。
+- 代码删除六个语义字段到 `overall_ok` 的确定性聚合，保留 Schema、长度、人物/scene ID 和一次修复上限。若 Prompt 仍漏判，下一步优先考虑更强模型，不先扩张规则系统。

@@ -354,23 +354,10 @@ def validate_story_node(state):
         validation["issues"].append(
             f"正文中文字符数为 {chinese_char_count}，低于 {_MIN_CHINESE_CHARS}"
         )
-    checks = (
-        "user_request_ok", "causal_constraints_ok", "character_consistency_ok",
-        "ending_ok", "unsupported_solution_ok", "length_ok",
-    )
-    validation["overall_ok"] = all(validation[key] for key in checks)
     if not validation["overall_ok"] and not validation["issues"]:
-        validation["issues"] = [
-            {
-                "user_request_ok": "正文偏离用户创作要求",
-                "causal_constraints_ok": "正文未兑现 Function/Outline 因果约束",
-                "character_consistency_ok": "人物身份或动机与输入不一致",
-                "ending_ok": "正文未完成结局目标",
-                "unsupported_solution_ok": "正文使用了输入未支持的临时解决方案",
-                "length_ok": f"正文中文字符数低于 {_MIN_CHINESE_CHARS}",
-            }[key]
-            for key in checks if not validation[key]
-        ]
+        validation["issues"] = ["Validator 未提供可执行的问题说明"]
+    if not validation["length_ok"]:
+        validation["overall_ok"] = False
     result = {"story_validation": validation}
     if state.get("story_repair_count", 0):
         result["story_revalidation"] = validation
@@ -380,8 +367,10 @@ def validate_story_node(state):
 
 
 def _should_repair_story(state):
+    validation = state.get("story_validation") or {}
     return (
-        (state.get("story_validation") or {}).get("overall_ok") is False
+        validation.get("overall_ok") is False
+        and validation.get("repairable") is True
         and not state.get("story_repair_count", 0)
     )
 
@@ -389,11 +378,7 @@ def _should_repair_story(state):
 def story_failure_type(validation):
     if validation.get("overall_ok"):
         return None
-    semantic_checks = (
-        "user_request_ok", "causal_constraints_ok", "character_consistency_ok",
-        "ending_ok", "unsupported_solution_ok",
-    )
-    return "rule" if all(validation.get(key) for key in semantic_checks) else "semantic"
+    return "rule" if validation.get("length_ok") is False else "semantic"
 
 
 def story_follow_up(validation_ok, repair_occurred):

@@ -175,6 +175,7 @@ def _story_validation(**overrides):
         "unsupported_solution_ok": True,
         "length_ok": True,
         "overall_ok": True,
+        "repairable": False,
         "issues": [],
     }
     values.update(overrides)
@@ -438,7 +439,7 @@ def _run_story_graph(tmp_path, monkeypatch, validations):
 def test_story_validator_rewrites_once_then_accepts(tmp_path, monkeypatch):
     exported, calls, outcomes = _run_story_graph(
         tmp_path, monkeypatch,
-        [_story_validation(overall_ok=False, ending_ok=False, issues=["结局没有完成解决动作"]),
+        [_story_validation(overall_ok=False, repairable=True, ending_ok=False, issues=["结局没有完成解决动作"]),
          _story_validation()],
     )
 
@@ -454,7 +455,7 @@ def test_story_validator_rewrites_once_then_accepts(tmp_path, monkeypatch):
 
 def test_story_validator_stops_after_second_failure_and_rejects(tmp_path, monkeypatch):
     failed = _story_validation(
-        overall_ok=False, causal_constraints_ok=False, issues=["因果链断裂"],
+        overall_ok=False, repairable=True, causal_constraints_ok=False, issues=["因果链断裂"],
     )
     exported, calls, outcomes = _run_story_graph(tmp_path, monkeypatch, [failed, failed])
 
@@ -466,4 +467,24 @@ def test_story_validator_stops_after_second_failure_and_rejects(tmp_path, monkey
     assert exported["story_revalidation"]["issues"] == ["因果链断裂"]
     assert outcomes[0][0][4] is False
     assert outcomes[0][0][5] is True
+    assert outcomes[0][0][7] == "rejected"
+
+
+def test_story_validator_unrepairable_failure_stops_without_rewrite(tmp_path, monkeypatch):
+    exported, calls, outcomes = _run_story_graph(
+        tmp_path, monkeypatch,
+        [_story_validation(
+            overall_ok=False, repairable=False, ending_ok=False,
+            issues=["固定结局目标互相矛盾"],
+        )],
+    )
+
+    assert calls.count(state.StoryDraft) == 1
+    assert calls.count(state.StoryValidation) == 1
+    assert exported["story_repair_count"] == 0
+    assert exported["story_status"] == "rejected"
+    assert exported["needs_human_review"] is True
+    assert exported["story_revalidation"] is None
+    assert outcomes[0][0][4] is False
+    assert outcomes[0][0][5] is False
     assert outcomes[0][0][7] == "rejected"

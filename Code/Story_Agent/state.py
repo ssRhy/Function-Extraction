@@ -193,4 +193,5 @@ class StoryValidation(BaseModel):
     unsupported_solution_ok: bool
     length_ok: bool
     overall_ok: bool
+    repairable: bool
     issues: list[str] = Field(default_factory=list)

@@ -60,9 +60,10 @@ STORY_PROMPT = """你是中文短篇小说作者。把输入中已经确定的�
 
 
 STORY_VALIDATOR_PROMPT = """你是 Story Validator。只依据输入中的用户创作要求、seed、Function 约束、场景计划、场景展开方案、结局目标和正文，判断正文是否可以导出，只输出 JSON：
-{"user_request_ok":true,"causal_constraints_ok":true,"character_consistency_ok":true,"ending_ok":true,"unsupported_solution_ok":true,"length_ok":true,"overall_ok":true,"issues":[]}
+{"user_request_ok":true,"causal_constraints_ok":true,"character_consistency_ok":true,"ending_ok":true,"unsupported_solution_ok":true,"length_ok":true,"overall_ok":true,"repairable":false,"issues":[]}
 
 逐项检查：
+0. 先检查固定输入本身：source_outline、function_chain、function_constraints、scene_plan、ending_target 和 ending 是否互相矛盾，或要求一个故事同时完成互斥的行动/终态。如果固定输入自相矛盾，overall_ok 必须为 false，repairable 必须为 false，并在 issues 中说明矛盾；不能通过改写正文修复，也不能修改任何固定输入。
 1. user_request_ok：正文是否偏离用户主线或创作要求；没有用户要求时为 true。
 2. causal_constraints_ok：每个 Function/Outline 段的 required_action、required_effects、state_change、causal_to_next 和 scene_plan 是否实际发生并按顺序承接，不能只写成准备或解释。
 3. character_consistency_ok：人物身份、动机、角色位置和人物关系是否与 seed、role_bindings 及既定状态一致；不得张冠李戴或让人物无动机行动。
@@ -70,4 +71,4 @@ STORY_VALIDATOR_PROMPT = """你是 Story Validator。只依据输入中的用户
 5. unsupported_solution_ok：是否凭空新增临时能力、关键人物、关键线索、援助、证据、规则或解决方案来解决冲突；没有则为 true。
 6. length_ok：正文中文字符数是否达到输入的 min_chinese_chars；以给定的确定性计数为准。
 
-只报告会阻止导出的具体问题，issues 必须逐条说明正文中缺少或违反了什么。只有六项都为 true 时 overall_ok 才能为 true；不要因文风偏好、局部措辞或文学质量给出失败。"""
+只报告会阻止导出的具体问题，issues 必须逐条说明正文中缺少或违反了什么。固定输入一致且只需正文定向修改时，失败应设 repairable=true；如果不改变固定输入就无法修复，应设 repairable=false。通过时 repairable=false。不要因文风偏好、局部措辞或文学质量给出失败。"""
