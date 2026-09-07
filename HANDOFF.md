@@ -1825,3 +1825,56 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - `load_pattern_feedback(snapshot_id)` 按 Snapshot 聚合：首次失败不降权，重复失败产生负分，accepted/rewritten 产生正分；Outline Planner、候选 Pattern 列表和 StoryCLI 批量入口复用这个排序信号。现有 `pattern_usage` 的单次使用边界保持不变，反馈不负责重新启用已消费 Pattern。
 - 离线全仓回归 `356 passed, 1 skipped`。正式库用父 Snapshot `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77` 的 `PAT_7d0b26b318f228c1` 完成一次真实 Outline：生成 `OUT_07509ac2dd6a3a01`，写入 `GO_72e2e9e256ba9168`，验证通过、未重试、`accepted`；反馈读取后候选排序由第 3 提升到第 1。
 - 与运行前正式库备份逐表对比，Corpus、Function、Pattern、Snapshot 及 serving 指针均无变化；SQLite `integrity_check=ok`、`foreign_key_check=0`。当前 serving 仍是 `serving_verification_main_20260907_20260907T025642311869Z_aaef6bcfe669`。
+
+## 本轮（2026-09-07）：Serving 就绪门禁与 Pattern 跨批次复用
+
+- `promote_snapshot()` 现在要求目标 Snapshot 同时存在 `pattern_runs.status=SUCCESS` 和至少一条 `snapshot_patterns.status=published`；不满足时不写 serving 指针。这样候选 Snapshot 不会在 Pattern 尚未完成时进入默认 Planner。
+- `Outline_Agent.available_patterns()`、Planner 和 StoryCLI 不再把 `pattern_usage` 当全局禁用名单；StoryCLI 仍通过当前批次的本地候选消费避免重复，跨批次排序继续由 Snapshot 内 `generation_outcomes` 的反馈决定。
+- `pattern_usage` 改为自增审计行并保留旧表数据迁移；`record_outline()` 与 `claim_pattern()` 允许重复使用同一 Pattern，实际 Outline/Outcome 继续逐次留痕。没有新增数据库或业务表。
+- 正式库 serving 已从无 Pattern Run、无 Published Pattern 的候选 `serving_verification_main_20260907_20260907T025642311869Z_aaef6bcfe669` 回退到 `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`。回退后默认 Resolver 读取 `7` 个 Published Pattern；`PAT_7d0b26b318f228c1` 带 `priority_delta=+1` 排第 `1` 且仍可选。新门禁对原候选明确拒绝并保持指针不变。
+- 正式库迁移保留原 `pattern_usage` 记录；当前 serving 为 `Pattern Run=SUCCESS`、`Published Pattern=7`、`Generation Outcome=1`，`integrity_check=ok`、`foreign_key_check` 为空。全仓离线回归 `360 passed, 1 skipped`，`compileall`、CLI help 和 `git diff --check` 通过。
+
+## 本轮（2026-09-07）：当前 Serving 上真实 Outline 小批次反馈验证
+
+- 固定当前 serving `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`，按 `03_现代情感` 原生候选顺序运行 StoryCLI `outline batch --count 5`；Manifest 为 `Code/data/story_cli/outlines/20260907T125224/outline_batch_manifest.json`。
+- 本批次自然尝试 `6` 次，产出 `5` 份有效 Outline：`generation_outcomes.follow_up_action` 为 `accepted=3`、`rewritten=2`、`rejected=1`；Manifest 的 rejected 尝试显示为 `blocked`，数据库 Outcome 仍明确记录为 `rejected`。未手工改写状态。
+- Pattern 跨批次复用实际成立：已有 `PAT_7d0b26b318f228c1` 再次生成 `OUT_7aa06a1bbd727b8e` 并新增 `pattern_usage.usage_id=2`；本批新增审计行 `usage_id=2..7`，没有被旧的全局使用名单挡住。
+- 批次前候选顺序为 `7d → 7ef → 98 → dd → eed → fd → c20`；反馈回读后的下一批顺序为 `7d → 98 → dd → eed → fd → 7ef → c20`。其中 `PAT_7d0b...` 累计 `accepted=2`、`priority_delta=+2` 保持第 1；`PAT_7ef...` 首次失败后为 `priority_delta=0` 降到第 6，成功/重写的四个 Pattern 均进入正反馈排序。
+- 正式库 serving 指针未改变；门禁仍为 `Pattern Run=SUCCESS`、`Published Pattern=7`、`Generation Outcome=7`。SQLite `integrity_check=ok`、`foreign_key_check` 为空。该结果证明反馈能跨批次影响选择，不等同于 Outline 的语义质量已完全达标。
+
+## 本轮（2026-09-07）：Outline Outcome 下游 Story Agent 两篇验证
+
+- 从批次 `20260907T125224` 按 SQLite `generation_outcomes.follow_up_action` 选择 `OUT_7aa06a1bbd727b8e`（accepted）与 `OUT_1f144f51ca114dca`（rewritten）；两篇均固定从当前 serving Snapshot 的正式库按 `outline_id` 读取，Story Agent 只写输出文件。
+- accepted Outline 生成《迟来的谈话》：`4343` 个中文字符、`5` 个场景；原 Outline 的 `4` 个段落被完整覆盖，末场 `resolves_ending=true`，正文实际出现分居、陶瓷爱好、咨询室沟通、每月沟通约定和孩子住校等结局证据。
+- rewritten Outline 生成《如果我不记得了》：`3157` 个中文字符、`4` 个场景；原 Outline 的 `4` 个段落按序覆盖，末场 `resolves_ending=true`，正文实际完成报案、刑事拘留、法庭作证、财产处理后的独立生活、心理咨询和志愿支持网络。
+- 两篇 StoryDraft、场景计划/展开对齐、人物姓名映射和正文非空校验均通过，两个 `length_ok=True`。生成前后正式 DB SHA-256 均为 `41ff2506e39a30d0bb06485ea6784eb471c24eea750d74ac19fcb491bc4439c3`；`generation_outcomes=7`、`pattern_usage=7`、`integrity_check=ok`、`foreign_key_check` 为空。
+- 结论：本两篇中 accepted 与 rewritten Outline 都能被正文链正常消费并完成结局闭合；没有出现现有规则无法处理的具体失败，按最小范围停止扩建。该样本证明 Outcome 可作为下游消费就绪信号，不把它扩大解释为最终语义质量评分。
+
+## 当前运行策略（2026-09-07）：停止结构扩建，进入自然积累
+
+- 当前主链已足够进入正常使用：`Pattern → Outline Outcome → Story 正文` 已完成最小真实闭环验证；后续只自然积累 `generation_outcomes`，不新增结构、表或 Supervisor。
+- 只有出现以下真实触发条件才重新进入结构处理：同一 `failure_type` 重复出现；Outline 验证通过但 Story 连续消费失败；现有规则无法判断重试、换 Pattern 或停止；或多个合格故事候选需要进一步择优。
+- 在触发条件出现前，不做额外 LLM 重跑、规则扩展或质量系统建设；保留现有审计、反馈排序和下游输出作为观察证据。
+
+## 本轮（2026-09-07）：三题材小规模生产批次与真实触发信号
+
+- 固定 serving `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`，按 `悬疑惊悚`、`古风仙侠`、`现代情感` 串行各生成 `3` 份有效 Outline，共 `9` 份；三个 Manifest 分别位于 `Code/data/story_cli/outlines/production_batch_20260907/` 下的三个题材目录。
+- Outline 结果：悬疑惊悚 `3/3`（`rewritten=2, accepted=1`）；古风仙侠 `5` 次尝试得到 `3` 份（`rejected=2, accepted=3`）；现代情感 `3/3`（`accepted=2, rewritten=1`）。生产批次新增 Outcome 为 `accepted=6、rewritten=3、rejected=2`。
+- 真实触发信号已出现：古风仙侠中 `PAT_7d0b26b318f228c1` 与 `PAT_98ee02a12fd73fef` 各一次 `failure_type=semantic`，最终拒绝原因相同，均为“结局关系状态超过前序谨慎/低信任状态，不能直接写成互信、和解或稳定联盟”。这两个 Pattern 后续分别恢复为 accepted / rewritten，暂未表现为同一 Pattern 连续失败。
+- 9 份有效 Outline 全部送入 Story Agent，9/9 正常导出正文：每篇 `StoryDraft`、场景覆盖/顺序、人物映射和末场 `resolves_ending=true` 均通过，未出现 Outline 通过但 Story 最终消费失败。正文长度为 `3278` 至 `6838` 个中文字符，未发现明显语义闭合失败。
+- 质量烟雾检查只发现一处孤立输出瑕疵：`OUT_cbb1d3017fff3238` 正文末尾多出单个 `R`；另一处 `未完` 实际属于正文句子“尚未完成猎杀”，不是元话语。该瑕疵未重复出现，暂不新增清洗规则或评分。
+- 正式库当前累计 `generation_outcomes=18`、`pattern_usage=18`，`integrity_check=ok`、`foreign_key_check` 为空；Story 生成前后 DB SHA-256 保持 `1d4f5ca5634a54dc15aab884110479602d2f7063b93b5664968dfe8399d28f90`。当前 serving 未改变。中间 JSON/字段/空响应重试均由现有有限重试恢复，不计为最终下游失败。
+- 结论：已记录一个应在后续针对性审计的重复 semantic 触发，但没有证据支持引入 Supervisor 或新的评分层；暂停扩大生产批次，后续只针对该具体关系状态门禁问题决定是否补规则。
+
+## 本轮（2026-09-07）：结局关系否定语义门禁最小修复
+
+- `Code/Outline_Agent/app.py::_has_unnegated_marker` 改为按中英文逗号、分号、句号、换行等分句处理，并只检查 marker 之前同一分句内的否定词；不新增每对人物最终关系上限判断。
+- 为真实样本 `OUT_9a6c00b1f97cdfdb` 的“并不代表彻底的和解或长久的联盟”和 `OUT_101c806de7e4b70b` 的“未涉及婚恋等永久承诺”增加回归测试；两句现在均不会命中强关系 marker。
+- 以只读方式重新读取正式库两个存档 JSON，`_ending_semantic_issues` 均返回空列表；没有调用 LLM、没有运行 Evolve/Pattern、没有写正式库。Outline + Contract 相关离线测试 `42 passed`。
+
+## 本轮收尾（2026-09-07）
+
+- README 已按当前真实运行路径更新：默认读取 serving Snapshot；`--snapshot-id` 可显式覆盖；同批次 Pattern 去重、跨批次复用；`generation_outcomes` 影响排序；`pattern_usage` 仅作审计；补充 `StoryCLI library status`、serving 查询和 `promote_snapshot` 最短操作。
+- 最终离线验证：全仓 `362 passed, 1 skipped`；全量 `compileall` 通过；`git diff --check` 通过。未运行昂贵 LLM、Evolve 或 Pattern。
+- 正式 SQLite 使用 `mode=ro` 检查，文件 SHA-256 前后均为 `1d4f5ca5634a54dc15aab884110479602d2f7063b93b5664968dfe8399d28f90`；`integrity_check=ok`、`foreign_key_check=[]`。当前 serving 为 `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`，对应 `Pattern Run=SUCCESS`、Published Pattern=`7`、Generation Outcome=`18`、Pattern Usage=`18`，`pattern_usage` 已是自增审计结构。
+- 当前阶段保持闭合：不新增 Supervisor、通用自动修复、五层相似度、独立 Creative Memory、Best-of-N、Pattern ending_spec 或新的关系等级系统；后续只在既定真实触发条件再次出现时处理。

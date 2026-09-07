@@ -3,6 +3,8 @@
 import hashlib
 import json
 
+import pytest
+
 from Contracts.occurrence import align_occurrences
 from Contracts.snapshot import publish_snapshot
 from Contracts.versioning import observation_version_id, story_version_id
@@ -73,6 +75,25 @@ def _commit(store, root, run_id, workflow, text, parent=None):
     return store.commit_function_run(snapshot, run_id)["snapshot_id"]
 
 
+def _commit_pattern(store, snapshot_id, published=True):
+    store.begin_pattern_run(snapshot_id, "test")
+    patterns = []
+    if published:
+        patterns.append({
+            "pattern_id": "PAT_TEST",
+            "pattern_version_id": f"PV_{snapshot_id}",
+            "status": "published",
+            "is_new": True,
+            "structure_signature": "test",
+            "pattern": {"pattern_name": "测试模式", "story_ids": []},
+            "version": {"action": "CREATE", "structure_signature": "test"},
+        })
+    return store.commit_pattern_run(snapshot_id, {
+        "sequences": {}, "motifs": [], "reviews": [], "clusters": [],
+        "patterns": patterns, "result": {},
+    })
+
+
 def test_run_overlay_snapshot_immutability_and_failure_cleanup(tmp_path):
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     parent = _commit(store, tmp_path / "snapshots", "R1", "bootstrap", "old")
@@ -136,8 +157,10 @@ def test_new_run_recovers_interrupted_unpublished_run(tmp_path):
 def test_serving_snapshot_is_explicit_and_planner_defaults_to_it(tmp_path):
     store = StoryKnowledgeStore(tmp_path / "knowledge.db")
     parent = _commit(store, tmp_path / "snapshots", "R1", "bootstrap", "old")
+    _commit_pattern(store, parent)
     store.promote_snapshot(parent)
     child = _commit(store, tmp_path / "snapshots", "R2", "evolve", "new", parent)
+    _commit_pattern(store, child)
 
     assert store.serving_snapshot_id() == parent
     assert outline_app.resolve_snapshot_id(None, store.db_path) == parent
@@ -153,3 +176,20 @@ def test_serving_snapshot_is_explicit_and_planner_defaults_to_it(tmp_path):
     with store.connect() as conn:
         assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
         assert conn.execute("SELECT COUNT(*) FROM serving_snapshots").fetchone()[0] == 1
+
+
+def test_promote_requires_successful_pattern_run(tmp_path):
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    snapshot = _commit(store, tmp_path / "snapshots", "R1", "bootstrap", "old")
+
+    with pytest.raises(ValueError, match="成功的 Pattern 运行"):
+        store.promote_snapshot(snapshot)
+
+
+def test_promote_requires_published_pattern(tmp_path):
+    store = StoryKnowledgeStore(tmp_path / "knowledge.db")
+    snapshot = _commit(store, tmp_path / "snapshots", "R1", "bootstrap", "old")
+    _commit_pattern(store, snapshot, published=False)
+
+    with pytest.raises(ValueError, match="已发布 Pattern"):
+        store.promote_snapshot(snapshot)

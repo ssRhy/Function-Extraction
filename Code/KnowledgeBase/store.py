@@ -18,7 +18,19 @@ from Contracts.versioning import observation_version_id, story_version_id
 
 DEFAULT_DB_PATH = Path(__file__).resolve().parents[1] / "data" / "knowledge" / "story_knowledge.db"
 
-SCHEMA = """
+_PATTERN_USAGE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS pattern_usage (
+    usage_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    pattern_id  TEXT NOT NULL,
+    snapshot_id TEXT NOT NULL,
+    claimed_at  TEXT NOT NULL,
+    outline_id  TEXT,
+    FOREIGN KEY (snapshot_id, pattern_id) REFERENCES patterns(snapshot_id, pattern_id),
+    FOREIGN KEY (outline_id) REFERENCES outlines(outline_id)
+);
+"""
+
+SCHEMA = f"""
 CREATE TABLE IF NOT EXISTS snapshots (
     snapshot_id        TEXT PRIMARY KEY,
     parent_snapshot_id TEXT REFERENCES snapshots(snapshot_id),
@@ -265,14 +277,7 @@ CREATE TABLE IF NOT EXISTS outlines (
     FOREIGN KEY (snapshot_id, pattern_id) REFERENCES patterns(snapshot_id, pattern_id)
 );
 
-CREATE TABLE IF NOT EXISTS pattern_usage (
-    pattern_id  TEXT PRIMARY KEY,
-    snapshot_id TEXT NOT NULL,
-    claimed_at  TEXT NOT NULL,
-    outline_id  TEXT,
-    FOREIGN KEY (snapshot_id, pattern_id) REFERENCES patterns(snapshot_id, pattern_id),
-    FOREIGN KEY (outline_id) REFERENCES outlines(outline_id)
-);
+{_PATTERN_USAGE_SCHEMA}
 
 CREATE TABLE IF NOT EXISTS generation_outcomes (
     outcome_id       TEXT PRIMARY KEY,
@@ -316,6 +321,19 @@ class StoryKnowledgeStore:
     def initialize(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            columns = {
+                row["name"] for row in conn.execute("PRAGMA table_info(pattern_usage)")
+            }
+            if columns and "usage_id" not in columns:
+                conn.execute("ALTER TABLE pattern_usage RENAME TO pattern_usage_legacy")
+                conn.executescript(_PATTERN_USAGE_SCHEMA)
+                conn.execute(
+                    """INSERT INTO pattern_usage
+                       (pattern_id, snapshot_id, claimed_at, outline_id)
+                       SELECT pattern_id, snapshot_id, claimed_at, outline_id
+                       FROM pattern_usage_legacy"""
+                )
+                conn.execute("DROP TABLE pattern_usage_legacy")
 
     @staticmethod
     def _story_stub(conn: sqlite3.Connection, story_id: str) -> None:
@@ -1130,6 +1148,7 @@ class StoryKnowledgeStore:
         with self.connect() as conn:
             snapshot_id = body["snapshot_id"]
             pattern_id = body.get("pattern_id")
+            usage_id = None
             if not conn.execute(
                 "SELECT 1 FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
             ).fetchone():
@@ -1147,21 +1166,21 @@ class StoryKnowledgeStore:
                 raise ValueError(f"大纲 ID 冲突: {outline_id}")
             if pattern_id and not existing:
                 usage = conn.execute(
-                    "SELECT outline_id FROM pattern_usage WHERE pattern_id=?",
-                    (pattern_id,),
+                    """SELECT usage_id FROM pattern_usage
+                       WHERE pattern_id=? AND snapshot_id=? AND outline_id IS NULL
+                       ORDER BY claimed_at, usage_id LIMIT 1""",
+                    (pattern_id, snapshot_id),
                 ).fetchone()
-                if usage and usage["outline_id"]:
-                    raise ValueError(f"Pattern 已绑定其他大纲: {pattern_id}")
-                if not usage:
-                    try:
-                        conn.execute(
-                            """INSERT INTO pattern_usage
-                               (pattern_id, snapshot_id, claimed_at, outline_id)
-                               VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL)""",
-                            (pattern_id, snapshot_id),
-                        )
-                    except sqlite3.IntegrityError as exc:
-                        raise ValueError(f"Pattern 已使用: {pattern_id}") from exc
+                if usage:
+                    usage_id = usage["usage_id"]
+                else:
+                    conn.execute(
+                        """INSERT INTO pattern_usage
+                           (pattern_id, snapshot_id, claimed_at, outline_id)
+                           VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL)""",
+                        (pattern_id, snapshot_id),
+                    )
+                    usage_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
             conn.execute(
                 """INSERT OR IGNORE INTO outlines
                    (outline_id, snapshot_id, pattern_id, pattern_name, genre, user_request,
@@ -1173,11 +1192,10 @@ class StoryKnowledgeStore:
                     body["generated_at"], payload, markdown_text,
                 ),
             )
-            if pattern_id:
+            if usage_id is not None:
                 conn.execute(
-                    """UPDATE pattern_usage SET outline_id=?
-                       WHERE pattern_id=? AND (outline_id IS NULL OR outline_id=?)""",
-                    (outline_id, pattern_id, outline_id),
+                    "UPDATE pattern_usage SET outline_id=? WHERE usage_id=?",
+                    (outline_id, usage_id),
                 )
             self._check(conn)
         return outline_id
@@ -1285,6 +1303,7 @@ class StoryKnowledgeStore:
         return feedback
 
     def claim_pattern(self, snapshot_id: str, pattern_id: str) -> None:
+        """记录 Pattern 领取审计，不阻止跨批次复用。"""
         self.initialize()
         with self.connect() as conn:
             if not conn.execute(
@@ -1292,21 +1311,15 @@ class StoryKnowledgeStore:
                 (snapshot_id, pattern_id),
             ).fetchone():
                 raise ValueError(f"知识库中不存在 Pattern: {pattern_id}")
-            if conn.execute(
-                "SELECT 1 FROM outlines WHERE pattern_id=?", (pattern_id,)
-            ).fetchone():
-                raise ValueError(f"Pattern 已使用: {pattern_id}")
-            try:
-                conn.execute(
-                    """INSERT INTO pattern_usage
-                       (pattern_id, snapshot_id, claimed_at, outline_id)
-                       VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL)""",
-                    (pattern_id, snapshot_id),
-                )
-            except sqlite3.IntegrityError as exc:
-                raise ValueError(f"Pattern 已使用: {pattern_id}") from exc
+            conn.execute(
+                """INSERT INTO pattern_usage
+                   (pattern_id, snapshot_id, claimed_at, outline_id)
+                   VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'), NULL)""",
+                (pattern_id, snapshot_id),
+            )
 
     def used_pattern_ids(self) -> set[str]:
+        """返回历史使用审计中的 Pattern ID，不作为候选禁用名单。"""
         self.initialize()
         with self.connect() as conn:
             rows = conn.execute(
@@ -1394,6 +1407,18 @@ class StoryKnowledgeStore:
                 "SELECT 1 FROM snapshots WHERE snapshot_id=?", (snapshot_id,)
             ).fetchone():
                 raise ValueError(f"知识库中不存在 Snapshot: {snapshot_id}")
+            if not conn.execute(
+                """SELECT 1 FROM pattern_runs
+                   WHERE snapshot_id=? AND status='SUCCESS'""",
+                (snapshot_id,),
+            ).fetchone():
+                raise ValueError(f"Snapshot 缺少成功的 Pattern 运行: {snapshot_id}")
+            if not conn.execute(
+                """SELECT 1 FROM snapshot_patterns
+                   WHERE snapshot_id=? AND status='published'""",
+                (snapshot_id,),
+            ).fetchone():
+                raise ValueError(f"Snapshot 没有已发布 Pattern: {snapshot_id}")
             conn.execute(
                 """INSERT INTO serving_snapshots(pointer_id, snapshot_id, promoted_at)
                    VALUES (1, ?, strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))

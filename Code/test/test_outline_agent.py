@@ -182,7 +182,7 @@ def test_load_planner_references_filters_selected_motifs_and_projects_occurrence
     assert references["transitions"] == {}
 
 
-def test_planner_node_skips_used_pattern(monkeypatch):
+def test_planner_node_reuses_audited_pattern(monkeypatch):
     catalog = {"published_patterns": [
         _pattern("已用", 2, {"01_悬疑惊悚": 1}, ["F1"]),
         _pattern("可用", 1, {"01_悬疑惊悚": 1}, ["F2"]),
@@ -192,15 +192,8 @@ def test_planner_node_skips_used_pattern(monkeypatch):
         def __init__(self, _path):
             pass
 
-        def used_pattern_ids(self):
-            return {"PAT_已用"}
-
         def load_pattern_feedback(self, _snapshot_id):
             return {}
-
-        def claim_pattern(self, snapshot_id, pattern_id):
-            assert snapshot_id == "snapshot_x"
-            assert pattern_id == "PAT_可用"
 
     monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
     monkeypatch.setattr(app, "load_catalog", lambda *_args: catalog)
@@ -213,10 +206,10 @@ def test_planner_node_skips_used_pattern(monkeypatch):
         "snapshot_id": "snapshot_x", "knowledge_db": "knowledge.db",
         "genre": "01_悬疑惊悚", "pattern_request": None,
     })
-    assert result["pattern_id"] == "PAT_可用"
+    assert result["pattern_id"] == "PAT_已用"
 
 
-def test_planner_node_rejects_explicitly_used_pattern(monkeypatch):
+def test_planner_node_allows_audited_pattern(monkeypatch):
     catalog = {"published_patterns": [
         _pattern("已用", 2, {"01_悬疑惊悚": 1}, ["F1"]),
     ]}
@@ -225,22 +218,20 @@ def test_planner_node_rejects_explicitly_used_pattern(monkeypatch):
         def __init__(self, _path):
             pass
 
-        def used_pattern_ids(self):
-            return {"PAT_已用"}
-
         def load_pattern_feedback(self, _snapshot_id):
             return {}
 
     monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
     monkeypatch.setattr(app, "load_catalog", lambda *_args: catalog)
+    monkeypatch.setattr(app, "load_contracts", lambda *_args: {})
     monkeypatch.setattr(app, "load_planner_references", lambda *_args: {
         "motifs": [], "transitions": {}, "instance_cases": {},
     })
-    with pytest.raises(ValueError, match="Pattern 已使用"):
-        app.planner_node({
-            "snapshot_id": "snapshot_x", "knowledge_db": "knowledge.db",
-            "genre": "01_悬疑惊悚", "pattern_request": "已用",
-        })
+    result = app.planner_node({
+        "snapshot_id": "snapshot_x", "knowledge_db": "knowledge.db",
+        "genre": "01_悬疑惊悚", "pattern_request": "已用",
+    })
+    assert result["pattern_id"] == "PAT_已用"
 
 
 def test_annotate_occurrences():
@@ -565,6 +556,26 @@ def test_validate_rejects_ending_relationship_conflict(monkeypatch):
     assert any("超过前序" in issue for issue in result["validation"]["issues"])
 
 
+@pytest.mark.parametrize(
+    ("sample_id", "ending_phrase"),
+    [
+        ("OUT_9a6c00b1f97cdfdb", "并不代表彻底的和解或长久的联盟"),
+        ("OUT_101c806de7e4b70b", "未涉及婚恋等永久承诺"),
+    ],
+)
+def test_ending_semantic_gate_ignores_negated_strong_relation(sample_id, ending_phrase):
+    assert not app._has_unnegated_marker(ending_phrase, app._STRONG_RELATION_MARKERS)
+    result = app._ending_semantic_issues(_semantic_validation_state(
+        {
+            "resolution_actions": [],
+            "conflict_resolution": ending_phrase,
+            "final_state": "稳定",
+        },
+        final_ledger=["P1与P2保持低信任的谨慎合作"],
+    ))
+    assert result == [], sample_id
+
+
 def test_semantic_failure_retries_realize_once(monkeypatch):
     calls = []
 
@@ -692,13 +703,6 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
 
         def load_pattern_feedback(self, _snapshot_id):
             return {}
-
-        def used_pattern_ids(self):
-            return set()
-
-        def claim_pattern(self, snapshot_id, pattern_id):
-            assert snapshot_id == "x"
-            assert pattern_id == "PAT_P"
 
         def record_outline(self, document, markdown):
             assert document["pattern_name"] == "P"

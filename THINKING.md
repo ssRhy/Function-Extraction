@@ -1494,3 +1494,39 @@ Function 集合 + 规则/状态/故事目标
 - 用户明确下一步先做生成经验反馈的最小闭环：真实 Outline 结果写入现有 SQLite，由有限规则影响后续 Pattern/Planner 选择；暂不做通用自动修复 Supervisor，也不让反馈层修改 Corpus。
 - 本轮将反馈边界收敛为单表 `generation_outcomes` 和 Snapshot 内聚合分数。首次验证失败不惩罚，重复失败才降权；通过或重写成功保留/提高优先级；没有反馈的 Pattern 使用原有排序。
 - 正式 Outline 真实验证已证明 outcome 写入、候选排序读取和知识边界隔离成立。当前 Pattern 仍有既有单次消费约束，因此反馈只影响尚未消费的候选，不绕过 `pattern_usage` 重新启用旧 Pattern。
+
+## 225. Serving 就绪与 Pattern 消费边界必须同时闭合（2026-09-07）
+
+- 用户指出候选 Snapshot 已被 promote，但该 Snapshot 没有成功 Pattern Run、Published Pattern 或本批 Outcome；因此 serving 指针不能只验证 Snapshot 存在，还必须验证下游可读的 Pattern 产物已经完成。
+- 用户进一步明确 Pattern 的“一次性使用”只应是同一批次内的去重规则。跨批次复用由 `generation_outcomes` 反馈排序，`pattern_usage` 只记录审计；保留全局 `pattern_id` 主键会让审计表继续携带错误的全局消费约束，故迁移为自增审计行。
+
+## 226. 真实小批次确认反馈确实跨批次生效（2026-09-07）
+
+- 用户要求在当前 serving 上跑 `3～5` 份真实 Outline，并自然积累三类 Outcome；本次选定 `count=5`，不注入状态、不绕过 Planner。实际 6 次尝试得到 `accepted=3`、`rewritten=2`、`rejected=1`，其中 5 份有效 Outline 达到目标。
+- 批次前后排序发生了可复现的结构变化：无反馈的 `PAT_7ef...` 从第 2 降到第 6，成功/重写的 `PAT_98...`、`PAT_dd...`、`PAT_eed...`、`PAT_fd...` 分别前移；已有正反馈的 `PAT_7d...` 因再次 accepted 从 `+1` 变为 `+2`。
+- 这次运行同时证明两个边界：`pattern_usage` 允许同一 Pattern 在不同批次再次绑定新的 Outline，`generation_outcomes` 才是跨批次排序信号；Outcome 的流程状态已经闭环，但 accepted/rewritten 仍只代表当前验证链结果，不替代语义质量评估。
+
+## 227. Outline Outcome 到正文的两篇下游验证通过（2026-09-07）
+
+- 用户要求只选一篇 accepted 和一篇 rewritten Outline 进入 Story Agent，不改数据库；本次按数据库 Outcome 精确选择 `OUT_7aa06a1bbd727b8e` 与 `OUT_1f144f51ca114dca`，没有把 Manifest 的批次 `accepted` 标签误当作 rewritten 判定。
+- 两篇正文都完成了既定场景结构和可观察结局动作，末场均承担结局，且输出通过当前 Story Agent 的结构合同。rewritten 只表示 Outline 生成阶段发生过一次重写，本次没有转化为下游消费失败。
+- 因没有发现重复且现有规则无法处理的具体失败，当前停止继续增加 Story 反馈表、Supervisor 或额外规则；后续只有出现明确下游失败样本时才针对该失败补规则。
+
+## 228. 真实闭环后停止结构扩建，转入正常使用（2026-09-07）
+
+- 用户确认当前最合适的下一步不是继续增加架构，而是让正常使用自然积累 Outcome。现有证据已经覆盖 Pattern 排序、Outline Outcome 和 Story 正文消费/结局闭合。
+- 后续继续工作的门槛限定为真实触发：同一 `failure_type` 重复出现；Outline 通过但 Story 连续消费失败；规则无法在重试/换 Pattern/停止之间作出判断；或多个合格候选需要择优。
+- 这意味着当前 accepted/rewritten/rejected 只继续作为运行反馈留痕，不提前扩展为 Supervisor、Best-of-N 或新的持久化层；没有触发条件就保持实现不动。
+
+## 229. 三题材生产批次暴露具体 semantic 重复触发（2026-09-07）
+
+- 用户要求用当前 serving 做三题材最小生产批次，并只观察真实重复问题。本次各题材生成 3 份有效 Outline，共 9 份；古风仙侠为达到 3 份有效 Outline 实际尝试 5 次。
+- 两个不同 Pattern 在古风仙侠中连续出现同一 `failure_type=semantic` 和同一关系状态越界原因；这满足“同一 failure_type 多次出现”的真实触发条件。由于两个 Pattern 后续都能恢复成功，尚未满足“某个 Pattern 连续失败”。
+- 9 份有效 Outline 全部成功进入 Story Agent 并完成末场闭合，因此没有出现“Outline 通过但 Story 连续消费失败”。中间结构化重试均被现有机制吸收，不能把中间重试直接升级成 Supervisor 需求。
+- 9 篇中仅发现一个孤立的正文末尾 `R` 噪声，没有重复到足以支持新规则；当前最小后续应是针对关系状态 semantic 门禁做具体审计，而不是扩建反馈层、评分层或 Supervisor。
+
+## 230. 关系门禁先修同一分句否定，不扩建人物对上限（2026-09-07）
+
+- 用户要求把两个真实重复 semantic 误判收敛到 `_has_unnegated_marker` 的同一分句否定识别：`并不代表彻底的和解或长久的联盟` 与 `未涉及婚恋等永久承诺` 都是否定表达，不应被当作强关系结局。
+- 修复后两个正式库存档样本的确定性关系检查均无问题，说明当前证据只需要修正否定作用域；没有进入“按每对人物最终关系上限”这一更大的语义判断。
+- 这次保持第三个 broader semantic Outcome 在范围外；后续只有出现否定修复后仍无法解释的具体关系样本，才重新评估是否需要更细的关系上限规则。

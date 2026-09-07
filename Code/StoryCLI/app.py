@@ -318,26 +318,12 @@ def batch_outlines(
     store = StoryKnowledgeStore(knowledge_db)
     feedback = store.load_pattern_feedback(snapshot_id)
     all_candidates = outline_app.candidate_patterns(catalog, genre, feedback)
-    used_ids = store.used_pattern_ids()
-    available = [
-        pattern for pattern in all_candidates
-        if pattern.get("pattern_id") not in used_ids
-    ]
+    available = all_candidates
     by_name = {}
     for pattern in available:
         by_name.setdefault(pattern["pattern_name"], []).append(pattern)
     requested_names = patterns or list(by_name)
     results = []
-    for pattern in all_candidates:
-        if pattern.get("pattern_id") in used_ids and (
-            not patterns or pattern["pattern_name"] in requested_names
-        ):
-            results.append({
-                "status": "skipped",
-                "pattern_id": pattern.get("pattern_id"),
-                "pattern_name": pattern.get("pattern_name"),
-                "reason": "Pattern 已使用",
-            })
     for pattern_name in requested_names:
         if len([item for item in results if item["status"] == "accepted"]) >= count:
             break
@@ -348,7 +334,7 @@ def batch_outlines(
             results.append({
                 "status": "skipped",
                 "pattern_name": pattern_name,
-                "reason": "Pattern 不存在或已使用",
+                "reason": "Pattern 不存在或本批次已使用",
             })
             continue
         pattern = candidates.pop(0)

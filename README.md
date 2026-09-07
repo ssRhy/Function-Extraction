@@ -123,6 +123,22 @@ python -m FunctionCoordinator_Agent --mode evolve --corpus <新语料目录> \
 - 三个子 Agent 的失败结果统一为 `status=FAILED`，并包含 `stage`、`workflow`、`run_id`、`namespace`、`snapshot_id`、`parent_snapshot_id`、`error_code`、`error` 和 `retryable`；数据库内部仍按各自表的 `FAIL/FAILED` 状态记录。
 - Coordinator 测试包含真实 Python 子进程协议：实际读取 stdout 的 `run_result`，并验证非零退出码会覆盖子 Agent 报告的成功状态。
 
+### Snapshot 与 Serving
+
+默认读取统一 SQLite 中的 serving Snapshot；用 `--snapshot-id` 可显式读取其他已发布 Snapshot。查看当前库状态和 serving 指针：
+
+```bash
+cd Code
+python -X utf8 -m StoryCLI library status
+python -X utf8 -c 'from KnowledgeBase.store import StoryKnowledgeStore; print(StoryKnowledgeStore().serving_snapshot())'
+```
+
+只有完成成功的 Pattern Run 且存在 Published Pattern 的 Snapshot 才能 promote；切换指针前先复制完整 Snapshot ID：
+
+```bash
+python -X utf8 -c 'from KnowledgeBase.store import StoryKnowledgeStore; print(StoryKnowledgeStore().promote_snapshot("SNAPSHOT_ID"))'
+```
+
 ### 一键生成故事（Outline_Agent → Story_Agent）
 
 ```bash
@@ -132,7 +148,7 @@ python -X utf8 -m Pipeline_Agent --genre 现代情感 --pattern "拯救之恋"
 python -X utf8 -m Pipeline_Agent --genre 悬疑惊悚 --out-dir data/pipeline_runs/demo
 ```
 
-- 从统一 SQLite 中当前 Snapshot 的 published PatternSet 开始，自动完成 Pattern 选择、大纲生成、场景计划、场景发展和正文生成。
+- 从统一 SQLite 中默认 serving Snapshot 的 published PatternSet 开始，自动完成 Pattern 选择、大纲生成、场景计划、场景发展和正文生成；可用 `--snapshot-id` 显式指定其他 Snapshot。
 - 大纲校验未通过时保留大纲并停止，不启动正文。
 - 完整大纲以 `outline_id` 写入 `Code/data/knowledge/story_knowledge.db`；Story_Agent 按 ID 从库中读取，JSON/Markdown 只作为导出物。
 - 默认输出到 `Code/data/pipeline_runs/<时间戳>/`，包含 `outline/`、`story/` 和 `pipeline_manifest.json`。
@@ -160,7 +176,7 @@ python -X utf8 -m StoryCLI template build --function-run data/story_cli/function
 python -X utf8 -m StoryCLI story write --template data/story_cli/templates/<时间戳>/template_bundle.json
 python -X utf8 -m StoryCLI story write --template data/story_cli/templates/<时间戳>/template_bundle.json --request "现实克制，突出人物共同承担压力后的关系变化"
 
-# 4. 批量生成大纲（每个 pattern_id 全库只使用一次）
+# 4. 批量生成大纲（同一批次内不重复，跨批次可复用）
 python -X utf8 -m StoryCLI outline --genre 现代情感 --count 3
 python -X utf8 -m StoryCLI outline batch --genre 现代情感 --count 3
 python -X utf8 -m StoryCLI outline batch --genre 悬疑惊悚 --count 3 --pattern "危局援手与连环深渊" --pattern "悬念升级式调查推进"
@@ -169,8 +185,8 @@ python -X utf8 -m StoryCLI outline batch --genre 悬疑惊悚 --count 3 --patter
 - `function bootstrap/evolve` 支持多个文件和递归目录输入；Function Snapshot 发布后自动运行 Pattern Evolve。`function_run.json` 只记录运行结果，Pattern 节点不读取它。
 - `template build` 从统一 DB 中指定 Snapshot 的 published PatternSet 选择 Pattern；Pattern 与一次具体 Outline 一起写入 `template_bundle.json`。
 - `story write` 没有 `--request` 时复用 Bundle 中的 `outline_id`；有 `--request` 时固定 Pattern、重新生成 Outline 入库，再交给 Story_Agent 写正文。
-- `outline` 是批量生成大纲的简洁入口，`outline batch` 为等价的显式写法；两者只运行 Outline_Agent，不生成正文。`--count` 表示目标有效大纲数量。已使用 Pattern 自动跳过，校验失败仍消耗 Pattern，并继续尝试其他 Pattern。
-- Pattern 使用记录保存在 `Code/data/knowledge/story_knowledge.db` 的 `pattern_usage` 表；同名但不同 `pattern_id` 的 Pattern 可分别使用。
+- `outline` 是批量生成大纲的简洁入口，`outline batch` 为等价的显式写法；两者只运行 Outline_Agent，不生成正文。`--count` 表示目标有效大纲数量。候选按当前 Snapshot 的 `generation_outcomes` 反馈排序；同一批次内不重复消费 Pattern，校验失败仍记录 Outcome 并继续尝试其他 Pattern，后续批次仍可复用。
+- Pattern 使用记录保存在 `Code/data/knowledge/story_knowledge.db` 的 `pattern_usage` 审计表；它不再作为跨批次禁用名单，同名但不同 `pattern_id` 的 Pattern 可分别使用。
 - 默认产物分别位于 `Code/data/story_cli/functions/`、`Code/data/story_cli/templates/` 和 `Code/data/story_cli/stories/`；每次运行另有对应的 `function_run.json`、`template_bundle.json` 或 `story_run.json` manifest。
 - StoryPattern 的生产入口为 `python -X utf8 -m StoryPattern_Agent --snapshot <snapshot_id>`。正式 LangGraph 只读写统一 SQLite，不读取 Catalog、review、summary JSON，也不使用旧目录 fallback。
 - Pattern Evolve 节点为 `load_pattern_delta → update_story_sequences → update_motif_evidence → retrieve_variant_pairs → review_changed_pairs → rebuild_clusters → summarize_changed_clusters → publish_pattern_set`。输入以当前 Snapshot 的完整故事清单为准；没有 Observation 的故事保留空 sequence，不从 Pattern 输入中静默丢弃。未变化故事继承父 sequence；只有新签名的候选 pair 调用 LLM；发布节点单事务写入 PatternSet。

@@ -131,7 +131,7 @@ def test_write_story_regenerates_outline_only_when_request_is_given(tmp_path, mo
     assert manifest["actual_outline_json"] == str(generated_outline.resolve())
 
 
-def test_batch_outlines_skips_used_and_stops_at_valid_count(tmp_path, monkeypatch):
+def test_batch_outlines_reuses_audited_and_stops_at_valid_count(tmp_path, monkeypatch):
     catalog = {"published_patterns": [
         {"pattern_id": "PAT_USED", "pattern_name": "已用", "story_support": 5,
          "category_counts": {"03_现代情感": 1}},
@@ -145,16 +145,13 @@ def test_batch_outlines_skips_used_and_stops_at_valid_count(tmp_path, monkeypatc
         def __init__(self, _path):
             pass
 
-        def used_pattern_ids(self):
-            return {"PAT_USED"}
-
         def load_pattern_feedback(self, _snapshot_id):
             return {}
 
     class FakeGraph:
         def invoke(self, state):
             assert state["knowledge_db"] == str(app.KNOWLEDGE_DB)
-            if state["pattern_request"] == "失败":
+            if state["pattern_request"] in {"已用", "失败"}:
                 return {
                     "outline_id": "OUT_BLOCKED", "result_path": "blocked.json",
                     "validation": {"overall_ok": False},
@@ -175,9 +172,42 @@ def test_batch_outlines_skips_used_and_stops_at_valid_count(tmp_path, monkeypatc
     manifest = json.loads(path.read_text(encoding="utf-8"))
     assert manifest["accepted_count"] == 1
     assert [item["status"] for item in manifest["results"]] == [
-        "skipped", "blocked", "accepted",
+        "blocked", "blocked", "accepted",
     ]
     assert manifest["results"][0]["pattern_id"] == "PAT_USED"
+
+
+def test_batch_outlines_does_not_repeat_pattern_in_one_batch(tmp_path, monkeypatch):
+    catalog = {"published_patterns": [{
+        "pattern_id": "PAT_ONE", "pattern_name": "唯一", "story_support": 1,
+        "category_counts": {"03_现代情感": 1},
+    }]}
+    calls = []
+
+    class FakeStore:
+        def __init__(self, _path):
+            pass
+
+        def load_pattern_feedback(self, _snapshot_id):
+            return {}
+
+    class FakeGraph:
+        def invoke(self, state):
+            calls.append(state["pattern_request"])
+            return {"outline_id": "OUT_ONE", "result_path": "one.json",
+                    "validation": {"overall_ok": True}}
+
+    monkeypatch.setattr(app.outline_app, "load_catalog", lambda *_args: catalog)
+    monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
+    monkeypatch.setattr(app.outline_app, "_build_graph", lambda: FakeGraph())
+
+    path = app.batch_outlines(
+        "snapshot_x", "现代情感", 2, patterns=["唯一", "唯一"], out_dir=tmp_path,
+    )
+    manifest = json.loads(path.read_text(encoding="utf-8"))
+    assert calls == ["唯一"]
+    assert [item["status"] for item in manifest["results"]] == ["accepted", "skipped"]
+    assert "本批次" in manifest["results"][1]["reason"]
 
 
 def test_main_accepts_short_outline_command(monkeypatch):

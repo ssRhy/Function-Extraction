@@ -222,11 +222,7 @@ def candidate_patterns(catalog, genre, feedback=None):
 
 
 def available_patterns(catalog, genre, knowledge_db=DEFAULT_DB_PATH, feedback=None):
-    used = StoryKnowledgeStore(knowledge_db).used_pattern_ids()
-    return [
-        pattern for pattern in candidate_patterns(catalog, genre, feedback)
-        if pattern.get("pattern_id") not in used
-    ]
+    return candidate_patterns(catalog, genre, feedback)
 
 
 def annotate_occurrences(chain):
@@ -431,11 +427,12 @@ _NEGATION_MARKERS = ("不", "未", "无", "没有", "并非", "不是", "并不�
 
 
 def _has_unnegated_marker(text, markers):
-    for marker in markers:
-        for match in re.finditer(re.escape(marker), text):
-            prefix = text[max(0, match.start() - 4):match.start()]
-            if not any(prefix.endswith(negation) for negation in _NEGATION_MARKERS):
-                return True
+    for clause in re.split(r"[，,。！？；：:\n]", text):
+        for marker in markers:
+            for match in re.finditer(re.escape(marker), clause):
+                prefix = clause[:match.start()]
+                if not any(negation in prefix for negation in _NEGATION_MARKERS):
+                    return True
     return False
 
 
@@ -570,7 +567,6 @@ def planner_node(state):
     catalog = load_catalog(snapshot_id, state["knowledge_db"])
     store = StoryKnowledgeStore(state["knowledge_db"])
     feedback = store.load_pattern_feedback(snapshot_id)
-    all_candidates = candidate_patterns(catalog, state["genre"], feedback)
     available = available_patterns(
         catalog, state["genre"], state["knowledge_db"], feedback,
     )
@@ -578,8 +574,6 @@ def planner_node(state):
     if pattern_request and not any(
         pattern.get("pattern_name") == pattern_request for pattern in available
     ):
-        if any(pattern.get("pattern_name") == pattern_request for pattern in all_candidates):
-            raise ValueError(f"Pattern 已使用或不可用: {pattern_request}")
         raise ValueError(f"题材 {state['genre']} 下没有 pattern: {pattern_request}")
     if not available:
         raise ValueError(f"题材 {state['genre']} 没有可用 Pattern")
