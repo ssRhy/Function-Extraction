@@ -1569,3 +1569,15 @@ Function 集合 + 规则/状态/故事目标
 - 用户要求把真实运行中的 `Connection error` 归类为暂时错误，并把 Release Pipeline 的 Coordinator 重试从 `0` 调整为 `1`。
 - 复用 Coordinator 已有的 `retryable` 路由，不新增通用异常层；测试确认第一次 Pattern 连接失败、第二次成功时，Evolve 只运行一次，Pattern 才执行第二次。
 - 现有新增测试和 helper 均仍对应正式备份、父 Snapshot、回滚或候选门禁边界，没有找到可安全删除的孤立测试；不为“清理”删除这些保护性覆盖。
+
+## 237. 先做单篇真实创作试用，不以全量验证替代收益判断（2026-09-07）
+
+- 用户将评价责任明确交给 Codex：当前 Serving 生成后由 Codex 直接阅读并评价，再写入 `generation_outcomes`；优先少量测试，尽量不全量运行。
+- 8 次试用得到 7 篇正文和 1 个被关系状态门禁阻断的 Outline。Codex 评价为 `accepted=5、rewrite=2、rejected=1`；两个 rewrite 原因分别是结局便利化和“寻药”主线偏移，不是同类重复问题。
+- 因此不做局部修复、不扩充 5 篇、不 promote；Full 稳定优于 Direct LLM 的条件仍未满足，也不新增质量架构。
+
+## 238. Story 正文只需要一次有边界的生成级修复（2026-09-07）
+
+- 用户把自修复范围限定为生成级正文质量闭环，而不是通用 Supervisor：因此复用现有 LLM structured output、StoryState 和 `generation_outcomes`，只加一个 Validator 节点和一次条件回边。
+- Validator 的语义检查覆盖用户主线、Function/Outline 因果、人物身份与动机、结局兑现、无依据临时方案；长度由确定性中文字符计数覆盖。重写只接收问题并固定上游结构，第二次失败不再尝试。
+- 首次问题、修复发生、复验和最终 accepted/rewritten/rejected 都进入现有 Outcome payload；正文 Outcome 保留来源 Pattern 但不填 `pattern_id` 关系列，避免被现有 Pattern 反馈聚合重复计数。拒绝结果仍导出正文供人工处理，不把失败升级为 Pattern、Function 或 Serving 的修改。

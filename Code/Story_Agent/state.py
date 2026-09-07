@@ -17,6 +17,10 @@ class StoryState(TypedDict):
     scene_plan: dict | None
     scene_developments: dict | None
     story: dict | None
+    story_validation: dict | None
+    first_story_validation: dict | None
+    story_revalidation: dict | None
+    story_repair_count: int
     result_path: str
 
 
@@ -40,8 +44,11 @@ class SourceOutline(BaseModel):
 class SourceOutlineDocument(BaseModel):
     outline_id: str
     snapshot_id: str
+    pattern_id: str | None = None
+    planner_mode: Literal["published", "dynamic"] = "published"
     pattern_name: str
     genre: str
+    user_request: str | None = None
     seed: dict
     story_profile: dict | None = None  # 预留接口，当前不参与正文生成
     mechanism_plan: MechanismPlan
@@ -176,3 +183,14 @@ class StoryDraft(BaseModel):
         default_factory=dict,
         description="故事内稳定人物 ID -> 正文使用的自然姓名",
     )
+
+
+class StoryValidation(BaseModel):
+    user_request_ok: bool
+    causal_constraints_ok: bool
+    character_consistency_ok: bool
+    ending_ok: bool
+    unsupported_solution_ok: bool
+    length_ok: bool
+    overall_ok: bool
+    issues: list[str] = Field(default_factory=list)

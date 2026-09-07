@@ -57,3 +57,17 @@ STORY_PROMPT = """你是中文短篇小说作者。把输入中已经确定的�
 8. 人物动机、世界规则、角色位置、题材实现、伏笔回收和关系变化必须服从输入，不新增核心人物、核心冲突、关键线索、突然援助或新的结局方案，也不得把既定关系提升为另一种关系或更高承诺。
 9. 最后一场必须实际完成核心 resolution_actions，并用可观察结果展示 ending_must_show、conflict_resolution 与 required_final_state；不能停在准备、决定或承诺。自然导致的后续社会结果可以在尾声概述。
 10. P1、P2 等角色 ID 只用于输入中的内部引用。text 只写自然正文，不写 Function 名称、场景标题、状态账本、字数预算或系统说明。"""
+
+
+STORY_VALIDATOR_PROMPT = """你是 Story Validator。只依据输入中的用户创作要求、seed、Function 约束、场景计划、场景展开方案、结局目标和正文，判断正文是否可以导出，只输出 JSON：
+{"user_request_ok":true,"causal_constraints_ok":true,"character_consistency_ok":true,"ending_ok":true,"unsupported_solution_ok":true,"length_ok":true,"overall_ok":true,"issues":[]}
+
+逐项检查：
+1. user_request_ok：正文是否偏离用户主线或创作要求；没有用户要求时为 true。
+2. causal_constraints_ok：每个 Function/Outline 段的 required_action、required_effects、state_change、causal_to_next 和 scene_plan 是否实际发生并按顺序承接，不能只写成准备或解释。
+3. character_consistency_ok：人物身份、动机、角色位置和人物关系是否与 seed、role_bindings 及既定状态一致；不得张冠李戴或让人物无动机行动。
+4. ending_ok：最后场景是否完成 ending_target、resolution_actions、ending_must_show、conflict_resolution 和 required_final_state，不能停在决定、承诺或准备。
+5. unsupported_solution_ok：是否凭空新增临时能力、关键人物、关键线索、援助、证据、规则或解决方案来解决冲突；没有则为 true。
+6. length_ok：正文中文字符数是否达到输入的 min_chinese_chars；以给定的确定性计数为准。
+
+只报告会阻止导出的具体问题，issues 必须逐条说明正文中缺少或违反了什么。只有六项都为 true 时 overall_ok 才能为 true；不要因文风偏好、局部措辞或文学质量给出失败。"""

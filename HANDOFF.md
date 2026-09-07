@@ -1922,3 +1922,18 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Coordinator 的现有暂时错误识别补充 `Connection error`；Release Pipeline 调用 Coordinator 时将 `max_retries` 设为 `1`，只允许同一阶段再尝试一次。
 - 新增回归测试：第一次 Pattern 子进程返回 `Connection error`，第二次成功；调用序列为 `BOOTSTRAP=1、PATTERN=1、PATTERN=2`，Evolve 没有重复执行。
 - 审计新增 Release Pipeline 测试和 helper 后，没有发现可证明无用的代码或测试；SQLite 备份、父 Snapshot 复制、Story 失败不 promote、父子回归门禁均保留为有效边界。
+
+## 本轮（2026-09-07）：转入少量真实创作试用
+
+- 用户确认下一步只走 `真实创作请求 → 当前 Serving 生成 → Codex 评价 → generation_outcomes`，优先少量测试，尽量不做全量运行。
+- 使用同一条真实创作要求完成 8 次当前 Serving 试用：7 篇正文成功、1 篇 Outline 被现有关系状态门禁阻断；正文长度均达到用户要求的 3500 中文字符下限。
+- Codex 逐篇评价为 `accepted=5、rewrite=2、rejected=1`，8 条评价已追加到现有 `generation_outcomes`；完整报告为 `Code/data/story_cli/assistant_trial_20260907_8b/assistant_evaluation.json`。
+- 两个需改样本的语义问题不同，尚无同类问题重复至少 3 次；Full 相对 Direct 的同题配对优势也未在本批次建立，因此不做局部修复、不扩充 5 篇、不触发 Release Pipeline promote。
+- 不新增 Supervisor、五层相似度、Creative Memory 或其他架构；当前 Serving 未改变，SQLite `integrity_check=ok`、`foreign_key_check=[]`。
+
+## 本轮（2026-09-07）：Story Agent 生成级一次自修复闭环
+
+- Story Agent 现为 `生成正文 → Story Validator → 导出`；Validator 逐项检查用户主线/创作要求、Function/Outline 因果、人物身份与动机、结局兑现、临时能力/解决方案和中文字符长度。
+- 首次未通过时只携带具体 issues 定向重写一次；重写固定原始 Outline、Function chain/constraints、seed 人物、核心冲突和结局目标，并锁定 title、人物映射和 scene_id；第二次仍失败直接导出 `rejected` 和 `needs_human_review=true`，没有循环。
+- 复用现有 `generation_outcomes`，payload 保存来源 Pattern、首次问题、首次验证、是否修复、复验结果和最终状态；正文 Outcome 的关系列不绑定 Pattern，避免污染既有 Pattern 反馈排序。不写 Function、Pattern、Serving Snapshot，也不执行 Evolve/promote。
+- 新增 3 条 Story Agent 回归覆盖首次通过、一次重写后通过、二次失败停止；定向回归 `14 passed`，全仓回归 `369 passed, 1 skipped`。未执行真实 LLM smoke，正式数据库未写入。

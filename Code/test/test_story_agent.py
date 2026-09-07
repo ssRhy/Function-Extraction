@@ -72,7 +72,7 @@ def _source():
     }
 
 
-def _mock_store(monkeypatch, source):
+def _mock_store(monkeypatch, source, outcomes=None):
     class FakeStore:
         def __init__(self, path):
             assert path == "knowledge.db"
@@ -80,6 +80,14 @@ def _mock_store(monkeypatch, source):
         def load_outline(self, outline_id):
             assert outline_id == "OUT_TEST"
             return source
+
+        def record_generation_outcome(self, *args, **kwargs):
+            assert args[0] == "snapshot_x"
+            assert args[1] is None
+            assert args[2] == "OUT_TEST"
+            if outcomes is not None:
+                outcomes.append((args, kwargs))
+            return "GO_TEST"
 
     monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
 
@@ -156,6 +164,21 @@ def _scene_developments():
             ),
         ),
     ])
+
+
+def _story_validation(**overrides):
+    values = {
+        "user_request_ok": True,
+        "causal_constraints_ok": True,
+        "character_consistency_ok": True,
+        "ending_ok": True,
+        "unsupported_solution_ok": True,
+        "length_ok": True,
+        "overall_ok": True,
+        "issues": [],
+    }
+    values.update(overrides)
+    return state.StoryValidation(**values)
 
 
 def test_load_outline_document_requires_existing_id(monkeypatch):
@@ -322,10 +345,13 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             assert payload["writing_requirements"] == {
                 "min_chinese_chars": 3000,
             }
+            long_text = "他在仓库里解决了危险。" * 200
             return state.StoryDraft(title="雾中灯塔", character_names={"P1": "林晚"}, scenes=[
-                state.StoryScene(scene_id="S2", text="他在仓库里解决了危险。"),
-                state.StoryScene(scene_id="S1", text="他在街道上发现了危险。"),
+                state.StoryScene(scene_id="S2", text=long_text),
+                state.StoryScene(scene_id="S1", text=long_text),
             ])
+        if output_schema is state.StoryValidation:
+            return _story_validation()
         raise AssertionError(output_schema)
 
     monkeypatch.setattr(app, "chat_structured", fake_chat)
@@ -334,7 +360,9 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
         "user_request": None, "out_dir": str(tmp_path / "stories"),
         "outline_data": None, "function_constraints": None,
         "scene_plan": None, "scene_developments": None,
-        "story": None, "result_path": "",
+        "story": None, "story_validation": None,
+        "first_story_validation": None, "story_revalidation": None,
+        "story_repair_count": 0, "result_path": "",
     })
     with open(result["result_path"], encoding="utf-8") as f:
         exported = json.load(f)
@@ -345,12 +373,97 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
         state.ScenePlanDraft,
         state.SceneDevelopmentPlan,
         state.StoryDraft,
+        state.StoryValidation,
     ]
     assert [item["segment_index"] for item in exported["function_constraints"]["segments"]] == [1, 2]
     assert exported["source_outline"]["contract_ledger"]["enabled"] is False
     assert exported["source_outline"]["validation"]["overall_ok"] is True
     assert exported["source_outline_id"] == "OUT_TEST"
     assert exported["story"]["character_names"] == {"P1": "林晚"}
+    assert exported["story_status"] == "accepted"
+    assert exported["generation_outcome_id"] == "GO_TEST"
     assert os.path.exists(result["result_path"].replace(".json", ".md"))
     markdown = open(result["result_path"].replace(".json", ".md"), encoding="utf-8").read()
     assert "F1" not in markdown and "scene_plan" not in markdown and "P1" not in markdown
+
+
+def _run_story_graph(tmp_path, monkeypatch, validations):
+    source = _source()
+    outcomes = []
+    _mock_store(monkeypatch, source, outcomes)
+    calls = []
+    story_calls = 0
+    validation_calls = 0
+
+    def fake_chat(messages, output_schema, **_kwargs):
+        nonlocal story_calls, validation_calls
+        calls.append(output_schema)
+        if output_schema is state.FunctionConstraintPlan:
+            return _function_constraints()
+        if output_schema is state.ScenePlanDraft:
+            return _scene_plan_draft()
+        if output_schema is state.SceneDevelopmentPlan:
+            return _scene_developments()
+        if output_schema is state.StoryDraft:
+            story_calls += 1
+            if story_calls > 1:
+                assert "Story Validator" in messages[-1]["content"]
+            long_text = "他在仓库里解决了危险。" * 200
+            return state.StoryDraft(
+                title="雾中灯塔", character_names={"P1": "林晚"}, scenes=[
+                    state.StoryScene(scene_id="S1", text=long_text),
+                    state.StoryScene(scene_id="S2", text=long_text),
+                ],
+            )
+        if output_schema is state.StoryValidation:
+            validation = validations[validation_calls]
+            validation_calls += 1
+            return validation
+        raise AssertionError(output_schema)
+
+    monkeypatch.setattr(app, "chat_structured", fake_chat)
+    result = app._build_graph().invoke({
+        "outline_id": "OUT_TEST", "knowledge_db": "knowledge.db",
+        "user_request": None, "out_dir": str(tmp_path / "stories"),
+        "outline_data": None, "function_constraints": None,
+        "scene_plan": None, "scene_developments": None, "story": None,
+        "story_validation": None, "first_story_validation": None,
+        "story_revalidation": None, "story_repair_count": 0,
+        "result_path": "",
+    })
+    with open(result["result_path"], encoding="utf-8") as f:
+        return json.load(f), calls, outcomes
+
+
+def test_story_validator_rewrites_once_then_accepts(tmp_path, monkeypatch):
+    exported, calls, outcomes = _run_story_graph(
+        tmp_path, monkeypatch,
+        [_story_validation(overall_ok=False, ending_ok=False, issues=["结局没有完成解决动作"]),
+         _story_validation()],
+    )
+
+    assert calls.count(state.StoryDraft) == 2
+    assert calls.count(state.StoryValidation) == 2
+    assert exported["story_repair_count"] == 1
+    assert exported["story_status"] == "rewritten"
+    assert exported["first_story_validation"]["issues"] == ["结局没有完成解决动作"]
+    assert exported["story_revalidation"]["overall_ok"] is True
+    assert outcomes[0][0][5] is True
+    assert outcomes[0][0][7] == "rewritten"
+
+
+def test_story_validator_stops_after_second_failure_and_rejects(tmp_path, monkeypatch):
+    failed = _story_validation(
+        overall_ok=False, causal_constraints_ok=False, issues=["因果链断裂"],
+    )
+    exported, calls, outcomes = _run_story_graph(tmp_path, monkeypatch, [failed, failed])
+
+    assert calls.count(state.StoryDraft) == 2
+    assert calls.count(state.StoryValidation) == 2
+    assert exported["story_repair_count"] == 1
+    assert exported["story_status"] == "rejected"
+    assert exported["needs_human_review"] is True
+    assert exported["story_revalidation"]["issues"] == ["因果链断裂"]
+    assert outcomes[0][0][4] is False
+    assert outcomes[0][0][5] is True
+    assert outcomes[0][0][7] == "rejected"

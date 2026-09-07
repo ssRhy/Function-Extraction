@@ -27,6 +27,7 @@ from Story_Agent.Prompt.Story_prompt import (
     FUNCTION_CONSTRAINT_PROMPT,
     SCENE_PLAN_PROMPT,
     STORY_PROMPT,
+    STORY_VALIDATOR_PROMPT,
 )
 from Story_Agent.state import (
     FunctionConstraintPlan,
@@ -34,11 +35,13 @@ from Story_Agent.state import (
     ScenePlanDraft,
     SourceOutlineDocument,
     StoryDraft,
+    StoryValidation,
     StoryState,
 )
 
 
 _DATA = os.path.join(_ROOT, "data")
+_MIN_CHINESE_CHARS = 3000
 
 
 def load_outline_document(knowledge_db, outline_id):
@@ -275,33 +278,137 @@ def develop_scenes_node(state):
 
 def write_story_node(state):
     source = state["outline_data"]
+    user_request = state.get("user_request") or source.get("user_request")
     user = {
         "seed": source["seed"],
+        "source_outline": source["outline"],
+        "function_chain": [item["function_name"] for item in source["outline"]["segments"]],
         "function_constraints": state["function_constraints"],
         "scene_plan": state["scene_plan"],
         "scene_developments": state["scene_developments"],
-        "user_request": state.get("user_request"),
+        "user_request": user_request,
         "writing_requirements": {
-            "min_chinese_chars": 3000,
+            "min_chinese_chars": _MIN_CHINESE_CHARS,
         },
         "ending_target": _ending_target(source),
         "ending_budget": source.get("ending_budget") or {},
         "ending": source["outline"]["ending"],
     }
+    repair = bool(state.get("story_validation")) and not state.get("story_repair_count", 0)
+    if repair:
+        user["current_story"] = state["story"]
     story = chat_structured([
         {"role": "system", "content": STORY_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-        *([{"role": "user", "content": f"补充创作要求：{state['user_request']}"}]
-          if state.get("user_request") else []),
+        *([{"role": "user", "content": f"补充创作要求：{user_request}"}]
+          if user_request else []),
+        *([{
+            "role": "user",
+            "content": (
+                "Story Validator 指出以下正文问题："
+                + "；".join(state["story_validation"].get("issues") or [])
+                + "。只修正这些问题。固定当前 title、character_names、scene_id、"
+                "seed、Function chain、function_constraints、scene_plan、核心冲突和结局目标；"
+                "不得修改任何上游结构或新增解决方案，只重新输出完整 JSON。"
+            ),
+        }] if repair else []),
     ], StoryDraft, reasoning_effort="medium").model_dump()
     story = validate_character_names(source, story)
-    return {"story": _align_story_scenes(state["scene_plan"], story)}
+    story = _align_story_scenes(state["scene_plan"], story)
+    if repair:
+        story["title"] = state["story"]["title"]
+        story["character_names"] = state["story"]["character_names"]
+    return {
+        "story": story,
+        "story_repair_count": state.get("story_repair_count", 0) + int(repair),
+    }
+
+
+def validate_story_node(state):
+    source = state["outline_data"]
+    user_request = state.get("user_request") or source.get("user_request")
+    text = _story_text(state["story"])
+    chinese_char_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+    user = {
+        "user_request": user_request,
+        "seed": source["seed"],
+        "source_outline": source["outline"],
+        "function_chain": [item["function_name"] for item in source["outline"]["segments"]],
+        "function_constraints": state["function_constraints"],
+        "scene_plan": state["scene_plan"],
+        "scene_developments": state["scene_developments"],
+        "ending_target": _ending_target(source),
+        "ending": source["outline"]["ending"],
+        "story": state["story"],
+        "chinese_char_count": chinese_char_count,
+        "min_chinese_chars": _MIN_CHINESE_CHARS,
+    }
+    validation = chat_structured([
+        {"role": "system", "content": STORY_VALIDATOR_PROMPT},
+        {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+    ], StoryValidation).model_dump()
+    validation["length_ok"] = chinese_char_count >= _MIN_CHINESE_CHARS
+    if not validation["length_ok"] and not any(
+        "长度" in issue or "字符" in issue for issue in validation["issues"]
+    ):
+        validation["issues"].append(
+            f"正文中文字符数为 {chinese_char_count}，低于 {_MIN_CHINESE_CHARS}"
+        )
+    checks = (
+        "user_request_ok", "causal_constraints_ok", "character_consistency_ok",
+        "ending_ok", "unsupported_solution_ok", "length_ok",
+    )
+    validation["overall_ok"] = all(validation[key] for key in checks)
+    if not validation["overall_ok"] and not validation["issues"]:
+        validation["issues"] = [
+            {
+                "user_request_ok": "正文偏离用户创作要求",
+                "causal_constraints_ok": "正文未兑现 Function/Outline 因果约束",
+                "character_consistency_ok": "人物身份或动机与输入不一致",
+                "ending_ok": "正文未完成结局目标",
+                "unsupported_solution_ok": "正文使用了输入未支持的临时解决方案",
+                "length_ok": f"正文中文字符数低于 {_MIN_CHINESE_CHARS}",
+            }[key]
+            for key in checks if not validation[key]
+        ]
+    result = {"story_validation": validation}
+    if state.get("story_repair_count", 0):
+        result["story_revalidation"] = validation
+    else:
+        result["first_story_validation"] = validation
+    return result
+
+
+def _should_repair_story(state):
+    return (
+        (state.get("story_validation") or {}).get("overall_ok") is False
+        and not state.get("story_repair_count", 0)
+    )
+
+
+def story_failure_type(validation):
+    if validation.get("overall_ok"):
+        return None
+    semantic_checks = (
+        "user_request_ok", "causal_constraints_ok", "character_consistency_ok",
+        "ending_ok", "unsupported_solution_ok",
+    )
+    return "rule" if all(validation.get(key) for key in semantic_checks) else "semantic"
+
+
+def story_follow_up(validation_ok, repair_occurred):
+    if not validation_ok:
+        return "rejected"
+    return "rewritten" if repair_occurred else "accepted"
 
 
 def export_node(state):
     story = state["story"]
     text = _story_text(story)
     chinese_char_count = len(re.findall(r"[\u4e00-\u9fff]", text))
+    validation = state["story_validation"]
+    repair_occurred = bool(state.get("story_repair_count"))
+    follow_up_action = story_follow_up(bool(validation.get("overall_ok")), repair_occurred)
     result = {
         "source_outline_id": state["outline_id"],
         "source_outline": state["outline_data"],
@@ -310,9 +417,32 @@ def export_node(state):
         "scene_developments": state["scene_developments"],
         "story": story,
         "chinese_char_count": chinese_char_count,
-        "length_ok": chinese_char_count >= 3000,
+        "length_ok": chinese_char_count >= _MIN_CHINESE_CHARS,
+        "story_validation": validation,
+        "first_story_validation": state.get("first_story_validation"),
+        "story_revalidation": state.get("story_revalidation"),
+        "story_repair_count": state.get("story_repair_count", 0),
+        "story_status": follow_up_action,
+        "needs_human_review": follow_up_action == "rejected",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }
+    outcome_id = StoryKnowledgeStore(state["knowledge_db"]).record_generation_outcome(
+        state["outline_data"]["snapshot_id"], None,
+        state["outline_id"], state["outline_data"].get("planner_mode", "published"),
+        bool(validation.get("overall_ok")), repair_occurred,
+        story_failure_type(validation), follow_up_action,
+        {
+            "generation_stage": "story",
+            "pattern_id": state["outline_data"].get("pattern_id"),
+            "first_issues": (state.get("first_story_validation") or {}).get("issues", []),
+            "first_validation": state.get("first_story_validation"),
+            "repair_occurred": repair_occurred,
+            "revalidation": state.get("story_revalidation"),
+            "final_status": follow_up_action,
+            "chinese_char_count": chinese_char_count,
+        },
+    )
+    result["generation_outcome_id"] = outcome_id
     os.makedirs(state["out_dir"], exist_ok=True)
     base = f"{state['outline_id']}_story_{time.strftime('%Y%m%dT%H%M%S')}"
     json_path = os.path.join(state["out_dir"], base + ".json")
@@ -331,13 +461,19 @@ def _build_graph():
     graph.add_node("plan_scenes", plan_scenes_node)
     graph.add_node("develop_scenes", develop_scenes_node)
     graph.add_node("write_story", write_story_node)
+    graph.add_node("validate_story", validate_story_node)
     graph.add_node("export", export_node)
     graph.add_edge(START, "load_outline")
     graph.add_edge("load_outline", "function_constraints")
     graph.add_edge("function_constraints", "plan_scenes")
     graph.add_edge("plan_scenes", "develop_scenes")
     graph.add_edge("develop_scenes", "write_story")
-    graph.add_edge("write_story", "export")
+    graph.add_edge("write_story", "validate_story")
+    graph.add_conditional_edges(
+        "validate_story",
+        lambda state: "write_story" if _should_repair_story(state) else "export",
+        {"write_story": "write_story", "export": "export"},
+    )
     graph.add_edge("export", END)
     return graph.compile()
 
@@ -359,6 +495,10 @@ def main():
         "scene_plan": None,
         "scene_developments": None,
         "story": None,
+        "story_validation": None,
+        "first_story_validation": None,
+        "story_revalidation": None,
+        "story_repair_count": 0,
         "result_path": "",
     })
     with open(result["result_path"], encoding="utf-8") as f:
