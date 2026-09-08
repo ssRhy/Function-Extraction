@@ -18,7 +18,11 @@ def _source():
         "snapshot_id": "snapshot_x",
         "pattern_name": "P",
         "genre": "01_悬疑惊悚",
-        "seed": {"characters": [{"id": "P1", "role": "hero"}], "core_conflict": "c"},
+        "seed": {
+            "characters": [{"id": "P1", "role": "hero"}],
+            "core_conflict": "c",
+            "ending_direction": "seed创作的稳定终态",
+        },
         "mechanism_plan": {"steps": [
             {
                 "segment_index": 1, "function_name": "F1", "role_bindings": {"P1": "发现者"},
@@ -325,7 +329,12 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
         payload = json.loads(messages[-1]["content"])
         if output_schema is state.FunctionConstraintPlan:
             assert payload["contract_ledger"]["enabled"] is False
-            assert payload["ending_target"]["source"] == "pattern"
+            assert payload["ending_target"] == {
+                "source": "llm_seed",
+                "resolves": "c",
+                "must_show": [],
+                "final_state": "seed创作的稳定终态",
+            }
             assert "ending_spec" not in payload
             return _function_constraints()
         if output_schema is state.ScenePlanDraft:

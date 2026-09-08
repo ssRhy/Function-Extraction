@@ -254,12 +254,12 @@ def test_seed_character_has_explicit_initial_stance():
     assert character.stance_toward_protagonist == "self"
 
 
-def test_build_ending_target_uses_seed_when_pattern_has_no_spec():
+def test_build_ending_target_uses_llm_seed():
     target = app.build_ending_target(
-        None, {"core_conflict": "解决冲突", "ending_direction": "恢复稳定"},
+        {"core_conflict": "解决冲突", "ending_direction": "恢复稳定"},
     )
     assert target == {
-        "source": "seed",
+        "source": "llm_seed",
         "resolves": "解决冲突",
         "must_show": [],
         "final_state": "恢复稳定",
@@ -448,7 +448,7 @@ def test_validate_distinguishes_seed_ending_target_from_generated_ending(monkeyp
         payload = json.loads(messages[-1]["content"])
         assert "ending_spec" not in payload
         assert payload["ending_target"] == {
-            "source": "seed",
+            "source": "llm_seed",
             "resolves": "核心冲突",
             "must_show": [],
             "final_state": "恢复稳定",
@@ -490,6 +490,10 @@ def test_prompts_limit_relationship_state_to_function_evidence():
     assert "题材标签" in app.SEED_PROMPT
     assert "关系类型" in app.SEED_PROMPT
     assert "可观察解决动作 → 直接冲突结果 → 稳定终态" in app.SEED_PROMPT
+    assert "历史模板的结局参考" in app.SEED_PROMPT
+    assert "用户明确的创作要求优先于它" in app.SEED_PROMPT
+    assert "本轮 LLM seed" in app.NARRATIVE_PROMPT
+    assert "不由 Pattern 的 `ending_spec` 直接提供" in app.VALIDATE_PROMPT
     assert "状态上界" in app.REALIZE_PROMPT
     assert "overall_ok 必须为 false" in app.VALIDATE_PROMPT
 
@@ -651,6 +655,12 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
         if output_schema is app.MechanismPlan:
             payload = json.loads(messages[-1]["content"])
             assert payload["reference_motifs"] == []
+            assert payload["ending_target"] == {
+                "source": "llm_seed",
+                "resolves": "c",
+                "must_show": [],
+                "final_state": "e",
+            }
             return app.MechanismPlan(steps=[
                 state.MechanismStep(segment_index=index, function_name=name, role_bindings={}, who_does_what="",
                                   why="", state_change="", character_state_changes={}, connects_to_next="")

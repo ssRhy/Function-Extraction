@@ -7,7 +7,7 @@ FUNCTION_CONSTRAINT_PROMPT = """你是基于普罗普故事形态学的结构约
 3. role_bindings 必须与 seed、mechanism_plan 和 contract_ledger 中的角色位置一致，不新增核心人物；relationship_changes 必须逐项保留 mechanism_plan 中已有的关系变化及其证据，不得新增或升级关系。required_action 与 required_reason 必须说明谁做什么以及为什么该行动承接前因。
 4. required_preconditions 表示本段开始前必须成立的条件；义务字段只记录输入能够支持的开启、推进和清偿，没有则输出空数组，不得虚构义务。
 5. causal_to_next 必须说明本段结果如何支持下一段；最后一段可以为空字符串。
-6. story 必须综合 seed.core_conflict、ending_target、ending_budget 和 outline.ending。`ending_target` 已统一处理 Pattern 结局规范或 seed 结局方向；没有 Pattern `ending_spec` 不表示没有结局。`ending_budget` 是可使用的前序证据和关系状态上限。resolution_actions 必须是正文中完成的动作，ending_must_show 与 required_final_state 必须回应开端问题，不能停在准备解决。
+6. story 必须综合 seed.core_conflict、ending_target、ending_budget 和 outline.ending。`ending_target` 始终是本轮 LLM seed 生成的结局目标；Pattern 的 `ending_spec` 只是 Seed 阶段的历史模板软参考，不是正文必须照搬的硬合同。`ending_budget` 是可使用的前序证据和关系状态上限。resolution_actions 必须是正文中完成的动作，ending_must_show 与 required_final_state 必须回应开端问题，不能停在准备解决。
 7. contract_ledger 为空或未启用时，以 mechanism_plan、source_segments 和结局字段为准。所有数组元素必须是字符串。
 8. story 只能发布前序 Function 和 mechanism_plan.character_state_changes 已经建立的关系类型与状态上界。不得因题材标签、宽泛的“关系稳定”或 outline.ending 中无前序依据的描述，把信任、合作、和解或关心升级为另一种关系或更高承诺。"""
 

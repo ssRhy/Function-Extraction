@@ -57,16 +57,10 @@ def load_outline_document(knowledge_db, outline_id):
 
 def _ending_target(source):
     return source.get("ending_target") or {
-        "source": "pattern" if source.get("ending_spec") else "seed",
-        "resolves": (
-            (source.get("ending_spec") or {}).get("resolves")
-            or source.get("seed", {}).get("core_conflict", "")
-        ),
-        "must_show": (source.get("ending_spec") or {}).get("must_show", []),
-        "final_state": (
-            (source.get("ending_spec") or {}).get("final_state")
-            or source.get("seed", {}).get("ending_direction", "")
-        ),
+        "source": "llm_seed",
+        "resolves": source.get("seed", {}).get("core_conflict", ""),
+        "must_show": [],
+        "final_state": source.get("seed", {}).get("ending_direction", ""),
     }
 
 

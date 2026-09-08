@@ -319,12 +319,10 @@ def _relationship_constraints(chain):
     ]
 
 
-def build_ending_target(ending_spec, seed):
-    """将可选的 Pattern 结局规范统一为本轮实际结局目标。"""
-    if ending_spec:
-        return {"source": "pattern", **ending_spec}
+def build_ending_target(seed):
+    """将 LLM seed 的本轮结局方向统一为唯一实际目标。"""
     return {
-        "source": "seed",
+        "source": "llm_seed",
         "resolves": seed.get("core_conflict", ""),
         "must_show": [],
         "final_state": seed.get("ending_direction", ""),
@@ -640,7 +638,7 @@ def mechanism_node(state):
     user = {
         "chain": _compact_chain(state["chain"]),
         "seed": state["seed"],
-        "ending_target": build_ending_target(state.get("ending_spec"), state["seed"]),
+        "ending_target": build_ending_target(state["seed"]),
         "relationship_constraints": _relationship_constraints(state["chain"]),
         "reference_motifs": (state.get("planner_references") or {}).get("motifs", []),
         "reference_role_stats": (state.get("planner_references") or {}).get("role_stats", {}),
@@ -678,7 +676,7 @@ def scaffold_node(state):
         "chain": _compact_chain(state["chain"]),
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
-        "ending_target": build_ending_target(state.get("ending_spec"), state["seed"]),
+        "ending_target": build_ending_target(state["seed"]),
         "ending_budget": build_ending_budget(state),
         "reference_motifs": (state.get("planner_references") or {}).get("motifs", []),
     }
@@ -707,7 +705,7 @@ def scaffold_node(state):
 def realize_node(state):
     user = {
         "chain": _compact_chain(state["chain"]),
-        "ending_target": build_ending_target(state.get("ending_spec"), state["seed"]),
+        "ending_target": build_ending_target(state["seed"]),
         "ending_budget": build_ending_budget(state),
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
@@ -746,7 +744,7 @@ def validate_node(state):
             {"segment_index": step["segment_index"], "function_name": step["function_name"]}
             for step in state["chain"]
         ],
-        "ending_target": build_ending_target(state.get("ending_spec"), state["seed"]),
+        "ending_target": build_ending_target(state["seed"]),
         "ending_budget": build_ending_budget(state),
         "generated_ending": (state.get("outline") or {}).get("ending"),
         "seed": state["seed"],
@@ -878,7 +876,7 @@ def export_node(state):
         "genre": state["genre"],
         "user_request": state.get("user_request"),
         "ending_spec": state.get("ending_spec"),
-        "ending_target": build_ending_target(state.get("ending_spec"), state["seed"]),
+        "ending_target": build_ending_target(state["seed"]),
         "ending_budget": build_ending_budget(state),
         "chain": [step["function_name"] for step in state["chain"]],
         "seed": state["seed"],
