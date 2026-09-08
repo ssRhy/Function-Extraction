@@ -1965,3 +1965,105 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - `Code/Story_Agent/app.py` 的 `_align_story_scenes()` 现在只在正文场景数量与 scene plan 不一致时拒绝；数量一致时直接按 scene plan 顺序覆盖正文 scene ID，不再要求 LLM 返回的 ID 集合先完全匹配。
 - 使用上一轮正式副本只重跑 `OUT_SMOKE_MEDICINE_DRIFT`。本次正文 3807 个中文字符，scene ID 对齐后全部匹配 plan，Validator 返回 `overall_ok=true、repairable=false`，最终 `accepted`，Outcome=`GO_a8cfb22aedfa9b8f`，没有发生重写。
 - 人工抽查本次正文确实完成寻药、血引救治、权力危机解决和医脉安置，未发现需要触发修复的主线偏离；因此不人为把 accepted 改成 rewritten。副本最终 `outlines=28`、`generation_outcomes=36`、`pattern_usage=26`、`snapshots=9`，完整性和外键检查通过，正式库与 Serving 不变。
+
+## 本轮（2026-09-08）：明确创作要求下的 Full vs Direct 小实验
+
+- 选定古风仙侠，固定 3 个带明确创作要求的题目；`fx_01` 使用已有明确请求，`fx_02/fx_03` 是为实验新增的可复现 benchmark brief，不冒充历史用户请求。三题均以同一当前 Serving Snapshot 生成 Full：`Serving Pattern → Outline → Story → Story Validator`；Direct 使用同一 `deepseek-v4-flash + reasoning_effort=medium`，不读取 Function、Pattern、motif、Outline 或知识库。
+- 三组 Full 均完成导出并通过 Validator，中文字符数为 `6468/6330/5775`，均未触发一次性正文修复；Direct 字符数为 `3237/4098/6330`。`fx_02` 首次 Story 场景规划出现与大纲段数不一致，单次自然重试后成功，未继续循环。
+- 匿名单模型盲评结果：`fx_01` Full 胜，`fx_02/fx_03` Direct 胜；Full/Direct 胜负为 `1/2`。四项均分为：Full 的要求执行 `3.667`、因果动机 `3.667`、结局 `4.000`、非模板化 `2.667`；Direct 分别为 `3.333/4.000/4.000/3.333`。这是单模型匿名评审，不等同于多人类盲评。
+- 决策：本批没有证明抽取模板让生成结果优于 Direct LLM，因此不扩充 5 篇真实故事、不新增 Supervisor/五层相似度/Creative Memory、不执行 Evolve、Pattern、候选 Snapshot 或 promote。正式 DB SHA-256 仍为 `e7c6f2cf905c3b19e7cd1ab3aa4848a00fab16f3a655cb8596a0431fffb8d8c0`，只读完整性检查通过。
+- 可复核产物：`Code/data/evaluation/explicit_xianxia_20260908/experiment_manifest.json`、`experiment_summary.json`、`blind_pairs.json`、`blind_review.json`；`blind_key.json` 单独保存 A/B 映射。
+
+## 本轮（2026-09-08）：Pipeline 一键入口贯通明确创作要求
+
+- `Code/Pipeline_Agent` 新增 CLI `--request`，并将值贯通 `PipelineState.user_request`、Outline Agent、Story Agent；不改变现有 Pattern、Snapshot 或数据库边界。
+- `pipeline_manifest.json` 现在保存 `user_request`，因此入口参数、两阶段调用和最终产物可相互核对。
+- Pipeline 定向回归 `3 passed`，CLI `--help` 已确认暴露 `--request`；未启动真实 LLM 生成，未修改正式数据库。
+
+## 本轮（2026-09-08）：真实 LLM Pipeline 单次验证在 Story 结构化输出失败
+
+- 使用正式 serving Snapshot `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77` 的 SQLite 副本，执行一次完整 Pipeline，输入为古风仙侠和寻药/城破权力危机创作要求；Outline 成功，`OUT_ff45ef006dfa9812` 的 `validation.overall_ok=true`。
+- Outline JSON 与副本 `outlines` 记录均保留完整 `user_request`，证明 CLI → PipelineState → Outline 的真实传递成立；Pipeline 随后确实启动 Story，但 `write_story_node` 的结构化输出 2 次重试仍失败：一次非法 JSON 控制字符，一次空响应。
+- 因 Story 未导出，未生成 `pipeline_manifest.json`、Story JSON 或 Story Outcome；副本最终 `outlines=28`、`generation_outcomes=35`、`pattern_usage=27`，完整性/FK 通过。正式库 SHA-256 仍为 `e7c6f2cf905c3b19e7cd1ab3aa4848a00fab16f3a655cb8596a0431fffb8d8c0`，计数与 Serving 未变。
+
+## 本轮（2026-09-08）：Pattern ending_spec 降为 Seed 软参考
+
+- `build_ending_target()` 现在无论 Pattern `ending_spec` 是否非空，都只从当前 LLM Seed 的 `core_conflict`/`ending_direction` 生成唯一目标，审计 source 为 `llm_seed`；`ending_spec` 仍单独传给 `seed_node` 并随 Outline 导出，不再复制为 `resolves`、`must_show` 或 `final_state` 的硬要求。
+- SEED/NARRATIVE/REALIZE/VALIDATE 及 Story Prompt 已明确用户创作要求优先、`ending_spec` 只作历史模板软参考；Outline/Story 继续使用既有 Function chain、ending_budget、前序证据和一次性正文重写边界。
+- 离线验证：Outline/Story 定向 `49 passed`；Outline/Dynamic/Contract/Story/KnowledgeBase 相关回归 `78 passed`；`compileall`、`git diff --check` 通过。组合回归另受环境缺少 `langgraph.checkpoint.sqlite` 和 `sentence_transformers/transformers` 导入错误阻塞。
+- 真实 smoke 使用正式 serving Snapshot 的临时 DB 副本和请求“古风仙侠，被逐出师门的阵师回乡解决水患，人物关系克制，不要靠外挂”：Pattern `剧变启程·结缘历险·认知重构` 的 `ending_spec=null`，Seed 生成方向，Outline `OUT_61eb55bf01e6d5f8` 校验通过，Story `ending_ok=true`、`overall_ok=true`、未重写。副本 `integrity_check=ok`；正式库前后 SHA-256 均为 `e7c6f2cf905c3b19e7cd1ab3aa4848a00fab16f3a655cb8596a0431fffb8d8c0`，正式计数与 Serving 未变。
+
+## 本轮（2026-09-08）：模板完整性不再等同于文学上的全解释与全解决
+
+- 从《枯井新泉》和《渡渊》的共同问题收敛出四个生成偏差：真相由人物集中说明、强钩子未进入核心因果、主角缺少可理解的错误与不可逆代价、个人觉悟过快清除制度/战争等系统阻力。
+- 只调整现有 Outline/Story Prompt：人物成长型冲突优先赋予主角盲点；调查型情节用分散证据推进；强钩子必须兑现；“稳定终态”改为核心选择及直接后果落定，允许制度余波继续存在；正文避免人物替作者总结主题和完整动机。没有新增 schema、Validator 指标、规则门禁、数据库或 Agent。
+- Validator 明确 seed goal/motivation 是开场驱动力而非结局义务，有充分事件推动时可以被修正或放弃；仍保留 Function、关系上界、因果、结局动作和无临时解决方案边界。Outline/Story 定向回归 `49 passed`，compileall 与 `git diff --check` 通过。
+- 一次正式库副本真实 smoke 的 Seed 已自然生成主角偏见、错误选择、活体锚点代价、已兑现的水兽钩子和未解决的三方水权摩擦；候选 Outline 仍因关系修复超过 Function 上界及证据铺陈不一致被拒绝，未进入 Story。该结果证明边界未被放松，但尚未证明最终正文文学质量改善；不随机重跑，不写正式库。
+
+## 本轮（2026-09-08）：核心冲突与结局尺度改为显式 Seed 合同
+
+- 用户指出真实生成《残玉照烽烟》存在系统性“大阴谋 → 小案件”问题，而非单篇题材问题。仅在 Validator Prompt 中增加尺度提醒后，用原 Outline 真实复验仍被判为通过，证明两段自由文本不足以稳定承载该边界。
+- `StorySeed` 新增必填 `ending_requirements`：逐项记录 `core_conflict` 中每个主线问题在结局必须展示的可观察直接后果；`build_ending_target()` 将其直接写入既有 `ending_target.must_show`，复用当前 Outline → Function constraints → Scene plan → Story → Validator 数据流，不新增节点、数据库或评分器。
+- Seed/Narrative/Realize/Story 提示统一要求：Function 链承接不了的战争、国家、宗门、家族、制度或世界危机只作 `world_setting` 背景；一旦进入核心冲突，结局必须产生同尺度后果。Outline/Story Validator 继续逐项检查 `must_show`，个人洗冤、揭露单个反派、恢复身份或迁移人物不能代偿系统主线。
+- 回归：定向 `67 passed`，全仓 `371 passed, 1 skipped`，compileall 与 `git diff --check` 通过。真实副本的新 Seed 已生成 4 条 `ending_requirements`，包括人物代价、边陲责任、村庄存续和宗门控制变化，并进入 `ending_target.must_show`；候选随后因 Function 链关系破裂却在 ending 和解相守被既有关系上界拒绝，未进入 Story。正式 DB SHA-256、计数与 Serving 均未改变。
+
+## 本轮（2026-09-08）：为 Ending 增加独立可执行场景
+
+- 真实古风仙侠样本 `OUT_579d2cb9a640d7eb` 暴露：Seed/Outline 已生成两条 `ending_target.must_show`，但 Scene Plan 只有 Function 场景；代码把最后一个 Function 场景直接标成 `resolves_ending`，正文因此在“逃出凉州”处提前收束。该样本正文 9403 字符、Validator `accepted`，但人工核对发现没有展示城破后的长期后果。
+- `ScenePlanDraft` 新增必填 `ending`（1–3 个场景）。`build_scene_plan()` 将其追加到全部 Function 场景之后，标记为 `is_ending=true` 且不绑定 Function；Function 场景不再承担独立结局。
+- Story Prompt/Scene Development Prompt 已要求最后的独立 Ending 场景实际完成 `resolution_actions`、`ending_must_show` 和 `required_final_state`。`StoryValidation` 新增 `ending_evidence`，代码检查每条 `must_show` 是否映射到独立 Ending scene_id；缺失时按正文可修复问题进入一次定向重写。
+- 定向 Story Agent `17 passed`，全仓 `373 passed, 1 skipped`，compileall 和 `git diff --check` 通过。真实副本 Pipeline 已完成：`OUT_3b10dffba7e77549`，正文 6163 字符，`accepted`，`ending_evidence` 的 3 项全部映射到独立 Ending `S6–S8`；副本 `integrity_check=ok`、外键为空。正式库 SHA-256 仍为 `e7c6f2cf905c3b19e7cd1ab3aa4848a00fab16f3a655cb8596a0431fffb8d8c0`，未写入正式库。
+
+## 本轮（2026-09-08）：真实复用 Outline 验证独立 Ending 正文
+
+- 使用当前 Serving Snapshot 的正式数据库副本运行真实 LLM。完整 Pipeline 首次成功生成 Outline `OUT_ed9d75fbfedbb274`，随后正文请求等待约 8 分钟无返回，停止该次卡住进程；没有把部分运行记为成功。
+- 复用该真实 Outline 单独运行 Story Agent 后成功导出《断臂辞》：Story `accepted`、未重写、Validator `overall_ok=true`，Ending evidence 的 3 项均映射到独立 Ending 场景 `S5`，正文和 JSON/Markdown 产物保留在 `/tmp/function-story-real.OGjB3D/story_retry/`。
+- 正文实际中文字符数为 `3489`。本次请求要求至少 `3500`，但当前确定性长度下限仍是 `3000`，因此系统报告 `length_ok=true`；这暴露了“用户长度要求未进入确定性门禁”的真实缺口，不把本次记为完全满足请求。
+- 副本 `integrity_check=ok`、外键为空；正式库 SHA-256 仍为 `e7c6f2cf905c3b19e7cd1ab3aa4848a00fab16f3a655cb8596a0431fffb8d8c0`，未写入正式库。该结果证明独立 Ending 场景能被真实正文执行，但不证明文学质量或长度门禁已经收尾。
+
+## 本轮（2026-09-08）：收窄 Story Agent 中间 Schema
+
+- 删除 `resolves_ending`（与 `is_ending` 重复）、正文侧未使用的 `story_profile` 和 LLM 输出的 `length_ok`。长度仍由 Story Agent 的确定性中文字符计数负责，导出报告继续保留结果。
+- 删除 `FunctionConstraintPlan.story` 结局副本；正文继续直接读取原始 `ending_target` 与 `outline.ending`，避免同一结局被中间 LLM 再描述一次。
+- 将 `SceneDevelopment` 收窄为 `scene_id`、`pacing_mode`、`expand_points`，删除 `reaction_decision`、`causal_moments`、`exit_aftereffect` 和 `literary_plan`，减少一次性文学调度对正文的硬约束。
+- 定向 Story Agent `17 passed`，全仓 `373 passed, 1 skipped`；compileall 和 `git diff --check` 通过。未执行真实 LLM smoke，正式数据库未写入。
+### 本轮（2026-09-08）：结局证据只作诊断
+
+`ending_evidence` 不再作为独立的拒绝/重写门禁，也不要求与复合 `ending_must_show` 一一对应；结局是否通过只由 Story Validator 的 `ending_ok/overall_ok` 和现有确定性长度、场景结构检查决定。保留该字段用于审计，避免把 LLM 的证据映射格式误判为正文结局失败。
+
+### 本轮（2026-09-08）：统一三阶段正式 CLI
+
+- `StoryCLI function bootstrap` 新增必填 `--reset-formal`：执行前将 Knowledge DB、Registry、Chroma Bank、Ontology Snapshot 和 checkpoint 移入 `data/formal_archives/<timestamp>/`，再建立干净正式链路；Bootstrap 与 Pattern 成功后自动 promote 根 Snapshot。
+- `StoryCLI function evolve` 继续基于当前 serving Snapshot 做批量增量，自动运行 Pattern，但只输出候选 Snapshot，不自动切换 serving。
+- 新增 `StoryCLI story generate`：只接收 `--request` 或 `--request-file`，用确定性题材关键词识别五类 genre，复用 `Pipeline_Agent` 将要求传入 Outline 和 Story；默认读取 serving，可用 `--snapshot-id` 试用候选。
+- 定向 CLI/Pipeline `16 passed`，全仓 `379 passed, 1 skipped`，compileall 和 `git diff --check` 通过。未执行真实 reset、Bootstrap、Evolve 或 LLM。
+
+### 本轮（2026-09-08）：公开 CLI 收敛为一键链路
+
+- 新增 `StoryCLI run --bootstrap ... --evolve ... --request ...`，用户不再需要 namespace 或 Snapshot ID；内部固定公开 namespace，自动把 Bootstrap 根 Snapshot 和 Evolve 候选传给下一阶段。
+- 默认不重置正式历史；`--reset-formal` 显式归档并重建正式链路。Evolve 候选仅用于本次 Story，不自动切换 serving。
+- 已补一键链路和公开参数回归；未执行真实 LLM 或正式 reset。
+
+### 本轮（2026-09-08）：公开 CLI 修正为三个独立入口
+
+- 用户指出“一键 `run`”不符合使用方式，且 `Bootstrap → Pattern` 省略了 Bootstrap 内部的 Function 提取；公开流程改为 `bootstrap：文本 → Function → Pattern → serving`、`evolve：新文本 → Function 增量 → Pattern 增量 → candidate`、`story generate：用户要求 → serving → Outline → Story`。
+- 新增顶层 `StoryCLI bootstrap` 和 `StoryCLI evolve`，公开参数不再包含 namespace 或 Snapshot ID；Evolve 可用 `--promote` 明确发布候选。`StoryCLI story generate` 仅接收用户要求和输出目录。
+- 移除公开 `StoryCLI run`，独立 CLI 教程已同步更新；定向回归 `17 passed`，全仓 `380 passed, 1 skipped`。
+
+### 本轮（2026-09-08）：公开 Evolve 继承现有 serving namespace
+
+- 真实用户执行公开 `StoryCLI evolve` 时，当前 serving Snapshot 属于历史正式 namespace `real_coordinator_rebuild_v5_20260904`，公开入口固定传 `story_cli`，导致在真正处理语料前报 namespace 不一致。
+- 公开 Evolve 现在不再传固定 namespace；未显式指定时从父 serving Snapshot manifest 继承 namespace，底层显式 namespace 仍保留一致性校验。
+- 定向 StoryCLI 回归 `15 passed`。真实重跑已进入 Evolve 主流程，但因所选项目文本已登记且人物画像不一致而安全失败；失败 Run 没有 Snapshot，原 serving 保持不变。
+
+### 本轮（2026-09-08）：公开 Evolve 真实复用项目语料
+
+- 选用项目内未登记的 `zhihu_story_subset_500_5domains_20260821_clean/04_末世科幻/1929371857_463723763.txt`（9357 字）执行公开 `StoryCLI evolve`。
+- Run `FR_72e2015819d341e1` 成功，候选 Snapshot 为 `real_coordinator_rebuild_v5_20260904_20260908T121306266945Z_9289a8851c77`；9 个 Observation，7 条 MATCH/EXTEND，2 条 NOVEL，Function/Pattern 验收报告 PASS（5/6，diversity 因单篇输入不达标）。
+- 候选未 promote，当前 serving 仍为 `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`。产物位于 `data/story_cli/functions/example_evolve_1929371857/`。
+
+### 本轮（2026-09-08）：正式主线切换与 CLI 副本清理
+
+- 将成功的 Evolve Snapshot `real_coordinator_rebuild_v5_20260904_20260908T121306266945Z_9289a8851c77` promote 为唯一 serving；其父 Snapshot lineage 保留在正式 SQLite 中。
+- 正式库核验：`snapshots=12`、`serving_snapshots=1`，候选父版本仍为 `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`；候选的正式 `ontology_snapshots` 目录保留。
+- `data/story_cli/functions/` 下 5 个 `example_evolve_*` 测试/副本运行目录移入系统废纸篓，可恢复；未删除 SQLite 行、正式 Registry、Bank 或 Snapshot lineage。

@@ -1602,3 +1602,96 @@ Function 集合 + 规则/状态/故事目标
 
 - 用户要求把 scene ID 对齐从“ID 集合必须先匹配”收窄为“数量一致即可按 plan 顺序覆盖 ID”；数量不一致仍是 Schema/结构错误。这样修复的是 LLM 输出元数据漂移，不引入故事语义规则。
 - 修复后的寻药真实重跑成功进入 Validator 并 `accepted`。人工抽查确认正文实际完成寻药主线和固定结局，因此没有触发重写；之前的 scene ID 硬失败已被最小对齐逻辑消除。
+
+## 243. 明确创作要求下仍未证明模板收益（2026-09-08）
+
+- 为验证项目核心价值，固定 3 个古风仙侠具体请求，逐题比较当前 `Serving Pattern → Outline → Story` 与同模型 Direct LLM，并使用匿名 A/B 单模型评审。Full 三题均通过 Story Validator；但其中一题需场景规划重试，三题均未触发正文自修复。
+- 评审结果为 Full 胜 1 题、Direct 胜 2 题；Full 的非模板化均分反而低于 Direct（`2.667` vs `3.333`），要求执行、因果动机和结局也没有形成稳定优势。该结果不能证明 Direct 普遍更好，只能说明当前模板链的核心收益尚未被小样本证明。
+- 因此继续扩 Corpus 或增加 Supervisor/五层相似度/Creative Memory 都缺少决策依据。下一次若要继续验证，应优先做真正多人类盲评或增加同题配对数量；在此之前维持当前 Serving，正常积累 `generation_outcomes`，只对重复出现的问题做局部修复。
+
+## 244. 一键生成入口必须保留用户创作要求（2026-09-08）
+
+- 用户指出正式 Pipeline 入口把 `user_request` 固定为 `None`，导致明确创作要求无法进入 Outline 和 Story；这不是新增生成能力，而是已有两个 Agent 接口在控制层的断链。
+- 最小修复是新增 Pipeline CLI `--request`，贯通状态和两次 Agent invoke，并把原始请求写入 `pipeline_manifest`；不新增数据库字段、质量层或兼容路径。
+
+## 245. 真实 Pipeline 验证区分请求传递成功与 Story 模型失败（2026-09-08）
+
+- 单次真实 LLM Pipeline 已证明 `--request` 能进入 Outline 并被写入副本 SQLite；Outline 校验通过后正常启动 Story，参数断链问题不再复现。
+- 本次在 Story 正文结构化输出阶段失败，2 次重试分别得到非法 JSON 控制字符和空响应；因此没有 manifest、正文导出或 Story Outcome。该结果只说明本次模型输出未完成，不足以支持新增重试层或其他架构。
+
+## 246. ending_spec 只能影响 Seed 创作，不能成为本轮硬结局（2026-09-08）
+
+- 用户明确把结局优先级收敛为“用户要求 → Pattern/Function/Contract/真实参考 → LLM Seed → Outline/Story 具体结尾”。因此保留 `ending_spec` 的历史审计可见性，但移除它直接覆盖 `ending_target` 的路径；`ending_target.source=llm_seed`，`must_show` 继续为空，具体解决动作由现有 Outline ending 生成。
+- 这不是放松结局约束：Seed 仍必须基于 core_conflict、Function chain、人物动机和前序边界创作“可观察解决动作 → 直接冲突结果 → 稳定终态”，Outline/Story Validator 仍检查前序证据、因果、稳定终态和临时方案，正文最多定向重写一次。
+- 真实古风仙侠副本已出现完整闭环：`ending_spec=null`，Seed 生成水患疏导方向，Outline 与 Story 均按 `llm_seed` target 完成且 `ending_ok=true`。非空 `ending_spec` 的“不得覆盖 Seed”由离线端到端测试覆盖，不以本次 null 样本冒充非空生产证据。
+
+## 247. 不用新的文学模板修复旧模板感（2026-09-08）
+
+- 用户从《枯井新泉》提出：真相揭露像审讯笔录、后半段一路绿灯、古兽强钩子未兑现、主角始终正确；结合《渡渊》可归为“说得太明、收得太顺、主角太正”，根因位于 Seed/Narrative/Realize/Story 的创作偏好，而不是缺少更多 Validator 门禁。
+- 最小修复采用条件性软原则，而不是给所有故事强制同一情节：只有人物成长/价值选择型冲突才优先安排盲点与错误选择；只有调查/旧案/秘密型故事才要求分散证据；强钩子进入核心因果；稳定终态允许系统余波。Validator 不评价含蓄程度或文学质量。
+- 真实副本候选说明“人物改变”和“结构合同”必须区分：主角可以因事件放弃开场 goal，但不能在 Function 链只形成后又破坏关系时，于 ending 无证据恢复互信合作。前者是人物弧线，后者仍是结构越界；因此只纠正 Validator 对 goal 的误读，不取消现有关系上界。
+
+## 248. Pattern 可以是局部的，但 Seed 不得制造无法清偿的完整故事规模（2026-09-08）
+
+- 用户进一步指出《残玉照烽烟》的最大问题不是结尾文风，而是前半段提出战争、秘境、魔道、宗门和家族的“大阴谋”，后半段只解决玄诚旧案与个人追杀。该问题适用于整个系统：局部 Pattern/Function 链可以合理，但 Seed 把背景升级为核心冲突后，结局缺少同尺度能力。
+- 只给 Validator 增加自然语言“尺度一致”提示不可靠：对原失败 Outline 的真实复验仍返回 `overall_ok=true`。因此将 `ending_requirements` 设为新 Seed 的显式必填输出，并复用已有 `ending_target.must_show`，让核心问题与结局后果从生成开始就逐项绑定。
+- 该合同不要求宏大问题全部解决：战争或制度可以继续存在，但正文必须展示主角选择对该层面造成的可观察直接后果。若当前 Function 链承接不了，就应把宏大要素降为 `world_setting` 背景，而不是伪装成故事承诺。
+- 新真实候选已证明合同生成和传递成立，但因另一项关系上界冲突被拒绝，尚未形成一篇最终 accepted 正文；不追加随机重跑，也不将“门禁正确拒绝”表述为文学质量已经提升。此前“Seed must_show 为空”的阶段决定由本轮显式 `ending_requirements → must_show` 取代。
+
+## 249. 结局合同必须拥有独立的场景执行位置（2026-09-08）
+
+- 用户追问真实样本为什么提前收束。追查发现问题不是 `ending_requirements` 没有生成，而是它只进入了 Outline 文本；Scene Plan 仍只按 Function 段生成场景，并把最后一个 Function 场景强行标记为结局。真实 S8 的 transition 明确是“为城破再见埋下伏笔”，却被当作已完成结局。
+- 因此结局合同不能只是一组 Prompt 字段：必须在 Scene Plan 中有独立的 `ending` 场景组，位于所有 Function 场景之后；正文不得新增场景，但必须执行这组 Ending 场景。这样保留 Function 的结构约束，也保留 LLM 对具体结局行动的创作权。
+- 为避免再次出现 Validator 只返回 `ending_ok=true` 的假通过，StoryValidation 增加 `ending_evidence`，要求每条 `must_show` 映射到独立 Ending scene_id 并提供正文证据。该校验只验证结局合同的执行位置和证据，不新增关键词规则或 Supervisor。
+
+## 250. 真实 Ending 正文通过但暴露用户长度要求断链（2026-09-08）
+
+- 用户要求用真实 LLM 生成一篇文章验证独立 Ending 修改。完整 Pipeline 的 Outline 成功，Story 首次请求超时；复用同一 Outline 单独运行 Story Agent 后导出《断臂辞》，`accepted`，3 条结局证据全部映射到独立 Ending `S5`。
+- 正文 3489 个中文字符，而本次用户要求至少 3500；代码的 `_MIN_CHINESE_CHARS=3000` 使确定性门禁仍报告 `length_ok=true`。结论是 Ending 场景结构已在真实正文中生效，但“用户明确长度要求 → 确定性门禁”仍未贯通。
+- 该问题应优先在请求解析/长度门禁的单一入口修复，不应靠 Validator 自由判断或继续增加文学规则；在修复前不能把本次结果表述为完全满足用户请求。
+
+## 251. 中间 Schema 只保留跨节点必要事实（2026-09-08）
+
+- 用户要求删除已确认的过度设计：`resolves_ending`、Story 侧未使用的 `story_profile`、LLM `length_ok`、`FunctionConstraintPlan.story` 结局副本，以及 SceneDevelopment 的文学调度字段。
+- 处理原则是区分“结构合同”和“一次性写作建议”：`ending_requirements`、独立 Ending 场景和 `ending_evidence` 继续保留；结局副本不再重复生成；场景展开只保留节奏和需要展开的既定行动。
+- 这样减少中间状态漂移和正文的作者控制痕迹，同时不改变 Function、Pattern、Serving Snapshot 或一次性 Story 修复边界。离线全仓验证通过后再决定是否进一步删除整个 `develop_scenes` 节点。
+## 252. 结局证据不再承担第二套判定逻辑（2026-09-08）
+
+真实样本显示，复合的 `ending_must_show` 被 LLM 拆成多个证据时，严格的一对一 `ending_evidence` 校验会把实际完成的结局误判为失败。结局证据保留为诊断输出；不再增加归一化、证据分组或额外评分，结局判定回到现有 Story Validator 与确定性结构/长度检查。
+
+## 253. 正式三阶段 CLI 必须显式区分重置、候选和 serving（2026-09-08）
+
+- 用户要求通过 CLI 依次执行批量 Bootstrap、批量 Evolve 和按用户要求生成 Story；入口收敛到三个独立命令，不把昂贵的 Bootstrap/Evolve 隐藏在每次 Story 生成中。
+- 用户选择 Bootstrap 每次完整重置正式链路，但保留可恢复归档；因此 `--reset-formal` 成为 Bootstrap 的显式必填开关，归档 Knowledge DB、Registry、Bank、Snapshot 和 checkpoint，不自动删除历史生成报告。
+- 用户选择 Bootstrap 成功后自动建立 serving，Evolve 仍只产出候选；Story 默认读 serving，候选必须通过显式 `--snapshot-id` 或人工 promote 使用。该边界避免 Evolve 成功被误认为语义质量已经通过。
+- 用户选择 Story 只传要求并用关键词识别题材；明确复合题材短语优先，仍命中多个普通题材或没有题材时在 LLM 前报错，不增加题材识别 LLM 调用。
+
+## 254. 公开 CLI 只暴露输入，不暴露版本控制细节（2026-09-08）
+
+- 用户指出 namespace/Snapshot ID 是内部实现细节，公开入口应直接接受 Bootstrap 批量文本、Evolve 批量文本和用户要求。
+- 因此新增单一 `StoryCLI run`，内部固定 namespace，自动把 Bootstrap 根 Snapshot 和 Evolve 候选传给下一阶段；不把候选自动 promote，保证本次生成可使用新知识但不改变正式 serving。
+- 为兼顾开源用户和数据安全，完整重置仅由显式 `--reset-formal` 开启，默认保留正式历史。
+
+## 255. Bootstrap 内含 Function 提取，公开 CLI 应按阶段独立执行（2026-09-08）
+
+- 用户指出此前把流程写成 `Bootstrap → Pattern` 会掩盖 Bootstrap 内部的 Function 提取，而且一键 `run` 不符合实际的分阶段使用方式。
+- 因此公开入口收敛为三个独立命令：`bootstrap` 完成 `Function → Pattern` 并建立 serving；`evolve` 基于 serving 完成增量 Function/Pattern，候选是否发布由无 ID 的 `--promote` 明确决定；`story generate` 默认消费 serving 生成 Outline 和 Story。
+- 保留 `function ...` 等底层命令用于调试，公开教程不再要求用户接触 namespace 或 Snapshot ID。
+
+## 257. 公开 Evolve 真实复用项目语料通过（2026-09-08）
+
+- 用户要求直接选项目文本执行 Evolve。排除已登记的两篇后，选用 `04_末世科幻/1929371857_463723763.txt`，公开入口自动继承历史 serving namespace 并完成真实 Function/Pattern 增量。
+- Run `FR_72e2015819d341e1` 产出候选 Snapshot `real_coordinator_rebuild_v5_20260904_20260908T121306266945Z_9289a8851c77`，9 个 Observation 中 7 条 MATCH/EXTEND、2 条 NOVEL；Function/Pattern 报告 PASS 但 diversity 失败，符合单篇 Evolve 的预期限制。
+- 候选保持未发布，serving 指针未改变。该结果同时验证了简洁公开命令与历史正式 namespace 的连接；同一文本重复运行仍应受 StoryVersion 身份保护。
+
+## 258. 正式主线只切 serving 指针，保留 Snapshot lineage（2026-09-08）
+
+- 用户要求只保留一条主线并删除 CLI 副本。实际采用的边界是：将最新成功候选 promote 为唯一 serving，保留其父 Snapshot 和所有正式 SQLite lineage；旧版本不再 serving，但仍是候选的外键父节点。
+- 删除 `data/story_cli/functions/` 下 5 个 `example_evolve_*` 运行副本，使用系统废纸篓保证可恢复；不直接删除 SQLite Snapshot 行或正式 Ontology Snapshot 目录。
+- 最终核验为 `serving_snapshots=1`、Snapshot lineage 完整、候选正式目录存在；后续 Story 默认读取最新候选，Evolve 仍从该 serving 继续增量。
+
+## 256. 公开 Evolve 应继承 serving 的 namespace（2026-09-08）
+
+- 用户实际执行公开 Evolve 时暴露：正式 serving Snapshot 仍来自历史 namespace，而公开入口固定使用 `story_cli`，使无 namespace 的简洁命令无法复用已有正式库。
+- 公开入口不应重新创建或猜测 namespace；Evolve 未显式指定时直接读取父 serving Snapshot manifest 并继承其 namespace。显式底层入口仍在 namespace 与父 Snapshot 不一致时拒绝执行。
+- 修复后的真实运行进入 Function Evolve 后才发现输入故事已存在且人物画像不一致，Run 安全记为 FAIL、没有发布候选，原 serving 不变；这区分了 CLI 路由修复与故事身份边界。

@@ -4,7 +4,7 @@
 
 ## 系统架构
 
-系统分为 **Bootstrap** 和 **Evolve** 两个阶段。
+用户侧 CLI 分为三个独立阶段：Bootstrap、Evolve 和 Story。
 
 ### Bootstrap（仅首次运行）
 
@@ -12,7 +12,7 @@
 python -m FunctionExtract_Agent  （bootstrap_app 单图，一次运行全流程）
   story_loader →（逐篇 preprocessor→observer→bank_adder→retrieval→pairs_collector 循环）
   → cluster →（induce_step 循环）→ evaluator →（revise 循环 / final_review）→ export
-  → Registry(O_0) + 快照 → Evolve
+  → Registry(O_0) + Function 快照 → Pattern → serving
 ```
 
 1. **Pre-Processor** — 读取清洗后故事文本，调用 LLM 按叙事结构分句分段（V2 prompt：`segments` 只输出句子索引、不重复全文，输出量 -40%；LLM 缺 `sentences`/解析失败/分句塌缩时用规则 `。！？` 切句兜底）
@@ -175,13 +175,38 @@ cd Code
 python -X utf8 -m Story_Agent --outline-id OUT_xxx
 ```
 
-### 统一 CLI：Function、模板和正文
+### 开源用户公开入口：三个独立命令
+
+详细的开源用户命令行教程见 [`Code/StoryCLI/README.md`](Code/StoryCLI/README.md)。
+
+开源用户分别运行 Bootstrap、Evolve 和 Story，不需要填写 namespace 或 Snapshot ID：
+
+```bash
+cd Code
+
+# 1. 文本 → Function → Pattern → serving
+python -X utf8 -m StoryCLI bootstrap --input /path/to/bootstrap_texts
+
+# 2. 新文本 → Function 增量 → Pattern 增量 → candidate
+python -X utf8 -m StoryCLI evolve --input /path/to/new_texts
+
+# 3. 用户要求 → serving → Outline → Story
+python -X utf8 -m StoryCLI story generate \
+  --request "古风仙侠：写一个雨夜寻药故事，结局必须完成真相揭示"
+```
+
+Bootstrap 首次需要清空并归档当前正式资产时增加 `--reset-formal`；Evolve 确认候选可用时增加 `--promote`。归档位于 `Code/data/formal_archives/<时间戳>/`，不会永久删除。详细参数见 [`Code/StoryCLI/README.md`](Code/StoryCLI/README.md)。
+
+下面的分阶段命令保留给调试、复用候选 Snapshot 或 Template Bundle 的高级场景。
+
+### 分阶段 CLI：Function、模板和正文
 
 ```bash
 cd Code
 
 # 1. 批量提取 Function（--input 可重复，也可传目录）
-python -X utf8 -m StoryCLI function bootstrap --input <文本文件或目录> --namespace demo
+#    --reset-formal 会先归档并重建正式 Knowledge/Registry/Bank/Snapshot/checkpoint
+python -X utf8 -m StoryCLI function bootstrap --reset-formal --input <文本文件或目录> --namespace demo
 python -X utf8 -m StoryCLI function evolve --input <新文本目录> --namespace demo
 
 # 2. 从 Function 运行已发布到 DB 的 PatternSet 生成 Outline，导出 Template Bundle
@@ -191,18 +216,25 @@ python -X utf8 -m StoryCLI template build --function-run data/story_cli/function
 python -X utf8 -m StoryCLI story write --template data/story_cli/templates/<时间戳>/template_bundle.json
 python -X utf8 -m StoryCLI story write --template data/story_cli/templates/<时间戳>/template_bundle.json --request "现实克制，突出人物共同承担压力后的关系变化"
 
-# 4. 批量生成大纲（同一批次内不重复，跨批次可复用）
+# 4. 只传用户要求直接生成故事（题材从要求关键词确定）
+python -X utf8 -m StoryCLI story generate --request "悬疑惊悚：写一个雨夜追查失踪案，结局必须完成真相揭示"
+python -X utf8 -m StoryCLI story generate --request-file /path/to/story_request.txt
+
+# 5. 批量生成大纲（同一批次内不重复，跨批次可复用）
 python -X utf8 -m StoryCLI outline --genre 现代情感 --count 3
 python -X utf8 -m StoryCLI outline batch --genre 现代情感 --count 3
 python -X utf8 -m StoryCLI outline batch --genre 悬疑惊悚 --count 3 --pattern "危局援手与连环深渊" --pattern "悬念升级式调查推进"
 ```
 
-- `function bootstrap/evolve` 支持多个文件和递归目录输入；Function Snapshot 发布后自动运行 Pattern Evolve。`function_run.json` 只记录运行结果，Pattern 节点不读取它。
+- `bootstrap` 支持多个文件和递归目录输入；当前正式资产只有在显式传 `--reset-formal` 时才会先归档。Function Snapshot 发布后自动运行 Pattern，Bootstrap 和 Pattern 成功后根 Snapshot 自动成为 serving。
+- `evolve` 默认从当前 serving 增量，支持多个文件和递归目录输入；Evolve 生成的子 Snapshot 默认是候选，不自动 promote。确认候选后给同一条 Evolve 命令增加 `--promote`，无需填写 Snapshot ID。
+- `function bootstrap/evolve` 是保留的调试级底层入口；公开用户使用顶层 `bootstrap/evolve` 即可。`function_run.json` 只记录运行结果，Pattern 节点不读取它。
 - `template build` 从统一 DB 中指定 Snapshot 的 published PatternSet 选择 Pattern；Pattern 与一次具体 Outline 一起写入 `template_bundle.json`。
 - `story write` 没有 `--request` 时复用 Bundle 中的 `outline_id`；有 `--request` 时固定 Pattern、重新生成 Outline 入库，再交给 Story_Agent 写正文。
+- `story generate` 只需要 `--request` 或 `--request-file`；从要求中的题材关键词确定现有五类题材，未命中或命中多个题材时在调用 LLM 前报错，并复用 `Pipeline_Agent` 完成 Outline → Story。
 - `outline` 是批量生成大纲的简洁入口，`outline batch` 为等价的显式写法；两者只运行 Outline_Agent，不生成正文。`--count` 表示目标有效大纲数量。候选按当前 Snapshot 的 `generation_outcomes` 反馈排序；同一批次内不重复消费 Pattern，校验失败仍记录 Outcome 并继续尝试其他 Pattern，后续批次仍可复用。
 - Pattern 使用记录保存在 `Code/data/knowledge/story_knowledge.db` 的 `pattern_usage` 审计表；它不再作为跨批次禁用名单，同名但不同 `pattern_id` 的 Pattern 可分别使用。
-- 默认产物分别位于 `Code/data/story_cli/functions/`、`Code/data/story_cli/templates/` 和 `Code/data/story_cli/stories/`；每次运行另有对应的 `function_run.json`、`template_bundle.json` 或 `story_run.json` manifest。
+- 默认产物分别位于 `Code/data/story_cli/functions/`、`Code/data/story_cli/templates/`、`Code/data/story_cli/stories/`（`story write`）和 `Code/data/pipeline_runs/`（`story generate`）；每次运行另有对应的 `function_run.json`、`template_bundle.json`、`story_run.json` 或 `pipeline_manifest.json` manifest。
 - StoryPattern 的生产入口为 `python -X utf8 -m StoryPattern_Agent --snapshot <snapshot_id>`。正式 LangGraph 只读写统一 SQLite，不读取 Catalog、review、summary JSON，也不使用旧目录 fallback。
 - Pattern Evolve 节点为 `load_pattern_delta → update_story_sequences → update_motif_evidence → retrieve_variant_pairs → review_changed_pairs → rebuild_clusters → summarize_changed_clusters → publish_pattern_set`。输入以当前 Snapshot 的完整故事清单为准；没有 Observation 的故事保留空 sequence，不从 Pattern 输入中静默丢弃。未变化故事继承父 sequence；只有新签名的候选 pair 调用 LLM；发布节点单事务写入 PatternSet。
 

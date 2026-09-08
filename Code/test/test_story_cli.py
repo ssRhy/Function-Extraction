@@ -230,3 +230,262 @@ def test_main_accepts_short_outline_command(monkeypatch):
         None,
         str(app.KNOWLEDGE_DB),
     )]
+
+
+def test_infer_genre_uses_keywords_and_rejects_ambiguous_requests():
+    assert app._infer_genre("悬疑：雨夜追查失踪案") == "01_悬疑惊悚"
+    assert app._infer_genre("写一个修仙者守城的故事") == "02_古风仙侠"
+    assert app._infer_genre("都市情感中的家庭关系修复") == "03_现代情感"
+    assert app._infer_genre("末世废土中的求生") == "04_末世科幻"
+    assert app._infer_genre("现实家庭中的职场冲突") == "05_现实家庭职场"
+    with pytest.raises(ValueError, match="未识别题材"):
+        app._infer_genre("写一个人物成长故事")
+    with pytest.raises(ValueError, match="多个题材"):
+        app._infer_genre("古风与悬疑推理结合")
+
+
+def test_archive_formal_assets_is_recoverable(tmp_path, monkeypatch):
+    data = tmp_path / "data"
+    assets = (
+        data / "knowledge" / "story_knowledge.db",
+        data / "registry",
+        data / "bank",
+        data / "ontology_snapshots",
+        data / "checkpoints",
+    )
+    assets[0].parent.mkdir(parents=True)
+    assets[0].write_text("db", encoding="utf-8")
+    for directory in assets[1:]:
+        directory.mkdir(parents=True)
+        (directory / "marker").write_text("asset", encoding="utf-8")
+    monkeypatch.setattr(app, "DATA", data)
+    monkeypatch.setattr(app, "FORMAL_ASSETS", assets)
+
+    archive = app._archive_formal_assets()
+
+    assert (archive / "knowledge" / "story_knowledge.db").read_text(encoding="utf-8") == "db"
+    assert (archive / "registry" / "marker").exists()
+    assert not assets[0].exists()
+    assert all(path.is_dir() and not any(path.iterdir()) for path in assets[1:])
+
+
+def test_bootstrap_forwards_formal_paths_and_promotes_root(tmp_path, monkeypatch):
+    source = tmp_path / "story.txt"
+    source.write_text("故事", encoding="utf-8")
+    output_dir = tmp_path / "run" / "output"
+    snapshot = tmp_path / "snapshot"
+    captured = {}
+
+    def fake_run_module(_module, arguments):
+        captured["arguments"] = arguments
+        output_dir.mkdir(parents=True)
+        (output_dir / "bank_production.jsonl").write_text("", encoding="utf-8")
+        (output_dir / "occurrences_final.jsonl").write_text("", encoding="utf-8")
+        snapshot.mkdir()
+        return [f"OntologySnapshot → {snapshot}"]
+
+    class FakeStore:
+        def __init__(self, path):
+            captured["knowledge_db"] = path
+
+        def promote_snapshot(self, snapshot_id):
+            captured["promoted"] = snapshot_id
+            return {"snapshot_id": snapshot_id}
+
+    import StoryPattern_Agent.app as pattern_app
+
+    monkeypatch.setattr(app, "_run_module", fake_run_module)
+    monkeypatch.setattr(app, "_archive_formal_assets", lambda: tmp_path / "archive")
+    monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
+    monkeypatch.setattr(pattern_app, "run_pattern_evolve", lambda *_args: {
+        "run_id": "PR_TEST", "new_pattern_ids": [],
+    })
+    monkeypatch.setattr(app, "KNOWLEDGE_DB", tmp_path / "formal.db")
+    monkeypatch.setattr(app, "DATA", tmp_path / "data")
+
+    manifest_path = app.run_function(
+        "bootstrap", [source], out_dir=tmp_path / "run",
+        namespace="production", reset_formal=True,
+    )
+
+    assert "--knowledge-db" in captured["arguments"]
+    assert str(tmp_path / "formal.db") in captured["arguments"]
+    assert "--snapshot-root" in captured["arguments"]
+    assert captured["promoted"] == snapshot.name
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["serving_snapshot_id"] == snapshot.name
+    assert manifest["formal_reset_archive"] == str(tmp_path / "archive")
+
+
+def test_story_generate_passes_request_and_uses_serving_snapshot(tmp_path, monkeypatch):
+    import Pipeline_Agent.app as pipeline_app
+
+    captured = {}
+
+    class FakeStore:
+        def __init__(self, path):
+            captured["knowledge_db"] = path
+
+        def resolve_snapshot_id(self, snapshot_id):
+            return snapshot_id or "SERVING"
+
+    class FakeGraph:
+        def invoke(self, state):
+            captured["state"] = state
+            manifest = tmp_path / "run" / "pipeline_manifest.json"
+            manifest.parent.mkdir()
+            manifest.write_text("{}", encoding="utf-8")
+            return {"manifest_path": str(manifest)}
+
+    monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
+    monkeypatch.setattr(pipeline_app, "_build_graph", lambda: FakeGraph())
+
+    path = app.generate_story(
+        "现代情感：写一次克制的家庭关系修复",
+        knowledge_db="formal.db", out_dir=tmp_path / "run",
+    )
+
+    assert path.exists()
+    assert captured["state"]["genre"] == "03_现代情感"
+    assert captured["state"]["snapshot_id"] == "SERVING"
+    assert captured["state"]["user_request"] == "现代情感：写一次克制的家庭关系修复"
+    assert captured["state"]["knowledge_db"] == "formal.db"
+
+
+def test_main_dispatches_story_generate_with_request_file(monkeypatch, tmp_path):
+    request_file = tmp_path / "request.txt"
+    request_file.write_text("末世科幻：写一个废土求生故事", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(app, "generate_story", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    assert app.main(["story", "generate", "--request-file", str(request_file)]) == 0
+    assert calls[0][0] == ("末世科幻：写一个废土求生故事",)
+    assert calls[0][1] == {"out_dir": None}
+
+
+def test_story_generate_rejects_two_request_sources(monkeypatch):
+    called = []
+    monkeypatch.setattr(app, "generate_story", lambda *args, **kwargs: called.append(True))
+
+    assert app.main([
+        "story", "generate", "--request", "悬疑故事",
+        "--request-file", "request.txt",
+    ]) == 1
+    assert called == []
+
+
+def test_evolve_does_not_promote_candidate(tmp_path, monkeypatch):
+    source = tmp_path / "story.txt"
+    source.write_text("新故事", encoding="utf-8")
+    output_dir = tmp_path / "run" / "output"
+    snapshot = tmp_path / "candidate"
+    captured = {"promote": 0}
+
+    def fake_run_module(_module, arguments):
+        output_dir.mkdir(parents=True)
+        (output_dir / "bank_story_cli.jsonl").write_text("", encoding="utf-8")
+        (output_dir / "occurrences_final.jsonl").write_text("", encoding="utf-8")
+        snapshot.mkdir()
+        return [f"OntologySnapshot → {snapshot}"]
+
+    class FakeStore:
+        def __init__(self, _path):
+            pass
+
+        def serving_snapshot_id(self):
+            return "BASE"
+
+        def load_snapshot_manifest(self, _snapshot_id):
+            return {"namespace": "story_cli"}
+
+        def promote_snapshot(self, _snapshot_id):
+            captured["promote"] += 1
+
+    import StoryPattern_Agent.app as pattern_app
+
+    monkeypatch.setattr(app, "_run_module", fake_run_module)
+    monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
+    monkeypatch.setattr(pattern_app, "run_pattern_evolve", lambda *_args: {
+        "run_id": "PR_TEST", "new_pattern_ids": [],
+    })
+
+    manifest_path = app.run_function(
+        "evolve", [source], out_dir=tmp_path / "run", namespace="story_cli",
+    )
+
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["base_snapshot_id"] == "BASE"
+    assert manifest["snapshot_id"] == snapshot.name
+    assert captured["promote"] == 0
+
+
+def test_evolve_inherits_serving_snapshot_namespace(tmp_path, monkeypatch):
+    source = tmp_path / "story.txt"
+    source.write_text("新故事", encoding="utf-8")
+    output_dir = tmp_path / "run" / "output"
+    snapshot = tmp_path / "candidate"
+    captured = {}
+
+    def fake_run_module(_module, arguments):
+        captured["arguments"] = arguments
+        output_dir.mkdir(parents=True)
+        (output_dir / "bank_real_coordinator.jsonl").write_text("", encoding="utf-8")
+        (output_dir / "occurrences_final.jsonl").write_text("", encoding="utf-8")
+        snapshot.mkdir()
+        return [f"OntologySnapshot → {snapshot}"]
+
+    class FakeStore:
+        def __init__(self, _path):
+            pass
+
+        def serving_snapshot_id(self):
+            return "BASE"
+
+        def load_snapshot_manifest(self, _snapshot_id):
+            return {"namespace": "real_coordinator"}
+
+    import StoryPattern_Agent.app as pattern_app
+
+    monkeypatch.setattr(app, "_run_module", fake_run_module)
+    monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
+    monkeypatch.setattr(pattern_app, "run_pattern_evolve", lambda *_args: {
+        "run_id": "PR_TEST", "new_pattern_ids": [],
+    })
+
+    app.run_function("evolve", [source], out_dir=tmp_path / "run")
+
+    namespace_index = captured["arguments"].index("--namespace")
+    assert captured["arguments"][namespace_index + 1] == "real_coordinator"
+
+
+def test_main_dispatches_public_bootstrap_and_evolve_without_internal_ids(monkeypatch, tmp_path):
+    calls = []
+    promoted = []
+    bootstrap_manifest = tmp_path / "bootstrap" / "function_run.json"
+    evolve_manifest = tmp_path / "evolve" / "function_run.json"
+
+    def fake_run_function(*args, **kwargs):
+        path = bootstrap_manifest if args[0] == "bootstrap" else evolve_manifest
+        app._write_json(path, {"snapshot_id": "candidate"})
+        calls.append((args, kwargs))
+        return path
+
+    monkeypatch.setattr(app, "run_function", fake_run_function)
+    monkeypatch.setattr(
+        app.StoryKnowledgeStore, "promote_snapshot",
+        lambda *args: promoted.append(args[-1]),
+    )
+
+    assert app.main([
+        "bootstrap", "--input", "boot-a.txt", "boot-dir", "--reset-formal",
+    ]) == 0
+    assert app.main([
+        "evolve", "--input", "new-a.txt", "new-dir", "--promote",
+    ]) == 0
+    assert calls[0][0][:2] == ("bootstrap", ["boot-a.txt", "boot-dir"])
+    assert calls[0][0][3] == app.PUBLIC_NAMESPACE
+    assert calls[0][1]["reset_formal"] is True
+    assert calls[1][0][:2] == ("evolve", ["new-a.txt", "new-dir"])
+    assert calls[1][0][3] is None
+    assert calls[1][1]["batch_size"] is None
+    assert promoted == ["candidate"]

@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import time
+import uuid
 from pathlib import Path
 
 from KnowledgeBase import StoryKnowledgeStore
@@ -19,6 +20,29 @@ from Story_Agent import app as story_app
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 KNOWLEDGE_DB = DATA / "knowledge" / "story_knowledge.db"
+PUBLIC_NAMESPACE = "story_cli"
+FORMAL_ASSETS = (
+    DATA / "knowledge" / "story_knowledge.db",
+    DATA / "registry",
+    DATA / "bank",
+    DATA / "ontology_snapshots",
+    DATA / "checkpoints",
+)
+
+GENRE_KEYWORDS = {
+    "01_悬疑惊悚": ("悬疑", "惊悚", "推理", "侦探"),
+    "02_古风仙侠": ("古风", "仙侠", "修仙", "穿越"),
+    "03_现代情感": ("现代情感", "都市情感", "言情", "爱情"),
+    "04_末世科幻": ("末世", "科幻", "废土"),
+    "05_现实家庭职场": ("现实家庭", "家庭", "职场", "婚姻"),
+}
+GENRE_PHRASES = {
+    "01_悬疑惊悚": ("悬疑惊悚",),
+    "02_古风仙侠": ("古风仙侠",),
+    "03_现代情感": ("现代情感", "都市情感"),
+    "04_末世科幻": ("末世科幻",),
+    "05_现实家庭职场": ("现实家庭职场", "现实家庭"),
+}
 
 
 def _read_json(path: Path):
@@ -31,6 +55,38 @@ def _read_json(path: Path):
 def _write_json(path: Path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _archive_formal_assets() -> Path:
+    archive_root = DATA / "formal_archives"
+    archive = archive_root / time.strftime("%Y%m%dT%H%M%S")
+    while archive.exists():
+        archive = archive_root / f"{time.strftime('%Y%m%dT%H%M%S')}_{uuid.uuid4().hex[:8]}"
+    archive.mkdir(parents=True, exist_ok=True)
+    sources = list(FORMAL_ASSETS)
+    database = FORMAL_ASSETS[0]
+    sources.extend(Path(f"{database}{suffix}") for suffix in ("-wal", "-shm"))
+    moved = []
+    try:
+        for source in sources:
+            if not source.exists():
+                continue
+            destination = archive / source.relative_to(DATA)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(destination))
+            moved.append((source, destination))
+    except BaseException:
+        for source, destination in reversed(moved):
+            if destination.exists() and not source.exists():
+                source.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(destination), str(source))
+        shutil.rmtree(archive, ignore_errors=True)
+        raise
+    FORMAL_ASSETS[0].parent.mkdir(parents=True, exist_ok=True)
+    for source in FORMAL_ASSETS[1:]:
+        source.mkdir(parents=True, exist_ok=True)
+    print(f"[StoryCLI] formal_archive={archive}")
+    return archive
 
 
 def _request(args):
@@ -144,30 +200,56 @@ def _snapshot_from_output(lines):
     return path
 
 
+def _infer_genre(request: str) -> str:
+    phrase_matches = [
+        genre for genre, phrases in GENRE_PHRASES.items()
+        if any(phrase in request for phrase in phrases)
+    ]
+    if len(phrase_matches) == 1:
+        return phrase_matches[0]
+    if len(phrase_matches) > 1:
+        raise ValueError(f"用户要求命中多个题材（{', '.join(phrase_matches)}），请只保留一个题材方向")
+    matches = [
+        genre for genre, keywords in GENRE_KEYWORDS.items()
+        if any(keyword in request for keyword in keywords)
+    ]
+    if not matches:
+        raise ValueError("用户要求中未识别题材，请包含悬疑、仙侠、现代情感、末世或家庭/职场等关键词")
+    if len(matches) > 1:
+        raise ValueError(f"用户要求命中多个题材（{', '.join(matches)}），请只保留一个题材方向")
+    return matches[0]
+
+
 def run_function(
     mode, inputs, out_dir=None, namespace=None, no_revise=False,
-    batch_size=None, top_k=None, base_snapshot=None,
+    batch_size=None, top_k=None, base_snapshot=None, reset_formal=False,
 ):
     run_id = time.strftime("%Y%m%dT%H%M%S")
     root = Path(out_dir).resolve() if out_dir else DATA / "story_cli" / "functions" / run_id
     input_dir = root / "input"
     output_dir = root / "output"
     manifest_path, count = _prepare_corpus(inputs, input_dir)
-    namespace = namespace or "story_cli"
+    archive_path = _archive_formal_assets() if mode == "bootstrap" and reset_formal else None
+    store = StoryKnowledgeStore(KNOWLEDGE_DB) if mode == "evolve" else None
     if mode == "evolve" and not base_snapshot:
-        base_snapshot = StoryKnowledgeStore(KNOWLEDGE_DB).serving_snapshot_id()
+        base_snapshot = store.serving_snapshot_id()
     if mode == "evolve" and base_snapshot:
-        base_manifest = StoryKnowledgeStore(KNOWLEDGE_DB).load_snapshot_manifest(base_snapshot)
-        if base_manifest.get("namespace") != namespace:
+        base_manifest = store.load_snapshot_manifest(base_snapshot)
+        parent_namespace = base_manifest.get("namespace")
+        if namespace is None:
+            namespace = parent_namespace
+        elif parent_namespace != namespace:
             raise ValueError(
-                f"父 Snapshot namespace 不一致: {base_manifest.get('namespace')} != {namespace}"
+                f"父 Snapshot namespace 不一致: {parent_namespace} != {namespace}"
             )
+    namespace = namespace or PUBLIC_NAMESPACE
     arguments = [
         "--corpus", str(input_dir),
         "--namespace", namespace,
         "--out-dir", str(output_dir),
     ]
     if mode == "bootstrap":
+        arguments.extend(["--knowledge-db", str(KNOWLEDGE_DB), "--snapshot-root", str(DATA / "ontology_snapshots")])
         if no_revise:
             arguments.append("--no-revise")
         lines = _run_module("FunctionExtract_Agent", arguments)
@@ -190,6 +272,9 @@ def run_function(
     from StoryPattern_Agent.app import run_pattern_evolve
 
     pattern_result = run_pattern_evolve(snapshot_id, KNOWLEDGE_DB)
+    promoted = None
+    if mode == "bootstrap":
+        promoted = StoryKnowledgeStore(KNOWLEDGE_DB).promote_snapshot(snapshot_id)
     manifest = {
         "schema_version": 1,
         "run_id": run_id,
@@ -207,10 +292,15 @@ def run_function(
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "pattern_run_id": pattern_result["run_id"],
         "new_pattern_ids": pattern_result["new_pattern_ids"],
+        "formal_reset_archive": str(archive_path) if archive_path else None,
+        "serving_snapshot_id": promoted["snapshot_id"] if promoted else None,
     }
     path = root / "function_run.json"
     _write_json(path, manifest)
     print(f"[StoryCLI] function_run={path}")
+    if mode == "evolve":
+        print(f"[StoryCLI] candidate_snapshot={snapshot_id}")
+        print(f"[StoryCLI] promote: python -X utf8 -c 'from KnowledgeBase.store import StoryKnowledgeStore; print(StoryKnowledgeStore().promote_snapshot(\"{snapshot_id}\"))'")
     return path
 
 
@@ -475,6 +565,33 @@ def write_story(template_path, request="", out_dir=None):
     return manifest_path
 
 
+def generate_story(request, snapshot_id=None, pattern=None, knowledge_db=KNOWLEDGE_DB, out_dir=None):
+    request = request.strip()
+    if not request:
+        raise ValueError("story generate 需要非空 --request 或 --request-file")
+    genre = _infer_genre(request)
+    snapshot_id = StoryKnowledgeStore(knowledge_db).resolve_snapshot_id(snapshot_id)
+    root = Path(out_dir).resolve() if out_dir else DATA / "pipeline_runs" / time.strftime("%Y%m%dT%H%M%S")
+    from Pipeline_Agent import app as pipeline_app
+
+    result = pipeline_app._build_graph().invoke({
+        "genre": genre,
+        "snapshot_id": snapshot_id,
+        "knowledge_db": str(knowledge_db),
+        "pattern_request": pattern,
+        "user_request": request,
+        "out_dir": str(root),
+        "outline_id": None,
+        "outline_path": None,
+        "outline_result": None,
+        "story_path": None,
+        "manifest_path": "",
+    })
+    manifest_path = Path(result["manifest_path"])
+    print(f"[StoryCLI] pipeline_manifest={manifest_path}")
+    return manifest_path
+
+
 def _add_request_arguments(parser):
     parser.add_argument("--request", default=None, help="用户创作要求")
     parser.add_argument("--request-file", default=None, help="用户创作要求文本文件")
@@ -504,6 +621,23 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="StoryCLI", description="Function、模板和故事生成 CLI")
     commands = parser.add_subparsers(dest="command", required=True)
 
+    public_bootstrap = commands.add_parser("bootstrap", help="建立正式 Function 根库和 Pattern")
+    public_bootstrap.add_argument("--input", action="append", nargs="+", required=True,
+                                  help="文本文件或目录，可重复")
+    public_bootstrap.add_argument("--reset-formal", action="store_true",
+                                  help="先归档并重建正式 Knowledge/Registry/Bank/Snapshot/checkpoint")
+    public_bootstrap.add_argument("--no-revise", action="store_true")
+    public_bootstrap.add_argument("--out-dir", default=None)
+
+    public_evolve = commands.add_parser("evolve", help="基于当前 serving 增量演化 Function 和 Pattern")
+    public_evolve.add_argument("--input", action="append", nargs="+", required=True,
+                               help="新文本文件或目录，可重复")
+    public_evolve.add_argument("--batch-size", type=int, default=None)
+    public_evolve.add_argument("--top-k", type=int, default=None)
+    public_evolve.add_argument("--promote", action="store_true",
+                               help="成功后将候选 Snapshot 切换为 serving")
+    public_evolve.add_argument("--out-dir", default=None)
+
     library = commands.add_parser("library", help="统一知识库")
     library_commands = library.add_subparsers(dest="library_command", required=True)
     library_commands.add_parser("status", help="查看统一知识库状态")
@@ -512,6 +646,8 @@ def main(argv=None):
     function_commands = function.add_subparsers(dest="function_command", required=True)
     bootstrap = function_commands.add_parser("bootstrap")
     bootstrap.add_argument("--input", action="append", nargs="+", required=True)
+    bootstrap.add_argument("--reset-formal", action="store_true", required=True,
+                           help="归档并重建正式 Knowledge/Registry/Bank/Snapshot/checkpoint")
     bootstrap.add_argument("--namespace", default=None)
     bootstrap.add_argument("--no-revise", action="store_true")
     bootstrap.add_argument("--out-dir", default=None)
@@ -538,8 +674,11 @@ def main(argv=None):
     batch = outline_commands.add_parser("batch", help="批量生成大纲")
     _add_outline_arguments(batch, required=True)
 
-    story = commands.add_parser("story", help="使用 Template Bundle 写正文")
+    story = commands.add_parser("story", help="生成故事或使用 Template Bundle 写正文")
     story_commands = story.add_subparsers(dest="story_command", required=True)
+    generate = story_commands.add_parser("generate", help="根据用户要求生成故事")
+    _add_request_arguments(generate)
+    generate.add_argument("--out-dir", default=None)
     write = story_commands.add_parser("write")
     write.add_argument("--template", required=True)
     _add_request_arguments(write)
@@ -547,12 +686,26 @@ def main(argv=None):
 
     args = parser.parse_args(argv)
     try:
-        if args.command == "library" and args.library_command == "status":
+        if args.command == "bootstrap":
+            run_function(
+                "bootstrap", _flatten_inputs(args.input), args.out_dir,
+                PUBLIC_NAMESPACE, args.no_revise, reset_formal=args.reset_formal,
+            )
+        elif args.command == "evolve":
+            manifest_path = run_function(
+                "evolve", _flatten_inputs(args.input), args.out_dir,
+                None, batch_size=args.batch_size, top_k=args.top_k,
+            )
+            if args.promote:
+                snapshot_id = _read_json(manifest_path)["snapshot_id"]
+                StoryKnowledgeStore(KNOWLEDGE_DB).promote_snapshot(snapshot_id)
+                print(f"[StoryCLI] serving_snapshot={snapshot_id}")
+        elif args.command == "library" and args.library_command == "status":
             show_library_status()
         elif args.command == "function" and args.function_command == "bootstrap":
             run_function(
                 "bootstrap", _flatten_inputs(args.input), args.out_dir,
-                args.namespace, args.no_revise,
+                args.namespace, args.no_revise, reset_formal=args.reset_formal,
             )
         elif args.command == "function" and args.function_command == "evolve":
             run_function(
@@ -577,6 +730,8 @@ def main(argv=None):
                 batch_outlines(*outline_args, planner_mode=args.planner_mode)
         elif args.command == "story" and args.story_command == "write":
             write_story(args.template, _request(args), args.out_dir)
+        elif args.command == "story" and args.story_command == "generate":
+            generate_story(_request(args), out_dir=args.out_dir)
         return 0
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"[StoryCLI] error: {exc}", file=sys.stderr)
