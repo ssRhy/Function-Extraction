@@ -348,9 +348,8 @@ Function
 ### Part B：利用 Function 自动生成大纲
 
 ```text
-LLM 规划候选 Function 序列
-→ 自动生成多个 Story Seed
-→ 选择 Seed 并回查序列是否适配
+LLM 规划有限 Beam 候选 Function 序列
+→ 选择 top-1 链并生成一个 Story Seed
 → 为整条序列生成初步实例化计划
 → 顺序实例化并维护状态
 → 得到一版中规中矩的完整初稿
@@ -358,7 +357,7 @@ LLM 规划候选 Function 序列
 → 判断哪些保留、修复或差异化
 → 只修改少量真正需要调整的位置
 → 重新检查全局一致性
-→ Best-of-N 选择最终大纲
+→ 输出一版通过校验的故事大纲
 ```
 
 ---
@@ -588,24 +587,13 @@ REPLAN：
 
 如果修改后的版本没有明显优于初稿，就保留初稿。
 
-#### 4. 漏斗式 Best-of-N
+#### 4. 多候选筛选（已退出当前运行路径）
 
-批量生成时：
-
-```text
-先生成较多 Function 序列
-→ 筛选少量结构候选
-→ 为候选生成多个 Story Seed
-→ 筛选少量实例化计划
-→ 只为最有希望的计划生成完整大纲
-→ 修复和排序
-```
-
-这样既能提高质量上限，也能控制 token 成本。
+多候选正文生成与比较曾作为 Best-of-2 实验运行；由于额外生成成本过高，当前不再作为主链能力。只有在后续真实质量收益足以覆盖成本时，才重新评估该实验。
 
 #### 完成标准
 
-系统能够批量生成大纲，自动判断哪些位置应当保留或调整，并从多个候选中选出整体较好的结果。
+系统能够生成一版大纲，自动判断哪些位置应当保留或调整，并通过校验和最多一次定向修复输出整体成立的结果。
 
 ### 阶段五：扩大故事库并持续完善
 
@@ -725,7 +713,7 @@ Function 知识库
 + LLM Planner
 + 实例检索
 + 检测修复
-+ Best-of-N
++ Beam top-1
 ```
 
 主要评价：
@@ -792,29 +780,37 @@ Instance Card
 
 ---
 
-## 十、RA 当前的任务顺序
+## 十、当前实现状态和后续路线
 
-当前按以下顺序推进：
+以下只记录当前代码、测试和正式 SQLite 已经能证明的状态；前文的阶段设计和候选方向不自动等同于已实现能力。
 
-1. 设计 Story Profile、Function 和 FunctionOccurrence；
-2. 明确故事级人物关系和 Function 级角色位置；
-3. 为 Function 补前置条件和状态变化；
-4. 在 5 篇不同题材故事上完整试验；
-5. 根据试验结果修订当前 Function；
-6. 处理当前全部故事，得到 FunctionOccurrence、Instance Card 和 Function 序列；
-7. 建立 Function 转移、motif 和实例化知识库；
-8. 实现供大模型查询这些知识的接口；
-9. 实现 LLM Function Planner；
-10. 实现自动 Story Seed、角色绑定和 Mechanism Plan；
-11. 实现顺序实例化、状态账本和 Function 往返检测；
-12. 实现故事库比较、局部优化和 Best-of-N。
+### 当前已具备的证据
 
-当前首先完成前 5 项。数据结构确认后，再批量处理当前故事；Function 知识库建立后，再进入自动生成部分。
+1. 正式库为 schema 5，当前唯一 serving Snapshot；只读核对得到 `snapshots=12`、`serving_snapshots=1`、`functions=14`、`function_contracts=132`、`function_occurrences=6846`、`patterns=48`（其中 published `36`）、`pattern_story_sequences=760`、`generation_outcomes=39`，`PRAGMA integrity_check` 通过且外键检查为空。
+2. 已有文章证据已经进入 Planner 读取链：published Planner 从当前 Snapshot 的 FunctionOccurrence、Pattern/motif evidence、Story Profile 投影出真实 `transitions`、成熟 `motifs`、运行时 `instance_cases`、Function 级 `role_stats` 和 `relationship_cases`；dynamic Planner 读取同一冻结 Snapshot，按相同边界组装这些参考。它们会随所选 Function chain 进入后续 Seed/Mechanism/Outline 提示；`instance_cases` 是由 Occurrence 运行时投影，不是独立持久化的 Instance Card 表。
+3. Dynamic Planner 已是 Function/Outline Beam Search：保留 `BEAM_WIDTH=4`，执行 FunctionContract、状态和叙事义务硬校验，按完整链质量排序并去除近重复路径，当前只将 top-1 链交给后续 Outline 流程。动态候选只保存在本次运行状态，不写 Pattern 表。
+4. Outline/Story 主链已包含角色绑定、Mechanism/状态账本、Outline Validator、Story Validator 和最多一次定向正文修复。Story Validator 在同时看到目标 Function chain、Function constraints、scene plan 和全文时输出 `function_execution_evidence`，因此 Function 执行证明以该校验为准。
+5. Observer→Matcher 重新抽取正文只是有损诊断，不能证明生成过程执行了目标 Function，也不能作为正文拒绝、候选排序或自动反馈的质量门禁。
+
+### 当前主线
+
+```text
+Dynamic Planner Beam top-1
+→ Seed / Mechanism / Narrative
+→ Outline Validator
+→ Story Validator
+→ 最多一次定向修复
+→ accepted / rejected 留痕
+```
+
+published Pattern 仍是默认的稳定入口；dynamic 模式用于从冻结 Snapshot 的真实结构证据中主动编排 Function 链。当前不把多候选正文筛选列为必需能力；历史 Best-of-2 smoke 只作为成本和质量对照记录，已退出运行路径。
+
+### 下一步只做可验证的成本核对
+
+先在保持 `BEAM_WIDTH=4` 的条件下，对 3–5 个固定 Seed 只运行 Dynamic Planner，不生成 Story；比较 Beam Prompt 压缩前后的 LLM token、有效候选数量、top-1 分数、Contract/state/obligation 问题、候选链多样性，以及关系型 Function 是否异常减少。只有结果稳定且关系证据没有异常退化，才重新评估是否有必要把 Beam width 从 4 降到 2。
 
 整个项目可以压缩成一句话：
 
-> 先把 Function 补成人物、前置条件和状态变化都明确的可生成结构，再从真实故事中学习它怎样组合、怎样实例化；之后让大模型利用这些知识生成一版成立的初稿，再参考故事库只修改真正需要调整的关键位置，最后通过批量筛选得到质量较好的大纲。
+> 先从冻结 Snapshot 的真实 Function、转移、motif、实例案例和角色/关系证据中编排一条可校验的链，再用 Seed、Mechanism 和 Outline/Story Validator 生成并修复一版成立的故事；多候选筛选只有在真实质量收益足以覆盖额外成本时才重新考虑。
 
 ---
-
- 
