@@ -243,7 +243,7 @@ def _motif_menu(references):
 def _planner_prompt(seed, user_request, chain, references):
     return (
         "你是动态 Function Planner。根据故事种子、用户目标、当前链、FunctionContract、"
-        "状态词汇、角色位置统计、关系变化案例、真实转移和成熟 motif，提出下一批候选扩展。只输出符合 schema 的 JSON。\n"
+        "状态词汇、真实转移和成熟 motif，提出下一批候选扩展。只输出符合 schema 的 JSON。\n"
         "允许的 operation：REUSE_MOTIF（完整复用一个 motif）、COMPOSE_MOTIFS（按顺序拼接至少两个 motif）、"
         "MUTATE_MOTIF（以一个 motif 为基线，至少替换一个 Function）、BRIDGE（追加一个桥接 Function）、"
         "EXPLORE（从 Function 级别自由追加一个或多个 Function）。\n"
@@ -270,8 +270,6 @@ def _planner_prompt(seed, user_request, chain, references):
             "motif_menu": _motif_menu(references),
             "state_vocabulary": references.get("state_vocabulary", {}),
             "transitions": references.get("transitions", {}),
-            "role_stats": references.get("role_stats", {}),
-            "relationship_cases": references.get("relationship_cases", {}),
         }, ensure_ascii=False)
     )
 

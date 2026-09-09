@@ -805,9 +805,21 @@ Dynamic Planner Beam top-1
 
 published Pattern 仍是默认的稳定入口；dynamic 模式用于从冻结 Snapshot 的真实结构证据中主动编排 Function 链。当前不把多候选正文筛选列为必需能力；历史 Best-of-2 smoke 只作为成本和质量对照记录，已退出运行路径。
 
-### 下一步只做可验证的成本核对
+### 最近完成的成本核对
 
-先在保持 `BEAM_WIDTH=4` 的条件下，对 3–5 个固定 Seed 只运行 Dynamic Planner，不生成 Story；比较 Beam Prompt 压缩前后的 LLM token、有效候选数量、top-1 分数、Contract/state/obligation 问题、候选链多样性，以及关系型 Function 是否异常减少。只有结果稳定且关系证据没有异常退化，才重新评估是否有必要把 Beam width 从 4 降到 2。
+在保持 `BEAM_WIDTH=4`、不生成 Story 的条件下，使用当前 serving Snapshot 和同一组 3 个固定 Seed 对 Beam Prompt 做了前后对照。只删除了 raw `role_stats` 和 `relationship_cases`；Function menu、Contract、state vocabulary、真实 transitions、成熟 motifs 以及候选链上的后续角色/关系证据均保留。
+
+| 指标 | 压缩前 | 压缩后 |
+| --- | ---: | ---: |
+| Dynamic Planner 调用次数 | 43 | 53 |
+| 真实 prompt token | 1,956,863 | 688,248 |
+| completion token | 20,830 | 25,317 |
+| 总 token | 1,977,693 | 713,565 |
+| `_planner_prompt` 输入字符 | 4,667,115 | 1,763,789 |
+
+空链代表性 Prompt 从 `108,477` 字符降到 `33,204`；被删除的两个 raw JSON 块合计 `75,219` 字符，基线 43 次调用中至少重复发送 `3,234,417` 字符。3 个 Seed 的有效候选数由 `4/4/2` 变为 `1/4/4`，top-1 分数由 `0.865417/0.834833/0.769000` 变为 `0.771893/0.834833/0.959250`。两侧 Contract hard issue 都为 `0`；聚合 state issue/state conflict/unresolved obligation 为 `64/40/62` 对 `57/38/63`。每个版本返回的候选链都包含关系型 Function，但候选数、链长度和多样性有升有降，不能据此宣称质量稳定。
+
+成本收益足够明确，但质量信号不稳定；因此当前不把 Beam width 从 4 降到 2，也不新增缓存、评分或 Best-of-N。后续若继续，只需在明确的固定采样/重复次数协议下复核质量，不改变当前主线。
 
 整个项目可以压缩成一句话：
 

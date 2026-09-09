@@ -56,6 +56,19 @@ def _seed():
     return {"characters": [{"id": "P1"}], "core_conflict": "c"}
 
 
+def test_beam_prompt_omits_raw_role_and_relationship_blocks():
+    references = _references()
+    references["role_stats"] = {"F1": {"positions": {"actor": {"binding_count": 4}}}}
+    references["relationship_cases"] = {"F1": [{"dimension": "trust"}]}
+
+    prompt = dynamic._planner_prompt(_seed(), "目标", [], references)
+
+    assert '"role_stats"' not in prompt
+    assert '"relationship_cases"' not in prompt
+    assert '"transitions"' in prompt
+    assert '"motif_menu"' in prompt
+
+
 def test_dynamic_operations_expand_only_declared_motifs_and_functions():
     references = _references()
     cases = [

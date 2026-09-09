@@ -2147,3 +2147,11 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 
 - 上述真实 Best-of-2 smoke 结论继续作为历史审计证据保留，但其双候选正文生成和比较成本过高，不再保留为 Pipeline/StoryCLI 的运行能力。
 - 当前运行路径恢复为单候选：Dynamic Planner 仍保留自身 Beam Search，并由 top-1 候选进入 Outline/Story Validator 和最多一次定向修复；删除 `Pipeline_Agent/best_of.py`、`--best-of` 参数、候选选择状态/分支及专用测试。
+
+### 本轮补充（2026-09-09）：Dynamic Planner Beam Prompt 最小压缩
+
+- 在当前 serving Snapshot `real_coordinator_rebuild_v5_20260904_20260908T121306266945Z_9289a8851c77` 上先量化，再只从 Beam Prompt 删除 raw `role_stats` 和 `relationship_cases`；`BEAM_WIDTH=4`、Function menu/Contract、state vocabulary、真实 transitions、成熟 motifs 和后续 Outline 链上的角色/关系证据不变。
+- 空链代表性 Prompt 为 `108,477 → 33,204` 字符；被删两个 raw JSON 块合计 `75,219` 字符。基线 3 个固定 Seed 的 43 次 Planner 调用至少重复发送 `3,234,417` 个该两块字符；优化后不再发送。
+- 同一组 3 个固定 Seed、只运行 Dynamic Planner 的真实 API 对照：prompt token `1,956,863 → 688,248`（`-64.8%`），总 token `1,977,693 → 713,565`（`-63.9%`），输入字符 `4,667,115 → 1,763,789`（`-62.2%`）。调用次数因模型输出路径由 `43 → 53`，但成本仍显著下降。
+- 有效候选数 `4/4/2 → 1/4/4`，top-1 分数 `0.865417/0.834833/0.769000 → 0.771893/0.834833/0.959250`；两侧 Contract hard issue 均为 `0`，聚合 state issue/state conflict/unresolved obligation 为 `64/40/62 → 57/38/63`。关系型 Function 在每个 Seed 的返回候选中均有覆盖，但候选数、链长度和多样性没有一致方向，质量不稳定，不能宣称压缩保持或提升质量。
+- 结论：只保留这处成本优化，`BEAM_WIDTH=4` 不降到 2；不新增缓存、评分、Best-of-N 或数据库边界。正式 SQLite 未写入，待最终回归后再次核对 hash/计数/integrity。

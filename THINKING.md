@@ -1758,3 +1758,11 @@ Best-of-2 最初暂放在 `Pipeline_Agent/app.py`，只为先用最小文件数�
 用户确认双候选正文生成与比较成本过高，要求恢复单候选默认流程。历史真实 Best-of-2 smoke 的候选、硬门禁、pair review、winner、manifest 和临时 outcome 仍保留在前文作为实验记录，但不再继续承担运行能力。
 
 因此删除 `Pipeline_Agent/best_of.py`、`--best-of` CLI 参数、PipelineState 候选/选择字段、Pipeline/StoryCLI 双候选分支和专用测试；Dynamic Planner 的 Beam Search、top-1 Outline/Story Validator、Function execution evidence 和最多一次定向 rewrite 不变。后续若再次考虑多候选，必须先有明确质量收益足以覆盖真实生成成本的证据。
+
+## 271. Dynamic Planner 只压缩 Beam Prompt 的原始角色关系块（2026-09-09）
+
+用户明确限定成本优化顺序：只删除 Beam Prompt 中原始 `role_stats` 和 `relationship_cases`，保持 `BEAM_WIDTH=4`，用 3–5 个固定 Seed 只运行 Dynamic Planner，对照 token、候选、top-1、Contract/state/obligation、链多样性和关系型 Function。该边界不取消 Beam Search、Contract/状态/义务校验、成熟 motif 或真实 transition，也不引入缓存、Agent、Supervisor、数据库或 Best-of-N。
+
+在当前 serving Snapshot 上用 3 个固定 Seed 完成真实 Planner-only 前后对照。空链 Prompt 为 `108,477 → 33,204` 字符；两个 raw 块合计 `75,219` 字符，基线 43 次调用至少重复发送 `3,234,417` 个该两块字符。真实 prompt token 为 `1,956,863 → 688,248`（`-64.8%`），总 token 为 `1,977,693 → 713,565`（`-63.9%`）；优化后虽然因模型路径调用 `53` 次而不是 `43` 次，成本仍显著下降。
+
+质量信号不稳定：有效候选数 `4/4/2 → 1/4/4`，top-1 分数 `0.865417/0.834833/0.769000 → 0.771893/0.834833/0.959250`；Contract hard issue 两侧均为 `0`，聚合 state issue/state conflict/unresolved obligation 为 `64/40/62 → 57/38/63`。每个 Seed 的返回候选均包含关系型 Function，但候选数、链长度和多样性没有一致方向。因此只接受这处确定的成本收益，不把一次/Seed 的真实样本解释为质量回归或提升，不把 Beam width 从 4 降到 2。
