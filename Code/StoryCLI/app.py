@@ -565,10 +565,15 @@ def write_story(template_path, request="", out_dir=None):
     return manifest_path
 
 
-def generate_story(request, snapshot_id=None, pattern=None, knowledge_db=KNOWLEDGE_DB, out_dir=None):
+def generate_story(
+    request, snapshot_id=None, pattern=None, knowledge_db=KNOWLEDGE_DB,
+    out_dir=None, planner_mode="published", best_of=1,
+):
     request = request.strip()
     if not request:
         raise ValueError("story generate 需要非空 --request 或 --request-file")
+    if best_of == 2 and planner_mode != "dynamic":
+        raise ValueError("Best-of-2 只支持 planner_mode=dynamic")
     genre = _infer_genre(request)
     snapshot_id = StoryKnowledgeStore(knowledge_db).resolve_snapshot_id(snapshot_id)
     root = Path(out_dir).resolve() if out_dir else DATA / "pipeline_runs" / time.strftime("%Y%m%dT%H%M%S")
@@ -580,11 +585,16 @@ def generate_story(request, snapshot_id=None, pattern=None, knowledge_db=KNOWLED
         "knowledge_db": str(knowledge_db),
         "pattern_request": pattern,
         "user_request": request,
+        "planner_mode": planner_mode,
+        "best_of": best_of,
         "out_dir": str(root),
         "outline_id": None,
         "outline_path": None,
         "outline_result": None,
+        "outline_results": [],
         "story_path": None,
+        "candidate_results": [],
+        "selection": None,
         "manifest_path": "",
     })
     manifest_path = Path(result["manifest_path"])
@@ -678,6 +688,13 @@ def main(argv=None):
     story_commands = story.add_subparsers(dest="story_command", required=True)
     generate = story_commands.add_parser("generate", help="根据用户要求生成故事")
     _add_request_arguments(generate)
+    generate.add_argument("--snapshot-id", default=None)
+    generate.add_argument("--knowledge-db", default=str(KNOWLEDGE_DB))
+    generate.add_argument(
+        "--planner-mode", choices=("published", "dynamic"), default="published",
+        help="Planner 模式，默认使用已发布 Pattern",
+    )
+    generate.add_argument("--best-of", type=int, choices=(1, 2), default=1)
     generate.add_argument("--out-dir", default=None)
     write = story_commands.add_parser("write")
     write.add_argument("--template", required=True)
@@ -731,7 +748,15 @@ def main(argv=None):
         elif args.command == "story" and args.story_command == "write":
             write_story(args.template, _request(args), args.out_dir)
         elif args.command == "story" and args.story_command == "generate":
-            generate_story(_request(args), out_dir=args.out_dir)
+            kwargs = {
+                "snapshot_id": args.snapshot_id,
+                "knowledge_db": args.knowledge_db,
+                "out_dir": args.out_dir,
+                "planner_mode": args.planner_mode,
+            }
+            if args.best_of != 1:
+                kwargs["best_of"] = args.best_of
+            generate_story(_request(args), **kwargs)
         return 0
     except (OSError, RuntimeError, ValueError) as exc:
         print(f"[StoryCLI] error: {exc}", file=sys.stderr)

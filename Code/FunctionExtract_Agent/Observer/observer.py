@@ -3,7 +3,6 @@ Observer Node - 从句子中提取 Narrative Observations
 LangGraph 范式
 """
 
-from typing import TypedDict
 from pydantic import BaseModel, Field, model_validator
 
 from FunctionExtract_Agent.llm import chat_structured
@@ -69,26 +68,6 @@ class ObservationResponse(BaseModel):
                 observation.relationship_deltas,
             )
         return self
-
-
-class NarrativeObservation(TypedDict):
-    obs_id: str
-    observation_version_id: str
-    observation_order: int
-    story_version_id: str
-    before_state: str
-    event: str
-    participants: list[str]
-    participant_ids: list[str]
-    role_bindings: dict[str, list[str]]
-    relationship_deltas: list[dict]
-    after_state: str
-    affected_aspect: str
-    narrative_effect: str
-    surface_form: str
-    source_sentence_indices: list[int]
-    source_text: str
-    story_id: str
 
 
 # ============================================================

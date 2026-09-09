@@ -149,12 +149,7 @@ def inducer_node(state: NarrativePipelineState) -> NarrativePipelineState:
             apply_confusable=APPLY_CONFUSABLE,
         )
         confidence = detail["confidence"]
-        print(f"\n[Inducer DEBUG] 候选: {func.function_name}")
-        print(f"  definition: {func.definition[:50]}...")
-        print(f"  因子得分: {detail['factors']}")
-        print(f"  最终置信度: {confidence:.3f}")
         if confidence < 0.5:
-            print(f"  → 跳过 (confidence={confidence:.3f} < 0.5)")
             continue
         scored.append({
             "schema_version": 2,

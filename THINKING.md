@@ -1695,3 +1695,60 @@ Function 集合 + 规则/状态/故事目标
 - 用户实际执行公开 Evolve 时暴露：正式 serving Snapshot 仍来自历史 namespace，而公开入口固定使用 `story_cli`，使无 namespace 的简洁命令无法复用已有正式库。
 - 公开入口不应重新创建或猜测 namespace；Evolve 未显式指定时直接读取父 serving Snapshot manifest 并继承其 namespace。显式底层入口仍在 namespace 与父 Snapshot 不一致时拒绝执行。
 - 修复后的真实运行进入 Function Evolve 后才发现输入故事已存在且人物画像不一致，Run 安全记为 FAIL、没有发布候选，原 serving 不变；这区分了 CLI 路由修复与故事身份边界。
+
+## 259. Dynamic Planner 的价值必须在正文回收链上判断（2026-09-08）
+
+- 用户要求把 Dynamic Planner/Beam Search 接入完整 Story 入口，并在固定 serving Snapshot 上对 3 个明确请求做正文→Observer→Matcher 回收；明确暂不新增 Best-of-N、Supervisor、独立 Instance Card 或 transition 表。
+- 回收结果与人工阅读出现分离：两篇正文的因果结构和结局基本成立，但严格 LCS 保留率只有 `0.3333/0.7143`，顺序均不一致；Matcher 对全部观察返回 `MATCH`，没有 `UNCERTAIN`。因此当前不能把低回收率直接归因于 Story/Mechanism 丢结构，也不能把 Outline Validator 通过当作正文 Function 保留证明；优先定位 Observer/Matcher 的粗粒度观察或过度自信匹配边界。
+- 第三题与一个替代题都在同一 `NarrativePlan.setup_payoffs[*].payoff=null` Schema 边界失败，现有 2 次重试未能恢复。暂不因两次就扩展兼容 Schema 或新增修复层；失败作为真实 Outline 阶段证据单独记录。
+- 当前决策：不进入 Best-of-N，不修 Dynamic Planner，不新增架构；下一轮若继续，应先做可解释的 Observer/Matcher 对齐诊断，并保持“正文成立、人为结构回收失败”与“正文真的丢 Function”分开。
+
+## 260. 第三篇失败先暴露的是接缝与 Contract 边界（2026-09-08）
+
+- 第三篇悬疑请求先因 `scene_developments` 的模型场景 ID 标签与计划不一致而阻断；数量和顺序仍可确定时，按计划顺序归一化是现有正文场景规则的最小一致修复，不能把这类元数据漂移直接当成正文质量失败。
+- 修复后同一请求只重跑一次，继续在 Outline/Mechanism 因 `CONFRONT_OPPOSITION` 的关系变化不匹配同一关系效果的 `P1/P3` 槽位而阻断。这个证据说明当前 Dynamic Planner/Mechanism 的候选关系边界仍未稳定，不能用两篇成功故事掩盖三篇样本尚未完成。
+- 因此阶段决策更新为：不进入 Best-of-N；先修关系 Contract 边界并重新完成 3 篇样本，再判断低 LCS 是正文执行问题还是 Observer/Matcher 回收问题；不新增 Supervisor、Instance Card 或 transition 表。
+
+## 261. 三篇正文成立但回收链仍不稳定（2026-09-08）
+
+- 针对第三篇真实运行暴露的两个最小边界做修复：空的 `setup_payoffs` 未完成项在严格 Schema 前丢弃；Mechanism 关系账本失败时把当前允许的人物对带入既有修复提示。固定 serving Snapshot 后，三个原始创作要求均完成 Dynamic Planner → Outline → Story，三篇正文均 `accepted`。
+- 正文人工阅读均能对应创作要求：水患故事通过勘察、协作和治理收束；雪山故事通过证据、风险和分别承担后果收束；疫城故事通过观察病情、资源交换、组织本地人和现实代价收束。因此不能把回收链低分直接等同于 Story 没有执行结构。
+- 重新经过现有 Observer + Matcher 后，LCS 仅为 `0.5714 / 0.5000 / 0.2857`，顺序全部不一致。`fx_03` 的 10 条 `UNCERTAIN` 主要来自 Matcher 两次重试仍把 Function 名写进 `label` 的输出 Schema 失败，属于诊断管线失败；`fx_01` 的 2 条 `UNCERTAIN` 则是单条观察混合两个功能边界。
+- 下一步只修 Matcher 现有输出合约/失败边界，再复跑相同三篇；确认回收结果后才决定是否修 Observer 边界。当前不修改 Dynamic Planner、Function 定义，不进入 Best-of-N，也不新增 Instance Card、transition 表或 Supervisor。
+
+## 262. 合约错误修复后仍需区分 Function 边界与正文执行（2026-09-08）
+
+- Matcher 的非法 `label=FunctionName` 已通过现有 Prompt/字段描述修复并验证。三篇正文复用回放均无最终 `matcher_errors`；这证明上一轮 `fx_03` 的批量 `UNCERTAIN` 主要是输出合约失败，不是正文语义本身。
+- Observer 增加“一个 Observation 一个主导状态变化”的最小边界提示后，本次回放 LCS 提升到 `0.7143 / 0.7500 / 0.7143`，但顺序仍全部不一致，且 `COMMUNITY_FORMATION` 三篇都缺失、`RESOURCE_RELINQUISHMENT` 两篇缺失。不能把“保留率提高”表述为 Function 链已经保住。
+- 当前证据不支持继续叠加 Prompt 规则，也不支持修改 Dynamic Planner 或 Story 执行。下一步应静态核对现有 Function 卡片的 definition、realization_patterns、hard_negatives、confusable_functions 是否覆盖这些具体实现；若确有输入缺口，只把已有字段接入 Matcher 当前卡片输入，仍不新增数据边界。
+- 阶段决策：不进入 Best-of-N；先完成这一项现有卡片边界核对，再决定是否需要最小 Matcher 输入修复。
+
+## 263. 现有边界卡片接入后仍不能驱动自动决策（2026-09-08）
+
+- 用户要求执行最小下一步：复用现有 Function 卡片，把 `hard_negatives`、`confusable_functions` 传入 Matcher，不新增 Instance Card、transition 表、Supervisor 或评分层。
+- 定向测试和全仓回归通过；同一 Snapshot、临时 DB、同三篇正文的真实 Observer + Matcher 回放无 Matcher 结构化错误，但 LCS 为 `0.5714 / 0.2500 / 0.4286`，顺序全部不一致，重复错配和系统性漏项仍在。Observer 重新抽取本身也出现输出波动。
+- 因此恢复链目前只能作为诊断报告，不能作为 Best-of-N 排序分数、Pattern 自动反馈或自动闭环验证依据。下一步若继续，应先建立稳定的 Observer/Matcher Function 对齐证据；当前 Demo 可继续展示生成链路和实验性回收，不宣称可靠闭环。
+
+## 265. 重新抽取不等于检查生成过程是否使用 Function（2026-09-09）
+
+用户指出当前验证方向需要纠正：Story 生成后再次运行 Observer → Matcher 得到不同 Function 链，本质是一次新的、有损的结构抽取，不能用来证明正文生成时是否执行了目标 Function，也不能直接作为 Best-of-N、自动反馈或正文拒绝门禁。
+
+因此删除 Matcher 目标链回收入口及其测试，改为复用现有 Story Validator：让 Validator 在已经同时看到 `function_chain`、`function_constraints`、`scene_plan` 和全文的情况下，逐 Function 输出正文行动与状态后果证据；代码只做数量、名称、场景归属、顺序和 `PASS/MISSING` 的确定性检查。三篇固定正文的 `7/7、8/8、7/7` 证据均通过，人工逐项核对也一致。这证明的是“这三篇正文的结构执行证据成立”，不是 Observer/Matcher 已经稳定，也不改变暂不实现 Best-of-N 的边界。
+
+## 266. 最小文件数不能牺牲职责边界（2026-09-09）
+
+用户追问为什么把校验代码堆在 `Story_Agent/app.py`。此前为了少新增一个文件，把纯 Function 执行校验放进了流程入口；这虽然减少了文件数，却让图编排和规则判断混在一起。最终只拆出一个 `Story_Agent/validation.py`，保留 `app.py` 的流程职责，不扩展架构、不改变行为。
+
+## 267. Best-of-N 不重新抽取 Function，硬门禁由 Story Validator、软排序由一次 LLM 比较承担（2026-09-09）
+
+用户明确纠正了 Best-of-N 的职责边界：候选不能在生成后再次运行 Observer → Matcher 来“证明”执行过 Function；那只是新的有损抽取。最终采用最小实现：复用 Dynamic Planner 已有 Beam 的两个不同候选，各自经过既有 Outline → Story → Story Validator；Validator 的用户要求、因果、人物、结局、临时解决方案和 Function 执行证据负责硬门禁，只有硬通过候选才交给一次 LLM 比较用户要求、因果连贯、结局兑现和正文质量。比较器不接收 Function 链、不输出数字分数、不新增表，结果写入现有 manifest/outcome payload。
+
+唯一真实运行已完成两篇 `accepted` 正文并通过 `7/7`、`8/8` Function 执行证据，但比较提示漏写 `json` 导致 DeepSeek 400；缺陷已修复并经离线回归验证，按“不重跑制造成功”不再重做真实请求。因此本次只证明了候选生成、硬门禁和人工质量差异，不能宣称自动 winner 已经真实落库。
+
+## 268. 修复后 Best-of-2 的 pair review、winner、manifest 与 outcome 均真实落地（2026-09-09）
+
+第一次真实 smoke 暴露的比较 Prompt `json` 前置条件已修复。按用户要求只再执行一次真实请求：两个 Dynamic Beam 候选均完成 Story 并通过 Story Validator 的全部硬门禁，Function 执行证据分别为 `7/7`、`8/8`；唯一 pair review 成功返回 `winner=1`，选择理由集中在用户要求兑现、因果连贯和共同治理结尾，没有重新抽取 Function，也没有使用 Beam score 直接排序。`pipeline_manifest.json` 的 `selection`、winner 文件指针和 `selection_outcome_id` 均已写入，临时 SQLite 的 `generation_stage=best_of_2` outcome 也已落地；正式库 hash、serving 指针、计数和完整性均未变化。该结果验证了最小 Best-of-2 的流程和持久化闭环，但质量收益仍只由一个明确请求支持，不扩大为大样本结论。
+
+## 269. Best-of-2 验证后应与 Pipeline 图编排分离（2026-09-09）
+
+Best-of-2 最初暂放在 `Pipeline_Agent/app.py`，只为先用最小文件数验证候选生成、硬门禁、pair review 和持久化闭环。用户指出入口文件同时承担候选筛选、Validator 规则和正文比较后，职责已明显独立；在不改变行为的前提下，将这些逻辑移到 `Pipeline_Agent/best_of.py`，`app.py` 只保留图节点和导出编排。这样仍是最小实现，但不再把一次性验证代码当作 Pipeline 的固有职责。

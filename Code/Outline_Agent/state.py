@@ -51,6 +51,10 @@ class StorySeed(BaseModel):
     characters: list[SeedCharacter]
     core_conflict: str
     ending_direction: str
+    ending_requirements: list[str] = Field(
+        min_length=1,
+        description="core_conflict 中每个主线问题在结局必须展示的可观察直接后果",
+    )
 
 
 class RelationshipChange(BaseModel):
@@ -108,6 +112,19 @@ class NarrativeStep(BaseModel):
     connective_event: str = ""
     reaction_beat: str = ""
     setup_payoffs: list[SetupPayoff] = Field(default_factory=list, max_length=3)
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_incomplete_setup_payoffs(cls, values):
+        if not isinstance(values, dict) or not isinstance(values.get("setup_payoffs"), list):
+            return values
+        values = dict(values)
+        values["setup_payoffs"] = [
+            item for item in values["setup_payoffs"]
+            if not isinstance(item, dict)
+            or (item.get("content") and item.get("payoff"))
+        ]
+        return values
 
 
 class NarrativePlan(BaseModel):

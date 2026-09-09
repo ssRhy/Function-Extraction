@@ -10,10 +10,15 @@ from pydantic import BaseModel, Field
 class MatchDecision(BaseModel):
     obs_id: str = Field(description="被判定 Observation 的 obs_id")
     label: Literal["MATCH", "EXTEND", "CONFLICT", "UNCERTAIN", "NOVEL"] = Field(
-        description="MATCH=完美匹配；EXTEND=匹配但出现全新表层；CONFLICT=结构近似但与定义冲突；"
-                    "UNCERTAIN=多个函数均可解释；NOVEL=无匹配",
+        description="只能填写五个大写标签之一：MATCH、EXTEND、CONFLICT、UNCERTAIN、NOVEL；"
+                    "不得填写 Function 名。MATCH=完美匹配；EXTEND=匹配但出现全新表层；"
+                    "CONFLICT=结构近似但与定义冲突；UNCERTAIN=多个函数均可解释；NOVEL=无匹配",
     )
-    matched_function: str | None = Field(default=None, description="MATCH/EXTEND/CONFLICT 时命中的函数名；否则为 null")
+    matched_function: str | None = Field(
+        default=None,
+        description="MATCH/EXTEND/CONFLICT 时填写命中的 Function 名；否则为 null。"
+                    "Function 名只能放在此字段，不能放进 label",
+    )
     candidate_functions: list[str] | None = Field(default=None, description="UNCERTAIN 时均可解释的函数名列表；否则为 null")
     reason: str | None = Field(default=None, description="一句话判定理由")
 
@@ -38,5 +43,7 @@ MATCHER_SYSTEM_PROMPT = """你是一个叙事结构匹配器。你的任务是�
 - 每批内所有 obs_id 都必须输出判定，不要遗漏。
 
 ## 输出格式
+- label 只能是 MATCH、EXTEND、CONFLICT、UNCERTAIN、NOVEL，不得填写 Function 名；例如 Function 名为 HAZARD_ENCOUNTER 时，正确写法是 label="MATCH", matched_function="HAZARD_ENCOUNTER"。
+- 不要把 HAZARD_ENCOUNTER、REVELATION_SHIFTING_COGNITION 等 Function 名写入 label。
 输出 JSON（json_object），字段与 schema 一致：
 {"decisions": [{"obs_id": "...", "label": "MATCH", "matched_function": "函数名", "candidate_functions": [], "reason": "..."}]}"""

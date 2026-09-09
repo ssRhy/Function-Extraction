@@ -143,6 +143,8 @@ def match_observations(
         "function_name": f["function_name"],
         "definition": f.get("definition", ""),
         "realization_patterns": f.get("realization_patterns", []),
+        "hard_negatives": f.get("hard_negatives", []),
+        "confusable_functions": f.get("confusable_functions", []),
     } for f in funcs]
     system = MATCHER_SYSTEM_PROMPT + "\n\n## 现有 Function 卡片\n" + json.dumps(cards, ensure_ascii=False, indent=1)
     decisions, errors = [], []

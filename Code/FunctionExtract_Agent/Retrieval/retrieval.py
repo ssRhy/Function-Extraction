@@ -77,14 +77,13 @@ class Retriever:
             query_embeddings=[query_embedding],
             n_results=min(self.bank.count(), top_k + len(seen_ids)),
             where=where_filter,
-            include=["distances", "documents", "metadatas"]
+            include=["distances"]
         )
 
         retrieved = []
 
         ids = results["ids"][0]
         distances = results["distances"][0]
-        documents = results["documents"][0]
 
         for i, obs_id in enumerate(ids):
             if obs_id in seen_ids:

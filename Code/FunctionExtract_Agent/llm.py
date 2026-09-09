@@ -64,7 +64,7 @@ def get_client():
 
 
 def chat(messages: list, model: str = "deepseek-v4-flash", response_format: dict | None = None,
-         reasoning_effort: str = "none") -> str:
+         reasoning_effort: str = "none", temperature: float | None = None) -> str:
     """通用 chat 接口"""
     client = get_client()
     kwargs = {
@@ -74,6 +74,8 @@ def chat(messages: list, model: str = "deepseek-v4-flash", response_format: dict
     }
     if reasoning_effort != "none":
         kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+    if temperature is not None:
+        kwargs["temperature"] = temperature
     if response_format:
         kwargs["response_format"] = response_format
     t0 = time.perf_counter()
@@ -112,7 +114,8 @@ def _repair_json(content: str) -> str:
 
 
 def chat_structured(messages: list, output_schema: type, model: str = "deepseek-v4-flash",
-                    reasoning_effort: str = "none", max_retries: int = _STRUCTURED_RETRY):
+                    reasoning_effort: str = "none", max_retries: int = _STRUCTURED_RETRY,
+                    temperature: float | None = None):
     """
     强制 JSON 格式返回 + Pydantic 验证解析。
 
@@ -126,6 +129,7 @@ def chat_structured(messages: list, output_schema: type, model: str = "deepseek-
             messages,
             response_format={"type": "json_object"},
             reasoning_effort=reasoning_effort,
+            temperature=temperature,
         ) or "")
         last_content = content
         if not content:

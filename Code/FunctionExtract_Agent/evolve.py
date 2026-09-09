@@ -308,7 +308,7 @@ def rematch_unresolved_node(state: dict) -> dict:
     ]
     selected_observations = [item[0] for item in selected]
     selected_candidates = [item[1] for item in selected]
-    decisions, _unused, errors = matcher_module.match_observations(
+    decisions, _, errors = matcher_module.match_observations(
         selected_observations, funcs, bank.embedder, candidates=selected_candidates,
     )
 

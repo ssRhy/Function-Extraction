@@ -36,6 +36,7 @@ OBSERVATION_SYSTEM_PROMPT = """你是一个叙事结构分析专家。请先建�
 - 聚焦叙事结构，忽略表层动作的差异。
 - `participants` 只写角色类型，不写人名；`participant_ids`、`role_bindings` 和关系变化只写画像中已声明的人物 ID。
 - 多个句子可能共同描述一个 Observation；无关的环境描写不需要提取。
+- 一个 Observation 只保留一个主导的叙事状态变化；不要把关系变化、资源转移、对抗、群体形成等不同变化硬合并。若句子明确包含前后独立事件就拆成多个 Observation；若只是同一事件的因果细节则保持合并，不要为了套 Function 而拆分。
 - 没有事实证据的位置留空，不要根据常识补写。
 - `relationship_deltas` 只记录可由句子直接支持的关系变化，不能把人物目标变化臆测成关系变化。
 

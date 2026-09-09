@@ -206,6 +206,7 @@ def test_outline_graph_consumes_contract_and_exports_closed_ledger(tmp_path, mon
                     motivation="m", relationships={}, stance_toward_protagonist="self",
                 )],
                 core_conflict="c", ending_direction="e",
+                ending_requirements=["完成c的可观察结果"],
             )
         if output_schema is outline.MechanismPlan:
             return outline.MechanismPlan(steps=[outline_state.MechanismStep(

@@ -343,12 +343,15 @@ def test_story_generate_passes_request_and_uses_serving_snapshot(tmp_path, monke
     path = app.generate_story(
         "现代情感：写一次克制的家庭关系修复",
         knowledge_db="formal.db", out_dir=tmp_path / "run",
+        planner_mode="dynamic", best_of=2,
     )
 
     assert path.exists()
     assert captured["state"]["genre"] == "03_现代情感"
     assert captured["state"]["snapshot_id"] == "SERVING"
     assert captured["state"]["user_request"] == "现代情感：写一次克制的家庭关系修复"
+    assert captured["state"]["planner_mode"] == "dynamic"
+    assert captured["state"]["best_of"] == 2
     assert captured["state"]["knowledge_db"] == "formal.db"
 
 
@@ -360,7 +363,25 @@ def test_main_dispatches_story_generate_with_request_file(monkeypatch, tmp_path)
 
     assert app.main(["story", "generate", "--request-file", str(request_file)]) == 0
     assert calls[0][0] == ("末世科幻：写一个废土求生故事",)
-    assert calls[0][1] == {"out_dir": None}
+    assert calls[0][1] == {
+        "snapshot_id": None,
+        "knowledge_db": str(app.KNOWLEDGE_DB),
+        "out_dir": None,
+        "planner_mode": "published",
+    }
+
+
+def test_main_dispatches_dynamic_story_generate(monkeypatch):
+    calls = []
+    monkeypatch.setattr(app, "generate_story", lambda *args, **kwargs: calls.append((args, kwargs)))
+
+    assert app.main([
+        "story", "generate", "--request", "古风仙侠：守城阵师回乡解决水患",
+        "--planner-mode", "dynamic",
+        "--best-of", "2",
+    ]) == 0
+    assert calls[0][1]["planner_mode"] == "dynamic"
+    assert calls[0][1]["best_of"] == 2
 
 
 def test_story_generate_rejects_two_request_sources(monkeypatch):

@@ -22,6 +22,7 @@ def _source():
             "characters": [{"id": "P1", "role": "hero"}],
             "core_conflict": "c",
             "ending_direction": "seed创作的稳定终态",
+            "ending_requirements": ["展示直接结果"],
         },
         "mechanism_plan": {"steps": [
             {
@@ -106,7 +107,10 @@ def _scene_plan_draft():
             characters=["P1"], setting="仓库", goal="解决危险", conflict="敌人阻拦",
             beats=["P1解决危险"], state_change="P1安全",
         )]),
-    ])
+    ], ending=[state.SceneDraft(
+        characters=["P1"], setting="仓库外", goal="确认余波", conflict="残余危险",
+        beats=["P1确认危险已解除"], state_change="P1进入稳定状态", transition="故事结束",
+    )])
 
 
 def _function_constraints():
@@ -128,11 +132,6 @@ def _function_constraints():
                 causal_to_next="已确认的危险迫使P1采取解决行动",
             ),
         ],
-        story=state.StoryLevelConstraint(
-            core_conflict="危险威胁P1", ending_resolves="危险是否会伤害P1",
-            ending_must_show=["P1解决危险"], required_final_state="P1安全",
-            resolution_actions=["P1解决危险"],
-        ),
     )
 
 
@@ -141,31 +140,14 @@ def _scene_developments():
         state.SceneDevelopment(
             scene_id="S2", pacing_mode="DRAMATIZE",
             expand_points=["P1完成解决危险的行动"],
-            causal_moments=[state.CausalMoment(
-                stimulus="危险源暴露", interpretation="P1确认必须立即关闭",
-                response="P1执行关闭行动",
-            )],
-            exit_aftereffect="危险解除，P1恢复安全",
-            literary_plan=state.LiteraryPlan(
-                environment_function="仓库的封闭感强化危险压力",
-                sensory_anchor=["金属声"], image_or_motif="灯塔",
-                dialogue_subtext="P1必须证明自己",
-                rhetoric_focus=["对照"], sentence_rhythm="紧促",
-            ),
         ),
         state.SceneDevelopment(
             scene_id="S1", pacing_mode="DEVELOP",
             expand_points=["P1确认异常符号与危险有关"],
-            reaction_decision=state.ReactionDecision(
-                stimulus="P1发现异常符号", reaction="P1提高警觉",
-                dilemma="离开现场或继续追查", decision="P1继续追查仓库",
-            ),
-            exit_aftereffect="P1带着已确认的危险线索前往仓库",
-            literary_plan=state.LiteraryPlan(
-                environment_function="街道的雾气遮挡视线",
-                sensory_anchor=["潮湿的雾"], image_or_motif="",
-                dialogue_subtext="", rhetoric_focus=[], sentence_rhythm="舒缓",
-            ),
+        ),
+        state.SceneDevelopment(
+            scene_id="S3", pacing_mode="DRAMATIZE",
+            expand_points=["P1确认危险解除后的稳定状态"],
         ),
     ])
 
@@ -177,10 +159,24 @@ def _story_validation(**overrides):
         "character_consistency_ok": True,
         "ending_ok": True,
         "unsupported_solution_ok": True,
-        "length_ok": True,
         "overall_ok": True,
         "repairable": False,
         "issues": [],
+        "ending_evidence": [{
+            "requirement_index": 0, "scene_id": "S3", "evidence": "P1确认危险解除",
+        }],
+        "function_execution_evidence": [
+            {
+                "segment_index": 1, "function_name": "F1", "scene_id": "S1",
+                "evidence": "P1发现符号并因此确认危险，开始追查",
+                "status": "PASS",
+            },
+            {
+                "segment_index": 2, "function_name": "F2", "scene_id": "S2",
+                "evidence": "P1关闭危险源，危险消失并恢复安全",
+                "status": "PASS",
+            },
+        ],
     }
     values.update(overrides)
     return state.StoryValidation(**values)
@@ -222,7 +218,7 @@ def test_scene_plan_requires_coverage_order_and_ending():
     assert app._scene_plan_issues(source, plan) == []
     incomplete = plan
     incomplete["scenes"].pop()
-    assert any("覆盖" in issue for issue in app._scene_plan_issues(source, incomplete))
+    assert any("结局" in issue for issue in app._scene_plan_issues(source, incomplete))
 
 
 def test_scene_plan_rejects_unknown_character_id():
@@ -274,12 +270,13 @@ def test_function_constraints_lock_segment_function():
         app.align_function_constraints(source, constraints)
 
 
-def test_scene_developments_require_exact_scene_ids():
+def test_scene_developments_align_by_plan_order():
     plan = app.build_scene_plan(_source(), _scene_plan_draft().model_dump())
-    developments = app.align_scene_developments(
-        plan, _scene_developments().model_dump(),
-    )
-    assert [item["scene_id"] for item in developments["developments"]] == ["S1", "S2"]
+    developments = _scene_developments().model_dump()
+    for index, item in enumerate(developments["developments"], 1):
+        item["scene_id"] = f"model-{index}"
+    developments = app.align_scene_developments(plan, developments)
+    assert [item["scene_id"] for item in developments["developments"]] == ["S1", "S2", "S3"]
     developments["developments"].pop()
     with pytest.raises(ValueError, match="一一对应"):
         app.align_scene_developments(plan, developments)
@@ -290,34 +287,92 @@ def test_prompts_do_not_promote_relationships_beyond_outline_evidence():
     assert "场景结构" in app.SCENE_PLAN_PROMPT
     assert "allowed_character_ids" in app.SCENE_PLAN_PROMPT
     assert "pacing_mode" not in app.SCENE_PLAN_PROMPT
-    assert "刺激 → 反应 → 两难 → 决定" in app.DEVELOP_SCENES_PROMPT
-    assert "literary_plan" in app.DEVELOP_SCENES_PROMPT
+    assert "pacing_mode" in app.DEVELOP_SCENES_PROMPT
+    assert "literary_plan" not in app.DEVELOP_SCENES_PROMPT
     assert "不撰写正文" in app.DEVELOP_SCENES_PROMPT
     assert "scene_developments" in app.STORY_PROMPT
-    assert "环境描写" in app.STORY_PROMPT
+    assert "不让人物替作者总结主题" in app.STORY_PROMPT
+    assert "不得把个人觉悟写成整个世界立即恢复正常" in app.STORY_PROMPT
+    assert "保持正文的问题规模与结局规模一致" in app.STORY_PROMPT
+    assert "不是结局义务" in app.STORY_VALIDATOR_PROMPT
+    assert "可以保留制度、阵营和利益冲突" in app.STORY_VALIDATOR_PROMPT
+    assert "同一层面的可观察直接后果" in app.STORY_VALIDATOR_PROMPT
+    assert "ending_evidence" in app.STORY_VALIDATOR_PROMPT
+    assert "function_execution_evidence" in app.STORY_VALIDATOR_PROMPT
+    assert "仅作结局行动与后果的诊断记录" in app.STORY_VALIDATOR_PROMPT
 
 
-def test_scene_development_normalizes_optional_nulls():
+def test_scene_plan_appends_independent_ending_scene():
+    plan = app.build_scene_plan(_source(), _scene_plan_draft().model_dump())
+    assert [scene["scene_id"] for scene in plan["scenes"]] == ["S1", "S2", "S3"]
+    assert plan["scenes"][1]["function_names"] == ["F2"]
+    assert plan["scenes"][2]["is_ending"] is True
+    assert plan["scenes"][2]["source_segment_indices"] == []
+    assert app._scene_plan_issues(_source(), plan) == []
+
+
+def test_scene_development_keeps_only_execution_hints():
     development = state.SceneDevelopment.model_validate({
         "scene_id": "S1",
         "pacing_mode": "DEVELOP",
-        "expand_points": [],
-        "causal_moments": None,
-        "exit_aftereffect": None,
-        "literary_plan": {
-            "environment_function": None,
-            "sensory_anchor": None,
-            "image_or_motif": None,
-            "dialogue_subtext": None,
-            "rhetoric_focus": None,
-            "sentence_rhythm": None,
-        },
+        "expand_points": ["P1继续追查"],
     })
 
-    assert development.causal_moments == []
-    assert development.exit_aftereffect == ""
-    assert development.literary_plan.image_or_motif == ""
-    assert development.literary_plan.sensory_anchor == []
+    assert development.model_dump() == {
+        "scene_id": "S1",
+        "pacing_mode": "DEVELOP",
+        "expand_points": ["P1继续追查"],
+    }
+
+
+def test_function_execution_evidence_checks_target_and_scene_order():
+    source = _source()
+    plan = app.build_scene_plan(source, _scene_plan_draft().model_dump())
+    validation = _story_validation().model_dump()
+    assert app._function_execution_issues(source, plan, validation) == []
+
+    validation["function_execution_evidence"][1]["status"] = "MISSING"
+    issues = app._function_execution_issues(source, plan, validation)
+    assert any("正文执行缺失" in issue for issue in issues)
+
+    validation["function_execution_evidence"][1]["status"] = "PASS"
+    validation["function_execution_evidence"][0]["scene_id"] = "S3"
+    assert any("不属于对应 Function 场景" in issue for issue in app._function_execution_issues(
+        source, plan, validation,
+    ))
+
+
+def test_validate_story_node_turns_missing_function_into_causal_failure(monkeypatch):
+    source = _source()
+    plan = app.build_scene_plan(source, _scene_plan_draft().model_dump())
+    validation = _story_validation(
+        function_execution_evidence=[
+            {
+                "segment_index": 1, "function_name": "F1", "scene_id": "S1",
+                "evidence": "P1发现符号并确认危险",
+                "status": "PASS",
+            },
+            {
+                "segment_index": 2, "function_name": "F2", "scene_id": "S2",
+                "evidence": "正文没有写出关闭危险源或危险消失",
+                "status": "MISSING",
+            },
+        ],
+    )
+    monkeypatch.setattr(app, "chat_structured", lambda *_args, **_kwargs: validation)
+    result = app.validate_story_node({
+        "outline_data": source,
+        "user_request": None,
+        "function_constraints": _function_constraints().model_dump(),
+        "scene_plan": plan,
+        "scene_developments": _scene_developments().model_dump(),
+        "story": {"scenes": [{"scene_id": "S1", "text": "正文" * 2000}]},
+        "story_repair_count": 0,
+    })
+    checked = result["story_validation"]
+    assert checked["causal_constraints_ok"] is False
+    assert checked["overall_ok"] is False
+    assert any("正文执行缺失" in issue for issue in checked["issues"])
 
 
 def test_graph_end_to_end(tmp_path, monkeypatch):
@@ -332,7 +387,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             assert payload["ending_target"] == {
                 "source": "llm_seed",
                 "resolves": "c",
-                "must_show": [],
+                "must_show": ["展示直接结果"],
                 "final_state": "seed创作的稳定终态",
             }
             assert "ending_spec" not in payload
@@ -344,14 +399,15 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             return _scene_plan_draft()
         if output_schema is state.SceneDevelopmentPlan:
             assert payload["scene_plan"]["scenes"][0]["scene_id"] == "S1"
+            assert payload["scene_plan"]["scenes"][-1]["is_ending"] is True
             assert "mechanism_plan" not in payload
             return _scene_developments()
         if output_schema is state.StoryDraft:
             assert _kwargs["reasoning_effort"] == "medium"
-            assert payload["function_constraints"]["story"]["required_final_state"] == "P1安全"
+            assert "story" not in payload["function_constraints"]
             assert "mechanism_plan" not in payload
             assert "narrative_plan" not in payload
-            assert [item["scene_id"] for item in payload["scene_developments"]["developments"]] == ["S1", "S2"]
+            assert [item["scene_id"] for item in payload["scene_developments"]["developments"]] == ["S1", "S2", "S3"]
             assert payload["writing_requirements"] == {
                 "min_chinese_chars": 3000,
             }
@@ -359,6 +415,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             return state.StoryDraft(title="雾中灯塔", character_names={"P1": "林晚"}, scenes=[
                 state.StoryScene(scene_id="S2", text=long_text),
                 state.StoryScene(scene_id="S1", text=long_text),
+                state.StoryScene(scene_id="S3", text=long_text),
             ])
         if output_schema is state.StoryValidation:
             return _story_validation()
@@ -376,8 +433,8 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
     })
     with open(result["result_path"], encoding="utf-8") as f:
         exported = json.load(f)
-    assert [scene["scene_id"] for scene in exported["story"]["scenes"]] == ["S1", "S2"]
-    assert [item["scene_id"] for item in exported["scene_developments"]["developments"]] == ["S1", "S2"]
+    assert [scene["scene_id"] for scene in exported["story"]["scenes"]] == ["S1", "S2", "S3"]
+    assert [item["scene_id"] for item in exported["scene_developments"]["developments"]] == ["S1", "S2", "S3"]
     assert calls == [
         state.FunctionConstraintPlan,
         state.ScenePlanDraft,
@@ -423,6 +480,7 @@ def _run_story_graph(tmp_path, monkeypatch, validations):
                 title="雾中灯塔", character_names={"P1": "林晚"}, scenes=[
                     state.StoryScene(scene_id="S1", text=long_text),
                     state.StoryScene(scene_id="S2", text=long_text),
+                    state.StoryScene(scene_id="S3", text=long_text),
                 ],
             )
         if output_schema is state.StoryValidation:
@@ -460,6 +518,35 @@ def test_story_validator_rewrites_once_then_accepts(tmp_path, monkeypatch):
     assert exported["story_revalidation"]["overall_ok"] is True
     assert outcomes[0][0][5] is True
     assert outcomes[0][0][7] == "rewritten"
+
+
+def test_story_validator_rewrites_after_function_execution_failure(tmp_path, monkeypatch):
+    failed = _story_validation(
+        overall_ok=False,
+        repairable=True,
+        causal_constraints_ok=False,
+        issues=["第 2 段 Function 正文执行缺失"],
+        function_execution_evidence=[
+            {
+                "segment_index": 1, "function_name": "F1", "scene_id": "S1",
+                "evidence": "P1发现符号并确认危险",
+                "status": "PASS",
+            },
+            {
+                "segment_index": 2, "function_name": "F2", "scene_id": "S2",
+                "evidence": "正文没有写出关闭危险源或危险消失",
+                "status": "MISSING",
+            },
+        ],
+    )
+    exported, calls, _ = _run_story_graph(
+        tmp_path, monkeypatch, [failed, _story_validation()],
+    )
+
+    assert calls.count(state.StoryDraft) == 2
+    assert exported["story_status"] == "rewritten"
+    assert exported["first_story_validation"]["causal_constraints_ok"] is False
+    assert exported["story_revalidation"]["overall_ok"] is True
 
 
 def test_story_validator_stops_after_second_failure_and_rejects(tmp_path, monkeypatch):

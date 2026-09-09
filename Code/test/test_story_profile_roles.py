@@ -2,7 +2,6 @@
 
 import pytest
 
-from Contracts.function_contract import definition_sha256
 from Contracts.ledger import build_contract_ledger
 from Contracts.occurrence import align_occurrences
 from Contracts.role_projection import project_role_references

@@ -1,5 +1,5 @@
 """RegistryStore（SQLite）单元测试：CRUD / 命名空间隔离 / 字段无损 / JSONL 往返。"""
-import sys, os, json
+import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from FunctionExtract_Agent.Registry.registry import RegistryStore

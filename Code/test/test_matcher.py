@@ -1,5 +1,6 @@
 """Matcher 单元测试：top-k 召回 / 直写 exemplars / occurrence 组装 / 五分类节点（mock LLM）。"""
 
+import json
 import os
 import sys
 import types
@@ -9,7 +10,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import numpy as np
 
 from FunctionExtract_Agent.Matcher import matcher as mm
-from FunctionExtract_Agent.Matcher.matcher import recall_candidates, _apply_evidence, _story_stage, _make_occurrence, matcher_node
+from FunctionExtract_Agent.Matcher.matcher import (
+    recall_candidates, _apply_evidence, _story_stage, _make_occurrence, matcher_node,
+)
 from FunctionExtract_Agent.Registry.registry import RegistryStore, get_active_store, set_active_store
 from FunctionExtract_Agent.Prompt.Matcher_prompt import MatchDecision, MatchResponse
 
@@ -126,10 +129,16 @@ def test_matcher_node_mixed_labels(tmp_path):
     bank.embedder = FakeEmbedder()
     prev = get_active_store()
     store = RegistryStore(db_path=str(tmp_path / "f.db"), namespace="evolve_test")
-    store.replace_all([_func("F_A", "角色获得资源")])
+    function = _func("F_A", "角色获得资源")
+    function["hard_negatives"] = ["资源被外力夺走"]
+    function["confusable_functions"] = ["RESOURCE_OBTAINMENT"]
+    store.replace_all([function])
     set_active_store(store)
 
     def fake_llm(messages, schema, **kw):
+        cards = json.loads(messages[0]["content"].split("\n\n## 现有 Function 卡片\n", 1)[1])
+        assert cards[0]["hard_negatives"] == ["资源被外力夺走"]
+        assert cards[0]["confusable_functions"] == ["RESOURCE_OBTAINMENT"]
         return MatchResponse(decisions=[
             MatchDecision(obs_id="o1", label="MATCH", matched_function="F_A", reason="结构一致"),
             MatchDecision(obs_id="o2", label="NOVEL", reason="现有函数无法解释"),
@@ -180,6 +189,11 @@ def test_matcher_node_empty_registry(tmp_path):
         bank.clear()
     assert out["match_decisions"][0]["label"] == "NOVEL"
     assert out["match_occurrences"][0]["function_name"] == "OTHER"
+
+
+def test_matcher_prompt_separates_label_from_function_name():
+    assert "不得填写 Function 名" in mm.MATCHER_SYSTEM_PROMPT
+    assert 'label="MATCH", matched_function="HAZARD_ENCOUNTER"' in mm.MATCHER_SYSTEM_PROMPT
 
 
 if __name__ == "__main__":

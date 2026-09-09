@@ -256,12 +256,16 @@ def test_seed_character_has_explicit_initial_stance():
 
 def test_build_ending_target_uses_llm_seed():
     target = app.build_ending_target(
-        {"core_conflict": "解决冲突", "ending_direction": "恢复稳定"},
+        {
+            "core_conflict": "解决冲突",
+            "ending_direction": "恢复稳定",
+            "ending_requirements": ["展示直接结果"],
+        },
     )
     assert target == {
         "source": "llm_seed",
         "resolves": "解决冲突",
-        "must_show": [],
+        "must_show": ["展示直接结果"],
         "final_state": "恢复稳定",
     }
 
@@ -315,8 +319,10 @@ def test_mechanism_retries_contract_relationship_boundary(monkeypatch):
     chain = [{"segment_index": 1, "function_name": "RELATE", "contract": contract}]
     calls = []
 
-    def fake_chat(_messages, output_schema, **_kwargs):
+    def fake_chat(messages, output_schema, **_kwargs):
         assert output_schema is app.MechanismPlan
+        if calls:
+            assert "segment_index=1:P1/P2" in messages[-1]["content"]
         calls.append(True)
         target = "P3" if len(calls) == 1 else "P2"
         return app.MechanismPlan(steps=[state.MechanismStep(
@@ -333,7 +339,11 @@ def test_mechanism_retries_contract_relationship_boundary(monkeypatch):
 
     monkeypatch.setattr(app, "chat_structured", fake_chat)
     result = app.mechanism_node({
-        "chain": chain, "seed": {"characters": [{"id": "P1"}, {"id": "P2"}]},
+        "chain": chain,
+        "seed": {
+            "characters": [{"id": "P1"}, {"id": "P2"}],
+            "ending_requirements": ["展示关系变化的直接结果"],
+        },
         "planner_references": None,
     })
 
@@ -406,6 +416,19 @@ def test_narrative_payoff_must_point_forward_or_ending():
     assert any("后续段或 ending" in issue for issue in app.narrative_plan_issues(chain, valid))
 
 
+def test_narrative_step_drops_incomplete_setup_payoffs():
+    step = state.NarrativeStep.model_validate({
+        "segment_index": 1,
+        "function_name": "A",
+        "genre_realization": "实现",
+        "setup_payoffs": [
+            {"content": "不完整线索", "payoff": None},
+            {"content": "有效线索", "payoff": "后续兑现"},
+        ],
+    })
+    assert [item.content for item in step.setup_payoffs] == ["有效线索"]
+
+
 def test_scaffold_retries_invalid_payoff_once(monkeypatch):
     chain = [
         {"segment_index": 1, "function_name": "A", "definition": "", "preconditions": [],
@@ -437,7 +460,9 @@ def test_scaffold_retries_invalid_payoff_once(monkeypatch):
     monkeypatch.setattr(app, "chat_structured", fake_chat)
     result = app.scaffold_node({
         "snapshot_id": "snapshot_x", "knowledge_db": "knowledge.db",
-        "chain": chain, "seed": {}, "mechanism": {}, "ending_spec": None,
+        "chain": chain,
+        "seed": {"ending_requirements": ["展示直接结果"]},
+        "mechanism": {}, "ending_spec": None,
     })
     assert result["narrative"]["steps"][0]["setup_payoffs"][0]["payoff_segment_index"] == 2
 
@@ -450,7 +475,7 @@ def test_validate_distinguishes_seed_ending_target_from_generated_ending(monkeyp
         assert payload["ending_target"] == {
             "source": "llm_seed",
             "resolves": "核心冲突",
-            "must_show": [],
+            "must_show": ["展示直接结果"],
             "final_state": "恢复稳定",
         }
         assert payload["generated_ending"]["final_state"] == "恢复稳定"
@@ -469,6 +494,7 @@ def test_validate_distinguishes_seed_ending_target_from_generated_ending(monkeyp
         "seed": {
             "core_conflict": "核心冲突",
             "ending_direction": "恢复稳定",
+            "ending_requirements": ["展示直接结果"],
             "characters": [],
         },
         "mechanism": {"steps": []},
@@ -492,9 +518,20 @@ def test_prompts_limit_relationship_state_to_function_evidence():
     assert "可观察解决动作 → 直接冲突结果 → 稳定终态" in app.SEED_PROMPT
     assert "历史模板的结局参考" in app.SEED_PROMPT
     assert "用户明确的创作要求优先于它" in app.SEED_PROMPT
+    assert "可理解但错误的选择" in app.SEED_PROMPT
+    assert "可理解但错误的选择" in app.DYNAMIC_SEED_PROMPT
+    assert "叙事尺度不得超过当前 Function 链" in app.SEED_PROMPT
+    assert "只提供环境压力" in app.DYNAMIC_SEED_PROMPT
     assert "本轮 LLM seed" in app.NARRATIVE_PROMPT
+    assert "强钩子必须进入核心因果" in app.NARRATIVE_PROMPT
+    assert "一次性完整供述" in app.NARRATIVE_PROMPT
+    assert "保持冲突尺度一致" in app.NARRATIVE_PROMPT
     assert "不由 Pattern 的 `ending_spec` 直接提供" in app.VALIDATE_PROMPT
     assert "状态上界" in app.REALIZE_PROMPT
+    assert "可以保留制度阻力" in app.REALIZE_PROMPT
+    assert "不是结局必须完成的义务" in app.VALIDATE_PROMPT
+    assert "允许制度、阵营和利益冲突继续存在" in app.VALIDATE_PROMPT
+    assert "必须单独比较 core_conflict 与 ending 的解决尺度" in app.VALIDATE_PROMPT
     assert "overall_ok 必须为 false" in app.VALIDATE_PROMPT
 
 
@@ -505,6 +542,7 @@ def _semantic_validation_state(ending, *, final_ledger=None, mechanism_steps=Non
         "seed": {
             "core_conflict": "核心冲突",
             "ending_direction": "恢复稳定",
+            "ending_requirements": ["展示直接结果"],
             "characters": [
                 {"id": "P1", "relationships": {"P2": "低信任"}},
                 {"id": "P2", "relationships": {"P1": "低信任"}},
@@ -651,6 +689,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
                     motivation="m", relationships={}, stance_toward_protagonist="self",
                 )],
                 core_conflict="c", ending_direction="e",
+                ending_requirements=["完成c的可观察结果"],
             )
         if output_schema is app.MechanismPlan:
             payload = json.loads(messages[-1]["content"])
@@ -658,7 +697,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             assert payload["ending_target"] == {
                 "source": "llm_seed",
                 "resolves": "c",
-                "must_show": [],
+                "must_show": ["完成c的可观察结果"],
                 "final_state": "e",
             }
             return app.MechanismPlan(steps=[

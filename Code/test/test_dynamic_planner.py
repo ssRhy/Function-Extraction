@@ -293,6 +293,7 @@ def test_dynamic_graph_keeps_candidate_in_memory_and_exports_null_pattern_id(tmp
                         "id": "P1", "label": "主角", "role": "hero", "goal": "g",
                         "motivation": "m", "relationships": {}, "stance_toward_protagonist": "self",
                 }], core_conflict="c", ending_direction="e",
+                ending_requirements=["完成c的可观察结果"],
             )
         if output_schema is outline.MechanismPlan:
             return outline.MechanismPlan(steps=[{
@@ -349,6 +350,43 @@ def test_dynamic_graph_keeps_candidate_in_memory_and_exports_null_pattern_id(tmp
     assert result["pattern_id"] is None
     assert result["pattern_source"] == "dynamic"
     assert result["dynamic_candidate"]["candidate_id"] == "DYN_TEST"
+
+
+def test_dynamic_graph_reuses_preplanned_candidate(monkeypatch):
+    selected = {
+        "candidate_id": "DYN_SECOND",
+        "chain": [{"function_id": "F1", "function_name": "A"}],
+    }
+    seed = {"core_conflict": "同一 Seed"}
+    monkeypatch.setattr(
+        outline,
+        "plan_dynamic_outline",
+        lambda *_args: pytest.fail("不应再次运行动态 Planner"),
+    )
+    monkeypatch.setattr(
+        outline,
+        "build_dynamic_references",
+        lambda snapshot_id, knowledge_db: {
+            "snapshot_id": snapshot_id, "knowledge_db": knowledge_db,
+        },
+    )
+
+    result = outline.dynamic_planner_node({
+        "snapshot_id": "snapshot_x",
+        "knowledge_db": "knowledge.db",
+        "dynamic_candidates": [selected],
+        "dynamic_candidate": selected,
+    })
+
+    assert result["dynamic_candidate"] == selected
+    assert result["dynamic_candidates"] == [selected]
+    assert result["chain"] == selected["chain"]
+    monkeypatch.setattr(
+        outline,
+        "chat_structured",
+        lambda *_args: pytest.fail("预置 Seed 不应再次生成"),
+    )
+    assert outline.seed_node({"seed": seed}) == {"seed": seed}
 
 
 def test_dynamic_outline_record_does_not_claim_pattern(tmp_path):

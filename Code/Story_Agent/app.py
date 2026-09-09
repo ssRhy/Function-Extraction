@@ -38,6 +38,7 @@ from Story_Agent.state import (
     StoryValidation,
     StoryState,
 )
+from Story_Agent.validation import _function_execution_issues
 
 
 _DATA = os.path.join(_ROOT, "data")
@@ -59,7 +60,7 @@ def _ending_target(source):
     return source.get("ending_target") or {
         "source": "llm_seed",
         "resolves": source.get("seed", {}).get("core_conflict", ""),
-        "must_show": [],
+        "must_show": list(source.get("seed", {}).get("ending_requirements") or []),
         "final_state": source.get("seed", {}).get("ending_direction", ""),
     }
 
@@ -78,12 +79,16 @@ def _scene_plan_issues(source, plan):
             issues.append(f"重复 scene_id: {scene['scene_id']}")
         scene_ids.add(scene["scene_id"])
         indices = scene["source_segment_indices"]
-        if any(index < 1 or index > len(segments) for index in indices):
-            issues.append(f"{scene['scene_id']} 引用了不存在的大纲段")
-            continue
-        expected_names = [segments[index - 1]["function_name"] for index in indices]
-        if scene["function_names"] != expected_names:
-            issues.append(f"{scene['scene_id']} 的 Function 与来源大纲段不一致")
+        if scene.get("is_ending"):
+            if indices or scene["function_names"]:
+                issues.append(f"{scene['scene_id']} 结局场景不能绑定 Function 段")
+        else:
+            if any(index < 1 or index > len(segments) for index in indices):
+                issues.append(f"{scene['scene_id']} 引用了不存在的大纲段")
+                continue
+            expected_names = [segments[index - 1]["function_name"] for index in indices]
+            if scene["function_names"] != expected_names:
+                issues.append(f"{scene['scene_id']} 的 Function 与来源大纲段不一致")
         if character_ids:
             unknown = sorted(set(scene["characters"]) - character_ids)
             if unknown:
@@ -93,8 +98,9 @@ def _scene_plan_issues(source, plan):
         issues.append("场景计划未覆盖全部大纲段")
     if seen_indices != sorted(seen_indices):
         issues.append("场景计划改变了大纲段顺序")
-    if not plan["scenes"][-1]["resolves_ending"]:
-        issues.append("最后场景未承担结局兑现")
+    ending_scenes = [scene for scene in plan["scenes"] if scene.get("is_ending")]
+    if not ending_scenes or plan["scenes"][-1] not in ending_scenes:
+        issues.append("场景计划缺少位于 Function 场景之后的独立结局场景")
     return issues
 
 
@@ -128,10 +134,10 @@ def _align_story_scenes(scene_plan, story):
 def align_scene_developments(scene_plan, developments):
     expected = [scene["scene_id"] for scene in scene_plan["scenes"]]
     items = developments["developments"]
-    by_id = {item["scene_id"]: item for item in items}
-    if len(by_id) != len(items) or set(by_id) != set(expected):
+    if len(items) != len(expected):
         raise ValueError("场景展开必须与场景计划的 scene_id 一一对应")
-    developments["developments"] = [by_id[scene_id] for scene_id in expected]
+    for item, scene_id in zip(items, expected):
+        item["scene_id"] = scene_id
     return developments
 
 
@@ -180,9 +186,16 @@ def build_scene_plan(source, draft):
                 "source_segment_indices": [index],
                 "function_names": [segment["function_name"]],
                 **detail,
-                "resolves_ending": False,
+                "is_ending": False,
             })
-    scenes[-1]["resolves_ending"] = True
+    for detail in draft["ending"]:
+        scenes.append({
+            "scene_id": f"S{len(scenes) + 1}",
+            "source_segment_indices": [],
+            "function_names": [],
+            **detail,
+            "is_ending": True,
+        })
     return {"scenes": scenes}
 
 
@@ -341,6 +354,15 @@ def validate_story_node(state):
         {"role": "system", "content": STORY_VALIDATOR_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
     ], StoryValidation).model_dump()
+    execution_issues = _function_execution_issues(
+        source, state["scene_plan"], validation,
+    )
+    if execution_issues:
+        validation["causal_constraints_ok"] = False
+        validation["overall_ok"] = False
+        validation["issues"] = list(dict.fromkeys(
+            [*validation.get("issues", []), *execution_issues]
+        ))
     validation["length_ok"] = chinese_char_count >= _MIN_CHINESE_CHARS
     if not validation["length_ok"] and not any(
         "长度" in issue or "字符" in issue for issue in validation["issues"]

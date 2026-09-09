@@ -47,7 +47,7 @@ from Outline_Agent.Prompt.Outline_prompt import (
     SEED_PROMPT,
     VALIDATE_PROMPT,
 )
-from Outline_Agent.dynamic_planner import plan_dynamic_outline
+from Outline_Agent.dynamic_planner import build_dynamic_references, plan_dynamic_outline
 
 
 _DATA = os.path.join(_ROOT, "data")
@@ -324,7 +324,7 @@ def build_ending_target(seed):
     return {
         "source": "llm_seed",
         "resolves": seed.get("core_conflict", ""),
-        "must_show": [],
+        "must_show": list(seed["ending_requirements"]),
         "final_state": seed.get("ending_direction", ""),
     }
 
@@ -606,7 +606,12 @@ def planner_node(state):
 
 
 def dynamic_planner_node(state):
-    references, candidates, selected = plan_dynamic_outline(state, chat_structured)
+    if state.get("dynamic_candidate"):
+        references = build_dynamic_references(state["snapshot_id"], state["knowledge_db"])
+        candidates = state.get("dynamic_candidates") or [state["dynamic_candidate"]]
+        selected = state["dynamic_candidate"]
+    else:
+        references, candidates, selected = plan_dynamic_outline(state, chat_structured)
     return {
         "snapshot_id": references.get("snapshot_id") or state.get("snapshot_id"),
         "pattern_source": "dynamic",
@@ -621,6 +626,8 @@ def dynamic_planner_node(state):
 
 
 def seed_node(state):
+    if state.get("seed"):
+        return {"seed": state["seed"]}
     user = {
         "genre": state["genre"],
         "chain": _compact_chain(state["chain"]),
@@ -658,6 +665,15 @@ def mechanism_node(state):
         if not ledger["issues"]:
             return {"mechanism": data, "contract_ledger": ledger}
         if attempt == 0:
+            allowed_people_pairs = []
+            for constraint, step in zip(user["relationship_constraints"], data["steps"]):
+                bindings = step.get("role_bindings") or {}
+                for role_pair in constraint["allowed_role_pairs"]:
+                    people = [bindings.get(role) for role in role_pair]
+                    if all(isinstance(person, str) for person in people) and len(set(people)) == 2:
+                        allowed_people_pairs.append(
+                            f"segment_index={constraint['segment_index']}:{people[0]}/{people[1]}"
+                        )
             messages = messages + [{
                 "role": "user",
                 "content": (
@@ -665,7 +681,9 @@ def mechanism_node(state):
                     + "；".join(ledger["issues"])
                     + "。请只修正这些边界：没有有效双角色关系 effect 的 Function，"
                     "relationship_changes 必须为空；关系变化双方必须是同一个允许角色对的绑定人物；"
-                    "before 必须沿用关系账本，不得自由改写，并重新输出完整 JSON。"
+                    "before 必须沿用关系账本，不得自由改写。当前绑定推导出的合法人物对为："
+                    + ("；".join(allowed_people_pairs) or "无")
+                    + "。请重新输出完整 JSON。"
                 ),
             }]
     raise ValueError("Mechanism 方案不合法: " + "；".join(ledger["issues"]))
@@ -928,8 +946,18 @@ def _build_graph():
     graph.add_node("export", export_node)
     graph.add_conditional_edges(
         START,
-        lambda state: "dynamic" if state.get("planner_mode") == "dynamic" else "published",
-        {"published": "select_pattern", "dynamic": "dynamic_seed"},
+        lambda state: (
+            "dynamic_planned"
+            if state.get("planner_mode") == "dynamic" and state.get("dynamic_candidate")
+            else "dynamic"
+            if state.get("planner_mode") == "dynamic"
+            else "published"
+        ),
+        {
+            "published": "select_pattern",
+            "dynamic": "dynamic_seed",
+            "dynamic_planned": "dynamic_planner",
+        },
     )
     graph.add_edge("select_pattern", "planner")
     graph.add_edge("planner", "seed")

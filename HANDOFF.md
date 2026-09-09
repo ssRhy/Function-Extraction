@@ -2067,3 +2067,78 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 将成功的 Evolve Snapshot `real_coordinator_rebuild_v5_20260904_20260908T121306266945Z_9289a8851c77` promote 为唯一 serving；其父 Snapshot lineage 保留在正式 SQLite 中。
 - 正式库核验：`snapshots=12`、`serving_snapshots=1`，候选父版本仍为 `real_coordinator_rebuild_v5_20260904_20260906T152048649508Z_4fef618ebe77`；候选的正式 `ontology_snapshots` 目录保留。
 - `data/story_cli/functions/` 下 5 个 `example_evolve_*` 测试/副本运行目录移入系统废纸篓，可恢复；未删除 SQLite 行、正式 Registry、Bank 或 Snapshot lineage。
+
+### 本轮（2026-09-08）：Dynamic Planner 贯通 Story 与正文 Function 回收闭环
+
+- 修复 `StoryCLI story generate --planner-mode dynamic` 的真实透传：`StoryCLI → PipelineState → OutlineState → Dynamic Planner → Outline → Story`；默认仍为 `published`。`story generate` 另支持显式 `--snapshot-id` 与 `--knowledge-db`，Pipeline manifest 保存 `planner_mode`，没有新增数据边界。
+- 固定 serving Snapshot `real_coordinator_rebuild_v5_20260904_20260908T121306266945Z_9289a8851c77`，在 SQLite 临时副本中运行。前两篇明确古风仙侠请求完整导出并 `accepted`：`fx_01` 5495 字、`fx_02` 7204 字；第三题在 Outline/NarrativePlan 的 `setup_payoffs[*].payoff=null` 连续 2 次结构化重试后阻断。未重试原题；替代题同样出现该字段阻断，因此不把失败伪装成第三篇正文。
+- 已成功正文直接复用现有 Observer + Matcher 做回收：`fx_01` 目标链 LCS 保留率 `0.3333`，`fx_02` 为 `0.7143`；两篇顺序均不一致。多重集 Function 覆盖率分别为 `0.3333`、`0.8571`，但重复/错序明显。两篇所有 Matcher 判定均为 `MATCH`，`UNCERTAIN=0`，说明当前主要信号是过度自信的错配/重复归类，而不是不确定集中。
+- 人工阅读两篇正文：水患故事和雪山护送故事的因果、人物选择和结局代价均基本成立；因此暂不直接修改 Dynamic Planner 或进入 Best-of-N，下一步应先针对 Observer/Matcher 回收边界做最小诊断。没有新增 Instance Card、transition 表、Supervisor、评分层或 Best-of-N。
+- 完整回归 `382 passed, 1 skipped`，compileall、`git diff --check`、正式/临时 SQLite integrity/FK 检查通过；正式库 SHA-256 前后均为 `d1fb200a358bd729a306c9d9c7a40871680657d3ad805298074f60e4d4aae49b`。产物：`Code/data/evaluation/dynamic_story_roundtrip_20260908/`。
+
+### 本轮补充（2026-09-08）：Story 场景 ID 接缝与第三篇阻断
+
+- 第三篇悬疑请求在 Story 的 `scene_developments` 阶段暴露现有接缝：模型按计划顺序返回了等量展开项，但使用了不同的 `scene_id` 标签；沿用正文场景的按计划顺序归一化规则，`align_scene_developments` 现在仅在数量一致时归一化，数量不一致仍阻断。新增回归覆盖，定向 Story/Pipeline/CLI 为 `35 passed`。
+- 修复后只重跑这一个此前未导出正文的请求；它在 Outline/Mechanism 的关系账本校验再次阻断：`CONFRONT_OPPOSITION` 的 `P1/P3` 关系变化没有匹配同一关系效果的两个角色槽位。没有继续放宽 Contract，也没有伪造第三篇正文。
+- 因此本轮实际只有两篇正文完成 Observer + Matcher 回收和人工阅读；最终判断仍是不进入 Best-of-N。下一步顺序应是先修 Dynamic Planner/Mechanism 的关系边界，再重新取得 3 篇正文，随后继续 Observer/Matcher 诊断。
+
+### 本轮补充（2026-09-08）：三篇 Dynamic 正文完成，回收链仍未达标
+
+- 针对第三篇真实运行暴露的两个最小边界做修复：`NarrativeStep` 在严格校验前丢弃空的 `setup_payoffs` 项；Mechanism 首次关系账本失败时，把当前绑定下允许的人物对加入既有修复提示。没有放宽 Contract，也没有新增修复层。
+- 在固定 serving Snapshot `real_coordinator_rebuild_v5_20260904_20260908T121306266945Z_9289a8851c77` 和临时 SQLite 副本中，`story generate --planner-mode dynamic` 的 3 个原始请求全部完成 Pipeline → Outline → Story，状态均为 `accepted`；对应正文为《河图村约》《雪路镖旗》《赤鳞石方》。全仓回归 `383 passed, 1 skipped`。
+- 现有 Observer + Matcher 回放的 LCS Function 保留率分别为 `0.5714 / 0.5000 / 0.2857`，三篇顺序均不一致；多重集覆盖率为 `0.5714 / 0.6250 / 0.4286`。`fx_01` 有 2 条混合边界 `UNCERTAIN`，`fx_02` 无 `UNCERTAIN`，`fx_03` 有 10 条主要由 Matcher 输出 Schema 失败批量回退产生的 `UNCERTAIN`，不能直接解释为正文丢失 Function。
+- 人工阅读三篇正文：水患治理、雪山护送、疫城施药的因果推进、人物选择和结局代价均成立。低回收率当前更像 Observer/Matcher 对齐边界问题，尚不能据此修改 Dynamic Planner 或 Story/Mechanism 执行。
+- 阶段决策：暂不进入 Best-of-N。下一步只修现有 Matcher 的输出合约/失败边界，再用同一 Snapshot 和三篇正文复跑；随后再处理 `fx_01` 的混合观察边界。暂不新增 Instance Card、transition 表、Supervisor 或评分层。产物位于 `Code/data/evaluation/dynamic_story_roundtrip_20260908/retry_20260908/`。
+
+### 本轮补充（2026-09-08）：Matcher 合约已修，Observer 粒度仍不足以进入 Best-of-N
+
+- Matcher 只做一处现有 Prompt/字段描述修复：明确 `label` 只能是 `MATCH/EXTEND/CONFLICT/UNCERTAIN/NOVEL`，Function 名只能写入 `matched_function`。定向 Matcher 回归 `7 passed`；全仓回归 `384 passed, 1 skipped`。
+- 复用同一 Snapshot、同一临时 SQLite 副本和已经生成的三篇正文重新回放，没有重新调用 Story。最终三篇 Matcher 均无 `matcher_errors`；此前 `fx_03` 的 10 条 Schema 失败型 `UNCERTAIN` 不再出现。
+- Observer 只增加一条边界提示：一个 Observation 保留一个主导叙事状态变化，独立事件才拆分，不为套 Function 强行拆分。新回放 LCS 为 `0.7143 / 0.7500 / 0.7143`，多重集覆盖率相同，但三篇顺序仍不一致；`COMMUNITY_FORMATION` 三篇均未回收，`RESOURCE_RELINQUISHMENT` 两篇未回收，重复匹配仍明显。`UNCERTAIN` 分别为 `2 / 0 / 4`，主要集中在复合的群体形成、资源给予/放弃和对抗事件。
+- 人工阅读结论不变：三篇正文结构仍成立，但 Function 回收尚未稳定。因此暂不进入 Best-of-N，也不修改 Dynamic Planner、Story/Mechanism 或 Function 定义。
+- 下一步只做一次静态边界核对：检查现有 `COMMUNITY_FORMATION`、`RESOURCE_RELINQUISHMENT` 等 Function 的 definition、realization_patterns、hard_negatives 和 confusable_functions 是否覆盖本轮正文；若需要，优先把已有字段传入 Matcher 现有卡片输入，不新增 Instance Card、transition 表、Supervisor 或评分层。回放报告：`Code/data/evaluation/dynamic_story_roundtrip_20260908/observer_retry_20260908/observer_match_report.json`。
+
+### 本轮补充（2026-09-08）：Matcher 已接入现有边界卡片，但恢复链仍不可作排序信号
+
+- `Matcher` 现将已有 Function 卡片的 `hard_negatives`、`confusable_functions` 与 definition、realization patterns 一起传入；新增字段合约测试，定向 Matcher `7 passed`，全仓 `384 passed, 1 skipped`。
+- 在同一 serving Snapshot、同一临时知识库和同三篇已生成正文上只重放 Observer + Matcher，未重新生成 Story。三篇 LCS 保留率为 `0.5714 / 0.2500 / 0.4286`，顺序仍全部不一致；`matcher_errors` 均为空，但重复错配、漏掉 `COMMUNITY_FORMATION` / `RESOURCE_RELINQUISHMENT` 仍存在，且 Observer 输出具有随机波动。
+- 结论：现有边界卡片输入不足以使恢复链成为稳定裁判。暂不接 Best-of-N、自动反馈或“自动闭环验证”对外宣称；恢复结果继续只作实验性诊断。下一步若继续，只应先解决 Observer/Matcher 的可重复 Function 对齐问题，不扩大到 Planner、Story 或新数据结构。
+
+### 本轮补充（2026-09-09）：改用 Story Validator 验证 Function 执行
+
+- 删除此前错误方向的 Matcher 目标链验证代码和专属测试；保留 Matcher 原有五分类、`label` 输出合约修复，以及现有 Function 卡片边界字段传入。生成后重新运行 Observer/Matcher 只表示有损再抽象，不能证明生成过程执行了目标 Function。
+- 在现有 `StoryValidation` 增加 `function_execution_evidence`：每个目标 Function 恰好一项，包含 `segment_index`、`function_name`、`scene_id`、正文行动与状态后果证据、`PASS/MISSING`。代码确定性检查目标链顺序、Function/segment 对齐、scene 所属和完整覆盖；缺项、错项或 `MISSING` 会令 `causal_constraints_ok/overall_ok=false`，继续复用现有最多一次正文定向重写。证据随现有 validation/outcome payload 保存，没有新增持久化边界。
+- 固定 serving Snapshot `real_coordinator_rebuild_v5_20260904_20260908T121306266945Z_9289a8851c77`，只对既有《河图村约》《雪路镖旗》《赤鳞石方》重新运行 Story Validator，没有重新生成 Story、运行 Observer/Matcher 或写正式库。三篇分别完成 `7/7`、`8/8`、`7/7` Function 证据，全部 `PASS`，scene_id 严格按链顺序；逐项人工对照正文后证据均对应实际行动和状态后果。
+- 该 Validator 执行证据层已具备作为后续 Best-of-N 结构检查输入的条件，但本轮仍未实现 Best-of-N、自动反馈或对外“自动闭环验证”宣称。全仓回归 `387 passed, 1 skipped`，compileall 和 `git diff --check` 通过。
+
+### 本轮补充（2026-09-09）：Story 校验职责拆分
+
+- 用户指出纯 Function 执行校验不应继续堆在 `Story_Agent/app.py`。将无副作用的 `_function_execution_issues` 移到 `Story_Agent/validation.py`；`app.py` 只保留图节点、流程和导出编排，`state.py` 保留 Schema，行为和 payload 不变。
+- 这是职责清理，不是新增验证层；Story 定向测试 `19 passed`，全仓 `387 passed, 1 skipped`，compileall 和 `git diff --check` 通过。
+
+### 本轮补充（2026-09-09）：最小 Dynamic Beam Best-of-2
+
+- 撤回 Observer 的 `event_boundaries`/固定边界分支及其专属测试和错误结论；保留通用 Observer/Evolve。生成后再跑 Observer → Matcher 只是有损再抽取，不作为 Function 执行证明。Story Validator 的 `function_execution_evidence` 继续作为唯一 Function 执行硬门禁。
+- `Pipeline_Agent` 增加显式 `best_of=2`：只在 `planner_mode=dynamic` 下复用现有 Beam 的两个有效且不同候选；候选 2 复用候选 1 的 Seed 和同一 Outline 图，不新增生成器。每个候选独立经过 Outline → Story 和既有最多一次 Validator 重写；只有最终硬通过者进入一次四维 LLM 比较（用户要求、因果连贯、结局兑现、正文质量），不传 Function 链、不重新抽取 Function、不使用 Planner 分数排序。默认 published / `best_of=1` 路径不变，未新增表。
+- 选择结果和候选审计信息写入现有 `pipeline_manifest.json` 与 `generation_outcomes.payload_json`；零个硬通过明确拒绝，一个硬通过直接选用，两个硬通过才比较。
+- 离线验证：Pipeline/Dynamic/Story/角色边界定向 `41 passed`；StoryCLI 在仅注入既有缺失依赖占位模块的测试环境中 `16 passed`；compileall 和 `git diff --check` 通过。正常 StoryCLI/全仓收集仍受环境问题阻断：PyTorch `2.2.2` 与当前 transformers 不兼容，绕过后还缺 `chromadb`。
+- 唯一一次真实 Best-of-2 使用 serving Snapshot `real_coordinator_rebuild_v5_20260904_20260908T121306266945Z_9289a8851c77` 的 SQLite 副本 `/private/tmp/function_bo2_smoke.pFtuHu/story_knowledge.db`。两个 Dynamic 候选均有效且 Outline 校验通过：候选 1 `DYN_eb6383d6a26d`，Beam `0.807361`，链为 `NOSTALGIC_MEMORY → REVELATION_SHIFTING_COGNITION → HAZARD_ENCOUNTER → CONFRONT_OPPOSITION → COMMUNITY_FORMATION → RELATIONSHIP_FORMATION → AUTONOMY_DECLARATION`；候选 2 `DYN_5f5c412e0bdb`，Beam `0.729726`，链为 `NOSTALGIC_MEMORY → REVELATION_SHIFTING_COGNITION → HAZARD_ENCOUNTER → RESOURCE_RELINQUISHMENT → AUTONOMY_DECLARATION → PROTECTIVE_INTERVENTION → COMMUNITY_FORMATION → CONFRONT_OPPOSITION`。
+- 两篇正文均 `accepted`、未重写，候选 1 为 `4944` 中文字符且 `7/7` Function 执行证据通过，候选 2 为 `7591` 中文字符且 `8/8` 通过；两篇的用户要求、因果、人物一致性、结局、禁止临时解决方案和长度硬门禁均为 `true`。人工通读倾向候选 2 的证据链和治理收束更完整，候选 1 的篇幅和叙事更紧凑。
+- 最终比较请求在 DeepSeek `response_format=json_object` 的提示词前置校验处报 `400`：比较提示没有显式包含小写 `json`，因此本次没有生成 `pipeline_manifest.json` 或 winner，也没有把人工倾向伪装成自动选择。已将提示改为显式 `json schema` 并补离线回归；遵守“不重跑制造成功”，不再重做真实请求，所以 Best-of-2 的自动比较结果仍记为未验证。
+- 正式库未被使用：真实运行前后 SHA-256 均为 `d1fb200a358bd729a306c9d9c7a40871680657d3ad805298074f60e4d4aae49b`，正式库 `serving_snapshots=1`、`snapshots=12`、`generation_outcomes=39`，正式 `integrity_check=ok`、FK 检查为空；变化仅发生在临时副本。
+
+### 本轮补充（2026-09-09）：修复后真实 Best-of-2 完整跑通
+
+- 按用户要求仅再执行一次真实 smoke，仍使用 serving Snapshot `real_coordinator_rebuild_v5_20260904_20260908T121306266945Z_9289a8851c77` 的全新 SQLite 副本 `/tmp/function_bo2_smoke.NVucDB/story_knowledge.db`；没有写正式库。
+- 两个不同 Dynamic Beam 候选均完成 Outline → Story：候选 1 `DYN_d047fb389b26`、Beam `0.807222`、7 个 Function、`accepted`、`7/7` evidence、`hard_gate=true`；候选 2 `DYN_7850d35ab24c`、Beam `0.761202`、8 个 Function、`accepted`、`8/8` evidence、`hard_gate=true`。两者均未触发正文 rewrite，用户请求、因果、人物、结局、临时方案和长度校验均通过。
+- 修复后的唯一 `_compare_candidates` 请求成功，返回 `winner=1`；理由为第一篇更贴近用户要求，治水方案来自实地勘察和村民协作，且结尾明确形成渠务管理会共同治理。最终选择为 `DYN_d047fb389b26`，不是按 Beam score 直接排序。
+- manifest 已完整生成：`/tmp/function_bo2_smoke.NVucDB/output/pipeline_manifest.json`，包含 `generation_mode=best_of_2`、两个候选审计信息、`selection.status=selected`、`winner_index=1`、`winner`、pair-review 理由和 `selection_outcome_id=GO_92533ac514bca3c7`。winner 指向 Candidate 1 的 Story/Outline 文件。
+- 临时 SQLite 中最终 `generation_outcomes` 为 44（基线 39，包含两个候选 Story outcome 和一个 `generation_stage=best_of_2` 的 selection outcome）；最终 outcome `GO_92533ac514bca3c7` 的 `validation_ok=1`、`follow_up_action=accepted`，payload 含完整 `candidates` 与 `selection`。
+- 人工通读两篇新正文：Candidate 1《水线图》在勘察、村民协作、放弃单一仙术和共同治理结尾上更紧凑，符合自动比较结论；Candidate 2《系铃坝上》同样完成要求，但叙事更长。该结果支持“硬门禁后由正文级比较排序”的设计边界，但仍只是单请求 smoke，不等同于大样本质量结论。
+- 正式库前后 SHA-256 仍为 `d1fb200a358bd729a306c9d9c7a40871680657d3ad805298074f60e4d4aae49b`；正式 `serving_snapshots=1`、`snapshots=12`、`generation_outcomes=39`，serving Snapshot 未变，正式 `integrity_check=ok`、FK 检查为空。
+
+### 本轮补充（2026-09-09）：Best-of-2 职责从 Pipeline 入口拆出
+
+- Best-of-2 初次实现时暂放在 `Pipeline_Agent/app.py`，是为了用最小改动先验证完整闭环；真实 pair review、winner、manifest 和 outcome 已验证成功后，确认这不是一次性局部判断，而是独立的候选选择职责。
+- 新增 `Pipeline_Agent/best_of.py`，集中承载 Best-of-2 的模式校验、Beam 候选筛选、候选摘要、Story Validator 硬门禁、Story body 提取、pair review 和 selection；`Pipeline_Agent/app.py` 只保留 Pipeline 图节点、候选运行和 manifest/outcome 编排。
+- 测试改为直接从 `Pipeline_Agent.best_of` 验证 selection schema 与比较调用；没有保留无调用依据的 `app.py` 兼容转发，也没有改变 CLI、manifest、outcome 或真实 smoke 的行为。定向 Pipeline/Dynamic/Story/角色边界回归 `41 passed`，compileall 和 `git diff --check` 通过。

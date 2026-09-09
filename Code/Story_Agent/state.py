@@ -2,7 +2,7 @@
 
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from Outline_Agent.state import MechanismPlan, NarrativePlan
 
@@ -50,7 +50,6 @@ class SourceOutlineDocument(BaseModel):
     genre: str
     user_request: str | None = None
     seed: dict
-    story_profile: dict | None = None  # 预留接口，当前不参与正文生成
     mechanism_plan: MechanismPlan
     narrative_plan: NarrativePlan
     contract_ledger: dict | None = None
@@ -80,17 +79,8 @@ class FunctionSegmentConstraint(BaseModel):
     causal_to_next: str
 
 
-class StoryLevelConstraint(BaseModel):
-    core_conflict: str = Field(min_length=1)
-    ending_resolves: str = Field(min_length=1)
-    ending_must_show: list[str] = Field(min_length=1)
-    required_final_state: str = Field(min_length=1)
-    resolution_actions: list[str] = Field(min_length=1)
-
-
 class FunctionConstraintPlan(BaseModel):
     segments: list[FunctionSegmentConstraint] = Field(min_length=1)
-    story: StoryLevelConstraint
 
 
 class SceneDraft(BaseModel):
@@ -110,61 +100,13 @@ class SegmentScenePlan(BaseModel):
 
 class ScenePlanDraft(BaseModel):
     segments: list[SegmentScenePlan] = Field(min_length=1)
-
-
-class ReactionDecision(BaseModel):
-    stimulus: str = Field(min_length=1)
-    reaction: str = Field(min_length=1)
-    dilemma: str = Field(min_length=1)
-    decision: str = Field(min_length=1)
-
-
-class CausalMoment(BaseModel):
-    stimulus: str = Field(min_length=1)
-    interpretation: str = Field(min_length=1)
-    response: str = Field(min_length=1)
-
-
-class LiteraryPlan(BaseModel):
-    environment_function: str = ""
-    sensory_anchor: list[str] = Field(default_factory=list, max_length=3)
-    image_or_motif: str = ""
-    dialogue_subtext: str = ""
-    rhetoric_focus: list[str] = Field(default_factory=list, max_length=2)
-    sentence_rhythm: str = ""
-
-    @field_validator(
-        "environment_function", "image_or_motif", "dialogue_subtext", "sentence_rhythm",
-        mode="before",
-    )
-    @classmethod
-    def normalize_empty_text(cls, value):
-        return "" if value is None else value
-
-    @field_validator("sensory_anchor", "rhetoric_focus", mode="before")
-    @classmethod
-    def normalize_empty_list(cls, value):
-        return [] if value is None else value
+    ending: list[SceneDraft] = Field(min_length=1, max_length=3)
 
 
 class SceneDevelopment(BaseModel):
     scene_id: str = Field(min_length=1)
     pacing_mode: Literal["DRAMATIZE", "DEVELOP", "COMPRESS"]
     expand_points: list[str]
-    reaction_decision: ReactionDecision | None = None
-    causal_moments: list[CausalMoment] = Field(default_factory=list, max_length=2)
-    exit_aftereffect: str = ""
-    literary_plan: LiteraryPlan
-
-    @field_validator("causal_moments", mode="before")
-    @classmethod
-    def normalize_empty_causal_moments(cls, value):
-        return [] if value is None else value
-
-    @field_validator("exit_aftereffect", mode="before")
-    @classmethod
-    def normalize_empty_aftereffect(cls, value):
-        return "" if value is None else value
 
 
 class SceneDevelopmentPlan(BaseModel):
@@ -185,13 +127,28 @@ class StoryDraft(BaseModel):
     )
 
 
+class EndingEvidence(BaseModel):
+    requirement_index: int = Field(ge=0)
+    scene_id: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+
+
+class FunctionExecutionEvidence(BaseModel):
+    segment_index: int = Field(ge=1)
+    function_name: str = Field(min_length=1)
+    scene_id: str = Field(min_length=1)
+    evidence: str = Field(min_length=1)
+    status: Literal["PASS", "MISSING"]
+
+
 class StoryValidation(BaseModel):
     user_request_ok: bool
     causal_constraints_ok: bool
     character_consistency_ok: bool
     ending_ok: bool
     unsupported_solution_ok: bool
-    length_ok: bool
     overall_ok: bool
     repairable: bool
     issues: list[str] = Field(default_factory=list)
+    ending_evidence: list[EndingEvidence] = Field(default_factory=list)
+    function_execution_evidence: list[FunctionExecutionEvidence] = Field(default_factory=list)
