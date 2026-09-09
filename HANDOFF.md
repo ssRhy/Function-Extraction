@@ -2142,3 +2142,8 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Best-of-2 初次实现时暂放在 `Pipeline_Agent/app.py`，是为了用最小改动先验证完整闭环；真实 pair review、winner、manifest 和 outcome 已验证成功后，确认这不是一次性局部判断，而是独立的候选选择职责。
 - 新增 `Pipeline_Agent/best_of.py`，集中承载 Best-of-2 的模式校验、Beam 候选筛选、候选摘要、Story Validator 硬门禁、Story body 提取、pair review 和 selection；`Pipeline_Agent/app.py` 只保留 Pipeline 图节点、候选运行和 manifest/outcome 编排。
 - 测试改为直接从 `Pipeline_Agent.best_of` 验证 selection schema 与比较调用；没有保留无调用依据的 `app.py` 兼容转发，也没有改变 CLI、manifest、outcome 或真实 smoke 的行为。定向 Pipeline/Dynamic/Story/角色边界回归 `41 passed`，compileall 和 `git diff --check` 通过。
+
+### 本轮补充（2026-09-09）：Best-of-2 实验退出运行路径
+
+- 上述真实 Best-of-2 smoke 结论继续作为历史审计证据保留，但其双候选正文生成和比较成本过高，不再保留为 Pipeline/StoryCLI 的运行能力。
+- 当前运行路径恢复为单候选：Dynamic Planner 仍保留自身 Beam Search，并由 top-1 候选进入 Outline/Story Validator 和最多一次定向修复；删除 `Pipeline_Agent/best_of.py`、`--best-of` 参数、候选选择状态/分支及专用测试。

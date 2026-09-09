@@ -567,13 +567,11 @@ def write_story(template_path, request="", out_dir=None):
 
 def generate_story(
     request, snapshot_id=None, pattern=None, knowledge_db=KNOWLEDGE_DB,
-    out_dir=None, planner_mode="published", best_of=1,
+    out_dir=None, planner_mode="published",
 ):
     request = request.strip()
     if not request:
         raise ValueError("story generate 需要非空 --request 或 --request-file")
-    if best_of == 2 and planner_mode != "dynamic":
-        raise ValueError("Best-of-2 只支持 planner_mode=dynamic")
     genre = _infer_genre(request)
     snapshot_id = StoryKnowledgeStore(knowledge_db).resolve_snapshot_id(snapshot_id)
     root = Path(out_dir).resolve() if out_dir else DATA / "pipeline_runs" / time.strftime("%Y%m%dT%H%M%S")
@@ -586,15 +584,11 @@ def generate_story(
         "pattern_request": pattern,
         "user_request": request,
         "planner_mode": planner_mode,
-        "best_of": best_of,
         "out_dir": str(root),
         "outline_id": None,
         "outline_path": None,
         "outline_result": None,
-        "outline_results": [],
         "story_path": None,
-        "candidate_results": [],
-        "selection": None,
         "manifest_path": "",
     })
     manifest_path = Path(result["manifest_path"])
@@ -694,7 +688,6 @@ def main(argv=None):
         "--planner-mode", choices=("published", "dynamic"), default="published",
         help="Planner 模式，默认使用已发布 Pattern",
     )
-    generate.add_argument("--best-of", type=int, choices=(1, 2), default=1)
     generate.add_argument("--out-dir", default=None)
     write = story_commands.add_parser("write")
     write.add_argument("--template", required=True)
@@ -754,8 +747,6 @@ def main(argv=None):
                 "out_dir": args.out_dir,
                 "planner_mode": args.planner_mode,
             }
-            if args.best_of != 1:
-                kwargs["best_of"] = args.best_of
             generate_story(_request(args), **kwargs)
         return 0
     except (OSError, RuntimeError, ValueError) as exc:

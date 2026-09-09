@@ -1752,3 +1752,9 @@ Function 集合 + 规则/状态/故事目标
 ## 269. Best-of-2 验证后应与 Pipeline 图编排分离（2026-09-09）
 
 Best-of-2 最初暂放在 `Pipeline_Agent/app.py`，只为先用最小文件数验证候选生成、硬门禁、pair review 和持久化闭环。用户指出入口文件同时承担候选筛选、Validator 规则和正文比较后，职责已明显独立；在不改变行为的前提下，将这些逻辑移到 `Pipeline_Agent/best_of.py`，`app.py` 只保留图节点和导出编排。这样仍是最小实现，但不再把一次性验证代码当作 Pipeline 的固有职责。
+
+## 270. Best-of-2 实验因成本退出运行路径（2026-09-09）
+
+用户确认双候选正文生成与比较成本过高，要求恢复单候选默认流程。历史真实 Best-of-2 smoke 的候选、硬门禁、pair review、winner、manifest 和临时 outcome 仍保留在前文作为实验记录，但不再继续承担运行能力。
+
+因此删除 `Pipeline_Agent/best_of.py`、`--best-of` CLI 参数、PipelineState 候选/选择字段、Pipeline/StoryCLI 双候选分支和专用测试；Dynamic Planner 的 Beam Search、top-1 Outline/Story Validator、Function execution evidence 和最多一次定向 rewrite 不变。后续若再次考虑多候选，必须先有明确质量收益足以覆盖真实生成成本的证据。
