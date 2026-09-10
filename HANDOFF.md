@@ -2225,3 +2225,8 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 迁移后调用现有 `StoryKnowledgeStore.promote_snapshot()` 切换 serving 指针，Snapshot 本身未修改。当前正式 serving 为 `bootstrap60_contract_20260910T034604743139Z_a1100a350fcf`，包含 180 个故事、40 个 Function、2169 条 Occurrence 和 15 个 Published Pattern；完整 SQLite `integrity_check=ok`、FK 为空，Snapshot 文件校验通过。
 - 正式 Registry 当前为 `bootstrap60_contract` namespace、40 个 Function；默认 KnowledgeBase catalog 可读取 15 个 Published Pattern。Outline 模块导入 smoke 受当前 Python 环境缺少 `langgraph.graph` 阻断，未将该环境问题误判为迁移失败。
 - 这 15 个 Pattern 仍应描述为 CLEAN 跨故事 cluster 下的稳定代表链，不是两个故事精确重复的完整 anchor 链。未提交代码；旧正式数据保留在归档中。
+
+### 本轮补充（2026-09-10）：Dynamic Outline 先生成 Seed
+
+- 暂时只调整 Dynamic 模式为 `用户要求 → Dynamic Seed → Dynamic Planner → Mechanism → Scaffold → Realize → Validate`；Published Pattern 保持原有 `Pattern → Seed` 顺序。Dynamic Seed 明确把用户要求作为最高内容约束，已存在的 dynamic candidate 也不再绕过 Seed。
+- 聚焦回归 `56 passed`，全仓 `421 passed, 1 skipped`；未启动真实 LLM、未写正式 SQLite；其他脏改动未纳入提交。

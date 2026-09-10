@@ -1834,3 +1834,7 @@ Best-of-2 最初暂放在 `Pipeline_Agent/app.py`，只为先用最小文件数�
 用户明确选择把 `validation_anchor_revert_20260910` 的完整候选 Snapshot 切换到正式 serving，而不是只复制 15 条 Pattern。迁移前先归档正式 Knowledge DB、Registry 和 Ontology Snapshot；随后复制候选完整数据库、40 个 Function Registry 和 4 个相关 Snapshot 文件，并调用已有 `promote_snapshot()` 切换指针。
 
 迁移后正式 serving 为 `bootstrap60_contract_20260910T034604743139Z_a1100a350fcf`，可读取 180 个故事、40 个 Function、2169 条 Occurrence 和 15 个 Published Pattern；Snapshot 校验、SQLite 完整性和 FK 检查通过。默认 KnowledgeBase catalog 读取 15 个 Pattern；Outline 模块导入验证因当前环境缺少 `langgraph.graph` 阻断，属于环境问题，不改变数据库迁移结论。旧正式 serving 数据保存在 `Code/data/formal_archives/20260910T123846_serving_before_anchor_revert/`，可恢复。
+
+## 286. Dynamic 模式先形成故事再寻找结构（2026-09-10）
+
+用户指出大纲应根据用户要求生成，而不是先有结构再贴合请求；随后明确当前只需要 Dynamic。决策：Dynamic 路径先由用户请求形成 Seed，再由 Dynamic Planner 寻找兼容 Function 结构；Published Pattern 暂不变更，用户要求一致性门禁与 Pattern 不兼容拒绝留作后续单独验证。
