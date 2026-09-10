@@ -10,6 +10,15 @@ story：用户要求 → serving → Outline → Story
 
 用户不需要填写 `namespace` 或 Snapshot ID。Bootstrap 和 Evolve 是知识库命令，Story 是知识库消费命令。
 
+如果不想直接使用命令行，可启动项目自带的轻量 Tkinter 窗口：
+
+```bash
+cd /path/to/Function-Extraction/Code
+.venv/bin/python -X utf8 -m StoryUI
+```
+
+窗口中的 1、2、3 分别对应 Bootstrap、Evolve 和生成文章。生成文章时，窗口只调用现有结构化 LLM 识别题材，操作类型由用户已选择的入口固定；程序去除原文开头已有的题材别名，只补一个规范前缀，再以固定参数启动 StoryCLI；模型不会生成或执行任意 shell 命令。生成文章可选择 Dynamic Planner 或 Published Pattern；Evolve 固定在成功后执行 `--promote`。Bootstrap 至少需要两个 `.txt` 故事，单篇新故事应使用 Evolve；“归档并重建正式库”默认关闭，勾选后还需要确认。
+
 ## 1. 准备环境
 
 以下命令从仓库的 `Code/` 目录执行。建议始终使用项目自己的 `.venv/bin/python`，不要混用 Conda 或系统 Python：

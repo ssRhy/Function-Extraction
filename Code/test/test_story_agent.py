@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import Story_Agent.app as app
 import Story_Agent.state as state
+import Outline_Agent.app as outline_app
 
 
 def _source():
@@ -95,6 +96,21 @@ def _mock_store(monkeypatch, source, outcomes=None):
             return "GO_TEST"
 
     monkeypatch.setattr(app, "StoryKnowledgeStore", FakeStore)
+
+
+def test_ending_identity_check_ignores_business_merger_but_catches_identity_merge():
+    def issues(text):
+        return outline_app._ending_semantic_issues({
+            "seed": {"characters": [{"id": "P1"}, {"id": "P2"}]},
+            "outline": {"ending": {
+                "resolution_actions": [text],
+                "conflict_resolution": "",
+                "final_state": "",
+            }},
+        })
+
+    assert issues("P1让外资合并案撤回") == []
+    assert issues("P1与P2合并为同一人") == ["结局合并或互换了不同人物 ID 的身份"]
 
 
 def _scene_plan_draft():
@@ -409,9 +425,9 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             assert "narrative_plan" not in payload
             assert [item["scene_id"] for item in payload["scene_developments"]["developments"]] == ["S1", "S2", "S3"]
             assert payload["writing_requirements"] == {
-                "min_chinese_chars": 3000,
+                "min_chinese_chars": 6000,
             }
-            long_text = "他在仓库里解决了危险。" * 200
+            long_text = "他在仓库里解决了危险。" * 300
             return state.StoryDraft(title="雾中灯塔", character_names={"P1": "林晚"}, scenes=[
                 state.StoryScene(scene_id="S2", text=long_text),
                 state.StoryScene(scene_id="S1", text=long_text),

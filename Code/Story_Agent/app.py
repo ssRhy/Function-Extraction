@@ -42,7 +42,7 @@ from Story_Agent.validation import _function_execution_issues
 
 
 _DATA = os.path.join(_ROOT, "data")
-_MIN_CHINESE_CHARS = 3000
+_MIN_CHINESE_CHARS = 6000
 
 
 def load_outline_document(knowledge_db, outline_id):

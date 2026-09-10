@@ -411,7 +411,7 @@ def narrative_plan_issues(chain, narrative):
 
 _PERSON_ID_RE = re.compile(r"(?<![A-Za-z0-9_])P\d+(?![A-Za-z0-9_])")
 _IDENTITY_MARKERS = (
-    "同一人", "合并", "互换", "冒充", "伪装成", "认作", "当作", "实际是", "原来是",
+    "同一人", "合并为同一人", "互换身份", "冒充", "伪装成", "认作", "当作", "实际是", "原来是",
 )
 _CAUTIOUS_RELATION_MARKERS = (
     "低信任", "信任极低", "不信任", "保持戒备", "互相提防", "谨慎合作", "有限合作",

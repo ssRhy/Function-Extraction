@@ -197,6 +197,17 @@ python -X utf8 -m StoryCLI story generate \
 
 Bootstrap 首次需要清空并归档当前正式资产时增加 `--reset-formal`；Evolve 确认候选可用时增加 `--promote`。归档位于 `Code/data/formal_archives/<时间戳>/`，不会永久删除。详细参数见 [`Code/StoryCLI/README.md`](Code/StoryCLI/README.md)。
 
+### 轻量桌面交互窗口
+
+不想记命令时，可以从 `Code/` 目录启动 Tkinter 窗口：
+
+```bash
+cd Code
+.venv/bin/python -X utf8 -m StoryUI
+```
+
+窗口提供 Bootstrap、Evolve 和生成文章三个入口。Bootstrap 递归读取至少包含两个 `.txt` 故事的文件夹；Evolve 可以选择单个 `.txt` 文件或文件夹。Bootstrap 正式库重建需要勾选并二次确认；Evolve 成功后自动提升候选 Snapshot 为 serving。生成文章时，窗口只调用现有结构化 LLM 识别题材，操作类型由用户已选择的入口固定；程序去除原文开头已有的题材别名，只补一个规范前缀，再用固定白名单参数启动 `StoryCLI`，不让模型拼接任意 shell 命令。生成文章入口可选择 Dynamic Planner 自动组合 Function，或使用 Published Pattern，并在窗口中显示运行日志和最终 Markdown 正文。该入口不新增数据库或第三方依赖。
+
 下面的分阶段命令保留给调试、复用候选 Snapshot 或 Template Bundle 的高级场景。
 
 ### 分阶段 CLI：Function、模板和正文

@@ -2226,7 +2226,47 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 正式 Registry 当前为 `bootstrap60_contract` namespace、40 个 Function；默认 KnowledgeBase catalog 可读取 15 个 Published Pattern。Outline 模块导入 smoke 受当前 Python 环境缺少 `langgraph.graph` 阻断，未将该环境问题误判为迁移失败。
 - 这 15 个 Pattern 仍应描述为 CLEAN 跨故事 cluster 下的稳定代表链，不是两个故事精确重复的完整 anchor 链。未提交代码；旧正式数据保留在归档中。
 
+### 本轮补充（2026-09-10）：新增轻量 Tkinter 交互入口
+
+- 新增 `Code/StoryUI`，以 `.venv/bin/python -X utf8 -m StoryUI` 启动本地窗口，提供 Bootstrap、Evolve、生成文章三个入口；底层通过无 shell 的后台子进程复用公开 `StoryCLI` 命令，不新增 Agent、数据库表或第三方依赖。
+- Bootstrap 的正式库重建仍需用户勾选并二次确认；Evolve 界面固定传递 `--promote`；生成文章默认 Dynamic，也可选择 Pattern，成功后从 `pipeline_manifest.json` 读取并展示 Markdown 正文。
+- 窗口运行期间禁止重复任务和关闭，日志通过队列实时显示；定向测试使用模拟子进程，不触发真实 LLM 或正式 SQLite。
+
+### 本轮补充（2026-09-10）：交互窗口先由 LLM 路由再执行 StoryCLI
+
+- 针对“情感类：民国时代银行家和天才画家的相爱故事”在 StoryCLI 早期关键词校验处失败的问题，新增 `Code/StoryUI/router.py`，复用现有 `FunctionExtract_Agent.llm.chat_structured` 返回受 Pydantic 限制的三操作/五题材计划。
+- StoryUI 只接受 LLM 返回的既有枚举；路径和原始创作要求仍由窗口掌握，程序随后生成无 shell 的固定 `StoryCLI` 参数。生成文章把规范题材前缀加入现有 `--request`，不修改 StoryCLI 的公开参数，规划方式由用户选择并映射到现有 `--planner-mode`。
+- `StoryCLI` 仍保留原有关键词识别，并补充 `情感类` 别名作为直接 CLI 的边界修复；没有新增 Agent、数据库表或 Snapshot 数据写入路径。定向 StoryUI/StoryCLI 回归为 `27 passed`，未执行真实 LLM 或正式库任务。
+
+### 本轮补充（2026-09-10）：Bootstrap 单故事前置保护
+
+- 单个 `.txt` 的 Bootstrap 只能产生本故事 Observation，无法形成至少跨 2 个故事的相似对和可发布 Function；此前流程会先清理 `story_cli` 工作 Registry/Bank/Checkpoint，再以 `NO_FUNCTION_SURVIVED` 失败。
+- `StoryCLI.run_function` 现在在 Bootstrap 收集文件数少于 2 时立即返回明确错误，不启动 FunctionExtract_Agent，也不执行正式资产归档或清理；单篇新故事应走 Evolve。正式 serving 指针未因本次保护改变。
+
 ### 本轮补充（2026-09-10）：Dynamic Outline 先生成 Seed
 
 - 暂时只调整 Dynamic 模式为 `用户要求 → Dynamic Seed → Dynamic Planner → Mechanism → Scaffold → Realize → Validate`；Published Pattern 保持原有 `Pattern → Seed` 顺序。Dynamic Seed 明确把用户要求作为最高内容约束，已存在的 dynamic candidate 也不再绕过 Seed。
+
+### 本轮补充（2026-09-10）：StoryUI 可选择 Dynamic 或 Pattern
+
+- “生成文章”表单新增规划方式单选项，默认 Dynamic，也可选择 Pattern；窗口只把选择映射为 StoryCLI 已有的 `--planner-mode dynamic|published`，没有新增生成路径、数据库或依赖。
 - 聚焦回归 `56 passed`，全仓 `421 passed, 1 skipped`；未启动真实 LLM、未写正式 SQLite；其他脏改动未纳入提交。
+
+### 本轮补充（2026-09-10）：StoryUI 与直接 Dynamic 生成的真实流程差异
+
+- 对比真实产物 `Code/data/pipeline_runs/20260910T163157`（StoryUI 路径）和 `Code/data/pipeline_runs/20260910T_direct_dynamic_codex.0N8cRd`（直接 StoryCLI 路径）：两次均为 `planner_mode=dynamic`，且解析到同一 Snapshot `bootstrap60_contract_20260910T063255731505Z_d3044cd05edb`；因此本次差异不是 Dynamic/Published 或 Snapshot 版本差异。
+- StoryUI 在调用 StoryCLI 前先执行一次额外的路由 LLM，然后在 `build_command()` 中把原始要求改成规范前缀加原文。真实 StoryUI manifest 的 `user_request` 为 `现代情感：情感类:战场上两位对手相爱，但爱而不得`；直接路径的 `user_request` 为 `现代情感：在战场上两位对手相爱了，但是却爱而不得`。
+- 该输入差异已经在 Dynamic Seed 层产生可观察语义漂移：StoryUI Seed 变成当代公益项目对手，直接 Seed 保留敌对部队战场；两次正文各自 `story_validation.overall_ok=true`，说明当前 Validator 主要保证生成结果相对其上游 Seed/大纲的一致性，不能证明 Seed 忠实保留用户创作要求。
+- 当前只完成调查，没有据此改代码。最小候选修复是路由只负责识别题材、将规范前缀与用户原文去重后再传递；另需为可复现实验显式固定 `--snapshot-id` 与 `--knowledge-db`。StoryUI 专项测试当前 `13 passed`，但没有同请求、同 Snapshot 的语义等价测试。
+
+### 本轮补充（2026-09-10）：StoryUI 只保留一个规范题材前缀
+
+- `Code/StoryUI/router.py` 新增既有题材别名表；`Code/StoryUI/app.py` 在构建 StoryCLI 命令时只删除用户输入开头连续的题材别名/中英文冒号，再补一个规范前缀，正文其余内容不改。
+- `情感：在战场上两位对手相爱了，但是却爱而不得` 和重复前缀输入都会统一为 `现代情感：在战场上两位对手相爱了，但是却爱而不得`；路由仍只返回 `genre`，没有新增生成阶段或 Prompt。
+- StoryUI + StoryCLI 聚焦回归 `30 passed`，没有启动真实 LLM、没有写正式 SQLite；其他脏改动未纳入本次行为修复。
+
+### 本轮补充（2026-09-10）：路由 LLM 仅识别 Story 题材
+
+- `StoryUI.router` 的 LLM schema 现在只有 `genre`；操作类型直接取 UI 已选择的 `mode`。Bootstrap/Evolve 不再为回显操作额外调用 LLM，Story 入口仍先识别题材再执行 CLI。
+- 题材别名归一化仍在 StoryUI 命令边界完成，Dynamic Seed 收到的请求只保留一个规范前缀和原始创作要求。
+- StoryUI + StoryCLI 聚焦回归 `31 passed`；全仓回归待本次代码变更完成后复跑。

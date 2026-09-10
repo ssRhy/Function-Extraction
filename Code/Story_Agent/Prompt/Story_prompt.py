@@ -41,7 +41,7 @@ STORY_PROMPT = """你是中文短篇小说作者。把输入中已经确定的�
 
 规则：
 0. 附加用户要求已经作为单独 user message 提供。它可以补充文风、视角、语气、感官重点和非核心表达；如果与 scene_plan、function_constraints 或结局冲突，以这些结构输入为准。
-1. 正文篇幅由情节完整性决定，不设目标字数、最大字数或单场字数。完整执行全部场景及其 expand_points 后才能结束；writing_requirements.min_chinese_chars 只防止过早结束，不得注水。
+1. 正文必须完整执行全部场景及其 expand_points。正文长度不得少于 writing_requirements.min_chinese_chars（当前要求为 6000 个中文字符）。不得为了达到字数机械重复或注水；应通过充分展开关键行动、人物反应、因果衔接、冲突推进、人物代价和结局后果来达到篇幅要求。
 2. 使用第三人称限知，以 P1 为叙述中心。为 seed.characters 中每个角色输出唯一的 character_names 映射，并在全文固定使用该映射；不得在不同场景更换同一人物的姓名。叙述句使用人物姓名、他或她，第一人称只能出现在人物直接引语中。
 3. character_names 的键必须覆盖 seed.characters 中所有人物 ID，值必须是稳定、自然且互不重复的姓名；P1/P2 等 ID 只用于该映射和输入引用，不写进正文。
 4. 必须按 scene_id 的既定顺序输出全部场景，不得遗漏、重复或新增 scene_id。场景之间自然衔接，text 中不写场景标题。

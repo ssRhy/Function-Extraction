@@ -236,6 +236,7 @@ def test_infer_genre_uses_keywords_and_rejects_ambiguous_requests():
     assert app._infer_genre("悬疑：雨夜追查失踪案") == "01_悬疑惊悚"
     assert app._infer_genre("写一个修仙者守城的故事") == "02_古风仙侠"
     assert app._infer_genre("都市情感中的家庭关系修复") == "03_现代情感"
+    assert app._infer_genre("情感类：民国时代银行家和天才画家的相爱故事") == "03_现代情感"
     assert app._infer_genre("末世废土中的求生") == "04_末世科幻"
     assert app._infer_genre("现实家庭中的职场冲突") == "05_现实家庭职场"
     with pytest.raises(ValueError, match="未识别题材"):
@@ -272,6 +273,8 @@ def test_archive_formal_assets_is_recoverable(tmp_path, monkeypatch):
 def test_bootstrap_forwards_formal_paths_and_promotes_root(tmp_path, monkeypatch):
     source = tmp_path / "story.txt"
     source.write_text("故事", encoding="utf-8")
+    second_source = tmp_path / "story-2.txt"
+    second_source.write_text("第二个故事", encoding="utf-8")
     output_dir = tmp_path / "run" / "output"
     snapshot = tmp_path / "snapshot"
     captured = {}
@@ -304,7 +307,7 @@ def test_bootstrap_forwards_formal_paths_and_promotes_root(tmp_path, monkeypatch
     monkeypatch.setattr(app, "DATA", tmp_path / "data")
 
     manifest_path = app.run_function(
-        "bootstrap", [source], out_dir=tmp_path / "run",
+        "bootstrap", [source, second_source], out_dir=tmp_path / "run",
         namespace="production", reset_formal=True,
     )
 
@@ -315,6 +318,16 @@ def test_bootstrap_forwards_formal_paths_and_promotes_root(tmp_path, monkeypatch
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["serving_snapshot_id"] == snapshot.name
     assert manifest["formal_reset_archive"] == str(tmp_path / "archive")
+
+
+def test_bootstrap_rejects_one_story_before_clearing_working_assets(tmp_path, monkeypatch):
+    source = tmp_path / "story.txt"
+    source.write_text("故事", encoding="utf-8")
+    monkeypatch.setattr(app, "_run_module", lambda *_: pytest.fail("不应启动 FunctionExtract_Agent"))
+    monkeypatch.setattr(app, "_archive_formal_assets", lambda: pytest.fail("不应归档正式资产"))
+
+    with pytest.raises(ValueError, match="至少需要 2 个"):
+        app.run_function("bootstrap", [source], out_dir=tmp_path / "run")
 
 
 def test_story_generate_passes_request_and_uses_serving_snapshot(tmp_path, monkeypatch):
@@ -341,7 +354,7 @@ def test_story_generate_passes_request_and_uses_serving_snapshot(tmp_path, monke
     monkeypatch.setattr(pipeline_app, "_build_graph", lambda: FakeGraph())
 
     path = app.generate_story(
-        "现代情感：写一次克制的家庭关系修复",
+        "情感类：民国时代银行家和天才画家的相爱故事",
         knowledge_db="formal.db", out_dir=tmp_path / "run",
         planner_mode="dynamic",
     )
@@ -349,7 +362,7 @@ def test_story_generate_passes_request_and_uses_serving_snapshot(tmp_path, monke
     assert path.exists()
     assert captured["state"]["genre"] == "03_现代情感"
     assert captured["state"]["snapshot_id"] == "SERVING"
-    assert captured["state"]["user_request"] == "现代情感：写一次克制的家庭关系修复"
+    assert captured["state"]["user_request"] == "情感类：民国时代银行家和天才画家的相爱故事"
     assert captured["state"]["planner_mode"] == "dynamic"
     assert captured["state"]["knowledge_db"] == "formal.db"
 

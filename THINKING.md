@@ -1835,6 +1835,38 @@ Best-of-2 最初暂放在 `Pipeline_Agent/app.py`，只为先用最小文件数�
 
 迁移后正式 serving 为 `bootstrap60_contract_20260910T034604743139Z_a1100a350fcf`，可读取 180 个故事、40 个 Function、2169 条 Occurrence 和 15 个 Published Pattern；Snapshot 校验、SQLite 完整性和 FK 检查通过。默认 KnowledgeBase catalog 读取 15 个 Pattern；Outline 模块导入验证因当前环境缺少 `langgraph.graph` 阻断，属于环境问题，不改变数据库迁移结论。旧正式 serving 数据保存在 `Code/data/formal_archives/20260910T123846_serving_before_anchor_revert/`，可恢复。
 
+## 283. 用轻量窗口承接三条公开流程（2026-09-10）
+
+用户希望通过人机交互完成 Bootstrap、Evolve 和文章生成，而不是记忆 Codex 或多层命令。最终选择不引入 Web 框架或新的 Agent：用 Python 标准库 Tkinter 做本地窗口，后台调用现有公开 StoryCLI；生成入口由用户选择 Dynamic 或 Pattern，Evolve 自动 promote，Bootstrap 重建保持显式勾选和二次确认。这样交互体验变简单，但正式 Run、Snapshot 和 Story Validator 的边界不变。
+
+## 284. 交互窗口应先让 LLM 路由，再执行白名单命令（2026-09-10）
+
+用户指出窗口直接按固定关键词进入 StoryCLI，不能满足“先传给 LLM，再调用命令行”的交互目标；`情感类：民国时代银行家和天才画家的相爱故事` 也因此在 LLM 尚未参与前被拒绝。最小改法是复用现有 `chat_structured` 做受限路由：操作必须匹配已点击的按钮，题材只能落在五个现有规范值，路径不接受模型改写，程序把规范题材前缀加入原始 `--request` 后用参数列表启动原有 StoryCLI。这样不修改 StoryCLI 的公开参数，仍解决入口顺序和“情感类”别名问题，同时没有把任意 shell 执行权交给 LLM。
+
+## 285. Bootstrap 单故事不能形成跨故事 Function（2026-09-10）
+
+用户用单个古风仙侠 `.txt` 执行 Bootstrap，最终日志为 `相似对=0、Function=0、Registry 为空`。这不是题材或 LLM 识别失败：当前 Evaluator 要求 Function 具有跨故事证据，单篇输入没有可比较的第二个故事。由于旧流程在收集文件后才清理工作 Registry/Bank/Checkpoint，单故事失败还会留下失败 Run 和未入 Snapshot 的临时数据。因此增加最小前置保护：Bootstrap 少于两个 `.txt` 时直接拒绝，不启动 FunctionExtract_Agent，也不归档或清理工作资产；已有 Snapshot/serving 不回写。
+
 ## 286. Dynamic 模式先形成故事再寻找结构（2026-09-10）
 
 用户指出大纲应根据用户要求生成，而不是先有结构再贴合请求；随后明确当前只需要 Dynamic。决策：Dynamic 路径先由用户请求形成 Seed，再由 Dynamic Planner 寻找兼容 Function 结构；Published Pattern 暂不变更，用户要求一致性门禁与 Pattern 不兼容拒绝留作后续单独验证。
+
+## 287. 生成窗口由用户选择 Dynamic 或 Pattern（2026-09-10）
+
+用户明确不要求系统同时运行两条路径再自动选优，而是在“生成文章”窗口中自行选择 Dynamic 或 Pattern；选择只复用 StoryCLI 现有 planner mode，Pattern 仍走 Published Pattern 路径。
+
+## 288. StoryUI 的问题首先是请求边界，不是正文展示（2026-09-10）
+
+对同一 Snapshot 的真实运行进行复查后，StoryUI 与直接 Dynamic 入口都走 `Dynamic Seed → Dynamic Planner → ... → Story`，但 StoryUI 额外调用路由 LLM，并把 `情感类:战场上两位对手相爱，但爱而不得` 改写成 `现代情感：情感类:战场上两位对手相爱，但爱而不得`。对应 Seed 从战场敌对士兵漂移为当代公益项目对手，正文因此也完全换了冲突世界；直接入口保留战场语义。
+
+这说明应先修正“用户要求进入 Seed 前被入口改写”的边界，再讨论正文 Prompt 或 StoryUI 展示层。Story Validator 对两份正文均判定通过，只能说明它们分别完成了各自 Seed/大纲，不能当作用户要求保真度的证据。当前不把额外路由调用单独认定为根因，也不在没有同输入对照实验前扩大为新的 Agent 或质量门禁。
+
+## 289. StoryUI 只归一化题材前缀，不改写创作要求（2026-09-10）
+
+按调查结论采用最小修复：路由 LLM 仍只识别 `genre`；程序在 `StoryCLI` 命令边界删除用户输入开头的已有题材别名及重复前缀，然后只加一次规范题材前缀。中间正文、标点和创作要求不由路由器重写，Dynamic Seed 收到的内容恢复为用户原文语义。
+
+不新增 `--genre` 参数、Agent、Prompt 或数据库字段；用 StoryUI/StoryCLI 聚焦回归验证命令与路由顺序，真实 LLM 语义 A/B 留待后续固定同请求、同 Snapshot、同 DB 时再验证。
+
+## 290. 操作由 UI 固定，路由 LLM 只负责 Story 题材（2026-09-10）
+
+进一步收窄路由职责：UI 已经确定 Bootstrap、Evolve 或 Story，不再让 LLM 回显或判断 action；只有 Story 入口调用结构化 LLM 返回 `genre`。Bootstrap/Evolve 直接执行既有公开命令，减少一次无意义的模型调用和一个失败点。

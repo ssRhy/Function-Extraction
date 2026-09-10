@@ -32,7 +32,7 @@ FORMAL_ASSETS = (
 GENRE_KEYWORDS = {
     "01_悬疑惊悚": ("悬疑", "惊悚", "推理", "侦探"),
     "02_古风仙侠": ("古风", "仙侠", "修仙", "穿越"),
-    "03_现代情感": ("现代情感", "都市情感", "言情", "爱情"),
+    "03_现代情感": ("现代情感", "都市情感", "情感类", "言情", "爱情"),
     "04_末世科幻": ("末世", "科幻", "废土"),
     "05_现实家庭职场": ("现实家庭", "家庭", "职场", "婚姻"),
 }
@@ -229,6 +229,8 @@ def run_function(
     input_dir = root / "input"
     output_dir = root / "output"
     manifest_path, count = _prepare_corpus(inputs, input_dir)
+    if mode == "bootstrap" and count < 2:
+        raise ValueError("Bootstrap 至少需要 2 个 .txt 故事，单篇故事请使用 Evolve")
     archive_path = _archive_formal_assets() if mode == "bootstrap" and reset_formal else None
     store = StoryKnowledgeStore(KNOWLEDGE_DB) if mode == "evolve" else None
     if mode == "evolve" and not base_snapshot:
