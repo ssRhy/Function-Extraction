@@ -2155,3 +2155,73 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - 同一组 3 个固定 Seed、只运行 Dynamic Planner 的真实 API 对照：prompt token `1,956,863 → 688,248`（`-64.8%`），总 token `1,977,693 → 713,565`（`-63.9%`），输入字符 `4,667,115 → 1,763,789`（`-62.2%`）。调用次数因模型输出路径由 `43 → 53`，但成本仍显著下降。
 - 有效候选数 `4/4/2 → 1/4/4`，top-1 分数 `0.865417/0.834833/0.769000 → 0.771893/0.834833/0.959250`；两侧 Contract hard issue 均为 `0`，聚合 state issue/state conflict/unresolved obligation 为 `64/40/62 → 57/38/63`。关系型 Function 在每个 Seed 的返回候选中均有覆盖，但候选数、链长度和多样性没有一致方向，质量不稳定，不能宣称压缩保持或提升质量。
 - 结论：只保留这处成本优化，`BEAM_WIDTH=4` 不降到 2；不新增缓存、评分、Best-of-N 或数据库边界。正式 SQLite 未写入，待最终回归后再次核对 hash/计数/integrity。
+
+### 本轮补充（2026-09-09）：正式 Bootstrap 根已生成，但 Pattern 未发布
+
+- 用户明确要求用删除代替叠加约束：不得用 `observation_order`、`obs_001` 等顺序编号补 Observation ID；重复稳定 ID 只删除后到记录，不改变 `observation_id()`。同时对无证据的 `relationship_delta` 在解析前删除，不新增身份冲突或兼容约束层。
+- 60 篇平衡 Bootstrap 在正式库完成函数抽取和根 Snapshot：`story_cli_20260909T072949663195Z_c1b261029498`，60 个 story、511 个 Observation、36 个 Function、36 个 Contract；`validate_snapshot`、`integrity_check` 和 FK 检查通过。
+- Pattern 运行 `PR_892e1e3908d649f2` 状态为 `SUCCESS`，但 8 个 cluster 均为 `candidate`，`published_patterns=0`。因此没有 serving 指针，公开 Bootstrap 在 promote 阶段停止；正式 Evolve 尚未启动，不能绕过“必须有已发布 Pattern”的门槛。旧正式资产保存在 `Code/data/formal_archives/` 下的本轮归档中。
+
+### 本轮补充（2026-09-09）：固定 30 条 Matcher 回归并收紧 Contract 槽位
+
+- Pattern 长度门槛保持不变。新增固定回归样本 `Code/test/fixtures/matcher_regression_30.json`，只保存当前 Snapshot 与 30 个稳定内容锚点 `obs_id`，没有使用 `observation_order` 或顺序后缀补身份。
+- Contract Prompt 明确 `role_slots` 只能声明被 preconditions/effects/obligation_effects 实际引用的必需角色；子 Snapshot 构建时对所有 Contract 统一删除未被契约引用的角色槽位，不维护 Function 名白名单、不补写 Observation 角色，也不直接改当前不可变根 Snapshot。
+- Observer 增加源句数较多 Observation 的一次拆分复核，并保留原结果作为失败回退。真实定点复核中，道歉→摔杯、身份识别→攻击成功拆开；资源→救治在另一轮复核成功拆开；砸击→逃离/安置、强行带走→后续撞击仍有模型波动，暂不能宣称 5/5 确定修复。
+- 同一 30 条样本、同一根 Snapshot 的只读 Matcher 重放：`MATCH=19, EXTEND=1, UNCERTAIN=7, CONFLICT=2, NOVEL=1`；用内存中的修剪 Contract 对齐后，`MATCHED` 从 `15` 提升到 `19`，槽位拦截从 `5` 条降为 `1` 条。两条疑似召回遗漏的 top-5/top-10 排名已记录：`ST_a8..._3f353...` 的 `EMPOWERMENT_GAIN` 未进 top-10，`ST_929..._e771...` 的 `ESCAPE_OR_RELEASE` 在 rank 6，属于不同的召回/复合边界问题。
+- 正式 SQLite 未写入：SHA-256 仍为 `9b4b2156c425aa2fe71f56983143d1888f2d81b0319395857be37100c9824e91`，serving Snapshot 未变，`integrity_check=ok`、FK 检查为空；全仓回归 `395 passed, 1 skipped`。
+
+### 本轮补充（2026-09-09）：Evolve label 传递与 Pattern 发布条件最小修复
+
+- Evolve 最终 `align_occurrences` 前按稳定 `obs_id` 将 Matcher/Critic 的本轮 `label` 合并回 Bank Observation；不改 `align_occurrences`、Observation 身份或 top-k。聚焦覆盖 NOVEL→OTHER、UNCERTAIN/RESOLVED→UNCERTAIN、Contract 通过/缺角色两种 MATCH 分支。
+- StoryPattern 题材读取统一改为 StoryVersion payload 的 `story_type`；motif evidence 和 `category_counts` 继续使用既有输出键 `category`，没有增加兼容字段或迁移。
+- Pattern cluster 只有自身 `story_support >= 2` 且 `length >= 4` 的 motif 才能作为 anchor；没有合格 anchor 的 cluster 保持 candidate，不发布固定核心链。没有增加支持字段、LCS 或数据库表。
+- 相关回归 `152 passed, 1 skipped`，全仓回归 `401 passed, 1 skipped`。临时目录只做只读复现：旧 78 条 NOVEL 在原始最终输出中未落为 OTHER，内存合并后 78 条均为 OTHER；正式 serving 数据未写入。
+
+### 本轮补充（2026-09-09）：修复后 12 篇定向 Evolve 验证通过，完整 60 篇超时
+
+- 按用户指定的 10 篇原 Published Pattern 支持故事 + 2 篇已知 NOVEL 故事，复制原始临时 DB 和 Bootstrap 父 Snapshot 到 `Code/data/story_cli/bootstrap_60_contract_evolve_20260909/validation_12_20260909/`；用 validation-only 的 Coordinator 包装传入新 revision `pattern_contract_validation_12_20260909`，Coordinator 正常完成 Evolve → Pattern。新 Snapshot `bootstrap60_contract_20260909T135445187502Z_f775a1d7a947`，父 Snapshot 为 `bootstrap60_contract_20260909T112832471189Z_d01013408590`；Evolve `FR_49da1348e41749cd=PASS`，Pattern `PR_44ffd5fa82a1c6f3=SUCCESS`。
+- 12 篇结果中 occurrence 状态为 `MATCHED=246 / UNCERTAIN=316 / OTHER=15`；带 `label=NOVEL` 的 18 条为 `NOVEL→OTHER=15、NOVEL→MATCHED=3、NOVEL→UNCERTAIN=0`。3 条 `NOVEL→MATCHED` 具有合同允许的 Function，不是 NOVEL 被写成 UNCERTAIN。Pattern 结果为 `clusters=89、candidate=88、blocked=1、published=0、published_patterns=0`；无发布 anchor 需要放行，符合完整链至少跨两故事且长度至少 4 的门槛。
+- 新 StoryVersion payload 均以 `story_type` 传递 3 个真实题材；motif evidence 与 cluster `category_counts` 使用 `01_悬疑惊悚 / 02_古风穿越重生 / 03_现代情感家庭`，没有 `uncategorized`。validation_12 的 `integrity_check=ok`、外键检查为空，正式 serving DB 未传入运行；原始临时 DB SHA-256 仍为 `ac8da911106bdeb7d68b99634ab386c25ac9f72547726f833b7036c6731055a8`。
+- 随后从同一 Bootstrap 父 Snapshot 新建 `validation_60_20260909/`，不传 top-k 覆盖，启动完整 60 篇。Coordinator 两次 Evolve 均达到 1800 秒阶段上限，最终 `FAILED / STAGE_TIMEOUT`，没有新 Snapshot、没有 Pattern run，因此完整 60 的 Pattern/全量数据结论仍未验证；失败副本的 SQLite `integrity_check=ok`、外键检查为空，但只留下部分 StoryVersion 和临时 RUNNING 记录，不作为成功结果。
+- 修复相关聚焦回归 `59 passed`；全仓回归 `401 passed, 1 skipped`；`git diff --check` 通过。未 promotion、未提交、未写正式 serving 数据。
+
+### 本轮补充（2026-09-09）：7200 秒窗口的 60 篇验证暴露独立 Observer 输入边界
+
+- 从原始临时 DB 重新建立干净副本 `Code/data/story_cli/bootstrap_60_contract_evolve_20260909/validation_60_long_20260909/`，固定父 Snapshot `bootstrap60_contract_20260909T112832471189Z_d01013408590`，显式使用 revision `pattern_contract_validation_60_long_20260909`，不传 top-k 覆盖。原 Bootstrap 文件只复制到该副本，正式 serving DB 未参与运行。
+- Coordinator 的 Evolve 阶段窗口改为 7200 秒。单次 Run `FR_4c77856882334204` 实际运行约 41 分钟，日志推进到第 50/60 篇入口，前 49 篇累计 465 条 Observation；没有触发阶段超时，也没有进入 Pattern。
+- 第 50 篇在 Observer 现有 `validate_event_roles(..., sentence_count=...)` 处失败：LLM 返回的 `relationship_deltas.evidence_sentence_indices` 越过该故事句子范围，Run 以 `EVOLVE_RUN_FAILED` 结束。该问题与本轮 NOVEL label 合并、`story_type` 读取和 Pattern anchor 门槛无关；暂未扩大范围修复。
+- 失败副本没有新 Snapshot，父 Snapshot 未变；副本 `integrity_check=ok`、FK 检查为空，正式库 SHA-256 仍为 `9b4b2156c425aa2fe71f56983143d1888f2d81b0319395857be37100c9824e91`。若要完成 60 篇闭环，需要另行决定是否允许删除没有有效句子证据的关系变化项这一处最小输入防护；不能把本次部分日志当作完整 Evolve/Pattern 成功证据。
+
+### 本轮补充（2026-09-10）：Observer 关系证据越界的最小清理
+
+- 在 Observer 输出进入既有角色校验前，只保留 `relationship_deltas.evidence_sentence_indices` 中位于当前句子范围的索引；过滤后无证据的关系变化项直接删除。没有新增 helper、字段、表、重试、Prompt 分支、ID 规则或 top-k 变化。
+- 聚焦 Observer/角色/Evolve 测试 `25 passed`，全仓回归 `402 passed, 1 skipped`。
+- 从原始临时 DB 建立 `validation_60_guard_20260910/` 后启动 7200 秒窗口的完整 Evolve；用户主动中断时处理到 3/60 篇、23 条 Observation。该副本没有新 Snapshot 或 Pattern，SQLite 完整性与外键检查通过；不作为完整 60 篇成功证据。
+
+### 本轮补充（2026-09-10）：修复后完整 60 篇 Evolve → Pattern 验证完成
+
+- 从原始临时 DB 重新建立干净副本 `Code/data/story_cli/bootstrap_60_contract_evolve_20260909/validation_60_final_20260910/`，固定 Bootstrap 父 Snapshot `bootstrap60_contract_20260909T112832471189Z_d01013408590`，使用 7200 秒 Evolve 阶段窗口，不传 top-k 覆盖。Coordinator 正常完成完整 60 篇 Evolve 与 Pattern；没有 promotion、提交或正式 serving DB 写入。
+- Evolve `FR_350dc918a3d4462a` 为 `PASS`，Snapshot `bootstrap60_contract_20260909T171916227435Z_dc9f2d9ef5e5`；60 篇新增故事产生 636 条 Observation，最终 Snapshot 共 1226 条 FunctionOccurrence，状态为 `MATCHED=602 / UNCERTAIN=566 / OTHER=58`。带 Matcher/Critic `label=NOVEL` 的 81 条中，无最终 Function 支持的 58 条全部为 `OTHER`；另 18 条获得新 Function 后为 `MATCHED`，5 条因 Contract 必需角色未绑定为 `UNCERTAIN`，不存在“无支持 NOVEL 被写成 UNCERTAIN”。
+- 新增 60 篇的题材按 `story_type` 正确进入 Pattern：5 个真实题材各 12 篇，新增故事的 motif evidence 没有 `uncategorized`。数据库中残留的 3 条 `uncategorized` 来自固定父 Snapshot 的历史继承数据，不是本轮新增读取错误，也未做迁移或回写父 Snapshot。
+- Pattern `PR_3d1ed8a272013ba9` 为 `SUCCESS`：`clusters=319、candidate_clusters=319、published_clusters=0、published_patterns=0`。因此没有发布任何虚假跨故事核心链；本轮不存在需要额外核验的 Published anchor。Snapshot `validate_snapshot` 通过，副本 `integrity_check=ok`、FK 检查为空；Observation ID 未出现顺序编号形式。
+- 相关聚焦回归 `91 passed, 1 skipped`，全仓回归 `402 passed, 1 skipped`。原始临时 DB SHA-256 仍为 `ac8da911106bdeb7d68b99634ab386c25ac9f72547726f833b7036c6731055a8`；正式 serving DB SHA-256 仍为 `9b4b2156c425aa2fe71f56983143d1888f2d81b0319395857be37100c9824e91`，正式库完整性与 FK 检查通过。
+
+### 本轮补充（2026-09-10）：按用户选择恢复稳定 anchor motif 发布规则
+
+- 用户明确选择恢复提交 `3dc5bb5` 的最小 anchor 规则：优先从 cluster 成员选择 `length >= 4` 的 motif；没有时回退全部成员；再按 `story_support`、`length`、`motif_id` 确定性排序。保留发布条件 `review_status=CLEAN`、cluster `story_support>=2`、cluster 存在长度至少 4 的 motif和现有 Contract 检查；没有恢复旧 Summary 的 Function 名选择，也没有增加公共核心链/新字段/新表。`story_type`、`NOVEL→OTHER` 和 Observer 修复保持不变。
+- 本次代码变更仅恢复 `Code/StoryPattern_Agent/app.py` 的 anchor 选择分支；将与新决策冲突的“第四步不同则不发布”测试改为验证稳定 anchor 发布，并补充 CONFLICT、INCOMPLETE、故事支持不足、长度不足和 Contract 缺失的负向测试。Pattern 相关回归 `123 passed, 1 skipped`，全仓 `407 passed, 1 skipped`。
+- 从 `validation_second60_20260910` 只复制 `knowledge.db`/`registry.db` 到 `validation_anchor_revert_20260910`，固定 Snapshot `bootstrap60_contract_20260910T034604743139Z_a1100a350fcf`，执行 `--rebuild`，没有重新 Evolve。源库 Reviewer cache 129 条，复制后仍为 129 条；源副本仍为 0 Published Pattern。
+- 副本 Pattern Run `PR_6939ce12eb8ecd37` 成功：`565 motifs / 547 clusters / 532 candidate / 15 published`。15 个 Published cluster 均为 `CLEAN`，cluster 跨故事支持为 2（14 个）或 3（1 个），所选 anchor 长度为 4–6，但 anchor motif 自身均只在 1 个故事有证据。这些 Pattern 是在 cluster 的跨故事审查支持下选出的代表链，不宣称 anchor 完整链被两个故事精确重复。
+- 15/15 个 Pattern 的 `core_function_chain` 与 anchor motif 的稳定 `function_ids` 一致，Contract 均存在；固定 Snapshot 包含 180 个故事、2169 条 Occurrence、40 个 Function。Snapshot 文件校验通过，副本 `integrity_check=ok`、FK 为空；正式 serving DB SHA-256 仍为 `9b4b2156c425aa2fe71f56983143d1888f2d81b0319395857be37100c9824e91`，未 promotion、未提交、未写正式库。
+
+### 本轮补充（2026-09-10）：移除 Observer 过度防御的二次拆分复核
+
+- 原始 Observer Prompt 已包含“单一主导变化、独立事件拆分”规则；移除后置二次 LLM 拆分复核、专用 schema/prompt 和测试，避免额外调用、4 次重试与多级回退。保留无证据 `relationship_delta` 删除及越界证据过滤。聚焦回归 `13 passed`，全仓 `406 passed, 1 skipped`；未写数据库。
+
+### 本轮补充（2026-09-10）：将稳定 anchor 验证 Snapshot 切换为正式 serving
+
+- 用户明确要求把验证副本的完整候选 Snapshot 迁移到正式 serving。迁移源为 `validation_anchor_revert_20260910`，目标 Snapshot 为 `bootstrap60_contract_20260910T034604743139Z_a1100a350fcf`；不是只复制 Pattern 行，而是复制完整 Knowledge DB、Registry 和相关 Ontology Snapshot 文件。
+- 原正式 Knowledge DB、Registry 和 `story_cli_20260909T072949663195Z_c1b261029498` Snapshot 已归档到 `Code/data/formal_archives/20260910T123846_serving_before_anchor_revert/`，可恢复；原正式 DB SHA-256 为 `9b4b2156c425aa2fe71f56983143d1888f2d81b0319395857be37100c9824e91`。
+- 迁移后调用现有 `StoryKnowledgeStore.promote_snapshot()` 切换 serving 指针，Snapshot 本身未修改。当前正式 serving 为 `bootstrap60_contract_20260910T034604743139Z_a1100a350fcf`，包含 180 个故事、40 个 Function、2169 条 Occurrence 和 15 个 Published Pattern；完整 SQLite `integrity_check=ok`、FK 为空，Snapshot 文件校验通过。
+- 正式 Registry 当前为 `bootstrap60_contract` namespace、40 个 Function；默认 KnowledgeBase catalog 可读取 15 个 Published Pattern。Outline 模块导入 smoke 受当前 Python 环境缺少 `langgraph.graph` 阻断，未将该环境问题误判为迁移失败。
+- 这 15 个 Pattern 仍应描述为 CLEAN 跨故事 cluster 下的稳定代表链，不是两个故事精确重复的完整 anchor 链。未提交代码；旧正式数据保留在归档中。

@@ -193,7 +193,7 @@ def update_story_sequences(state: StoryPatternState) -> dict:
 def _story_motif_rows(state: StoryPatternState, story_id: str) -> list[dict]:
     rows = []
     segment = []
-    category = str((state["story_metadata"].get(story_id) or {}).get("category") or "uncategorized")
+    category = str((state["story_metadata"].get(story_id) or {}).get("story_type") or "uncategorized")
 
     def add_windows() -> None:
         if len(segment) < 3:

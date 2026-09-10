@@ -30,8 +30,8 @@ def _source(functions=None, observations=None, contracts=None, metadata=None):
         "functions": functions or _functions(),
         "contracts": contracts or [],
         "story_metadata": metadata or [
-            {"story_id": "s2", "category": "题材二"},
-            {"story_id": "s1", "category": "题材一"},
+            {"story_id": "s2", "story_type": "题材二"},
+            {"story_id": "s1", "story_type": "题材一"},
         ],
         "observations": observations or [
             _obs("s1_obs_bbbbbbbbbbbb", "s1"),
@@ -98,8 +98,8 @@ def test_load_inputs_keeps_stories_without_observations(monkeypatch):
 
     assert result["story_ids"] == ["s2", "s1"]
     assert result["story_metadata"] == {
-        "s2": {"story_id": "s2", "category": "题材二"},
-        "s1": {"story_id": "s1", "category": "题材一"},
+        "s2": {"story_id": "s2", "story_type": "题材二"},
+        "s1": {"story_id": "s1", "story_type": "题材一"},
     }
     assert result["observations_by_story"]["s2"] == []
 

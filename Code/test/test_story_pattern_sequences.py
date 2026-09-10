@@ -276,8 +276,8 @@ def _context_state(structural_sequences, story_ids=None):
             "F_EMPTY": {"function_id": "F_EMPTY", "function_name": "EMPTY"},
         },
         "story_metadata": {
-            "s1": {"category": "悬疑"},
-            "s2": {"category": "情感"},
+            "s1": {"story_type": "悬疑"},
+            "s2": {"story_type": "情感"},
         },
     }
 

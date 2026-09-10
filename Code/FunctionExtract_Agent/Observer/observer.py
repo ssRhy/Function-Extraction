@@ -3,7 +3,7 @@ Observer Node - 从句子中提取 Narrative Observations
 LangGraph 范式
 """
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from FunctionExtract_Agent.llm import chat_structured
 from FunctionExtract_Agent.Prompt.Observer_prompt import OBSERVATION_SYSTEM_PROMPT
@@ -40,6 +40,16 @@ class ObservationItem(BaseModel):
         default_factory=list,
         description="支撑此观察的句子在 normalized_story.sentences 中的下标（可追溯；缺失时为空列表）",
     )
+
+    @field_validator("relationship_deltas", mode="before")
+    @classmethod
+    def drop_unproven_relationship_deltas(cls, value):
+        if not value:
+            return value
+        return [
+            item for item in value
+            if not isinstance(item, dict) or item.get("evidence_sentence_indices")
+        ]
 
 
 class ObservationResponse(BaseModel):
@@ -118,6 +128,17 @@ def observer_node(state: NarrativePipelineState) -> NarrativePipelineState:
         valid = [index for index in indices if index < len(sentences)]
         dropped_profile_indices += len(indices) - len(valid)
         item.evidence_sentence_indices = valid
+
+    for obs in result.observations:
+        for delta in obs.relationship_deltas:
+            delta.evidence_sentence_indices = [
+                index for index in delta.evidence_sentence_indices
+                if 0 <= index < len(sentences)
+            ]
+        obs.relationship_deltas = [
+            delta for delta in obs.relationship_deltas
+            if delta.evidence_sentence_indices
+        ]
 
     observations = []
     for i, obs in enumerate(result.observations):

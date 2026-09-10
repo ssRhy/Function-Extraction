@@ -184,3 +184,23 @@ def test_inherited_only_legacy_relationship_effect_is_downgraded():
     sanitized = contract_module._sanitize_legacy_contract(contract)
     validate_function_contracts([function], [sanitized])
     assert sanitized["effects"][0]["aspect"] == "FUNCTION_STATE"
+
+
+def test_prunes_unreferenced_roles():
+    contract = {
+        "function_id": "F_TEST001",
+        "function_name": "EMPOWERMENT_GAIN",
+        "role_slots": [
+            "actor", "affected", "resource_provider", "beneficiary", "obstacle", "information_provider",
+        ],
+        "preconditions": [
+            {"role_slots": ["actor"], "aspect": "RESOURCE", "state": "AVAILABLE"},
+            {"role_slots": ["affected"], "aspect": "NEED", "state": "PRESENT"},
+        ],
+        "effects": [
+            {"role_slots": ["affected"], "aspect": "RESOURCE", "before": "MISSING", "after": "AVAILABLE"},
+        ],
+        "obligation_effects": {"opens": [], "advances": [], "resolves": []},
+    }
+    sanitized = contract_module._prune_optional_role_slots(contract)
+    assert sanitized["role_slots"] == ["actor", "affected"]

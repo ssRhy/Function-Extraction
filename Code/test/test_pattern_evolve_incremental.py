@@ -21,6 +21,30 @@ def _candidate(motif_id, stories):
     }
 
 
+def _candidate_with_functions(motif_id, story_id, function_ids):
+    anchors = {
+        "F_0": "aabbccddeeff",
+        "F_1": "bbccddee1122",
+        "F_2": "ccddee112233",
+        "F_3": "ddeeff223344",
+        "F_4": "eeff00112233",
+    }
+    return {
+        "motif_id": motif_id, "snapshot_id": "child",
+        "function_ids": function_ids,
+        "function_names": [f"FUNCTION_{item.removeprefix('F_')}" for item in function_ids],
+        "length": len(function_ids), "tier": "SINGLE_STORY", "story_ids": [story_id],
+        "story_support": 1, "evidence_count": 1,
+        "category_counts": {"测试": 1},
+        "evidence": [{
+            "story_id": story_id, "category": "测试",
+            "structural_orders": list(range(1, len(function_ids) + 1)),
+            "repeat_counts": [1] * len(function_ids),
+            "occurrence_ids": [f"{story_id}_obs_{anchors[item]}" for item in function_ids],
+        }],
+    }
+
+
 def _lineage_state(candidates, reviews, parent_clusters, parent_patterns):
     return {
         "snapshot_id": "child", "snapshot_manifest": {
@@ -74,6 +98,129 @@ def test_empty_child_retires_parent_pattern():
     assert app.rebuild_clusters(state)["retired_pattern_ids"] == ["PAT_PARENT"]
 
 
+def test_clean_two_story_cluster_publishes_stable_length_four_anchor():
+    candidates = [
+        _candidate_with_functions("MC_A", "story_a", ["F_0", "F_1", "F_2", "F_3"]),
+        _candidate_with_functions("MC_B", "story_b", ["F_0", "F_1", "F_2", "F_4"]),
+    ]
+    review = {
+        "variant_pair_id": "MV_AB", "snapshot_id": "child",
+        "member_motif_ids": ["MC_A", "MC_B"], "verdict": "SAME_PATTERN",
+        "order_conflicts": [],
+    }
+
+    cluster = app.rebuild_clusters(
+        _lineage_state(candidates, [review], [], []),
+    )["motif_clusters"][0]
+
+    assert cluster["story_support"] == 2
+    assert cluster["anchor_motif_id"] == "MC_A"
+    assert cluster["status"] == "published"
+    assert cluster["pattern_id"].startswith("PAT_")
+
+
+def test_same_four_step_motif_supported_by_two_stories_can_publish():
+    candidate = _candidate("MC_SHARED", ["story_a", "story_b"])
+
+    cluster = app.rebuild_clusters(
+        _lineage_state([candidate], [], [], []),
+    )["motif_clusters"][0]
+
+    assert cluster["anchor_motif_id"] == "MC_SHARED"
+    assert cluster["status"] == "published"
+    assert cluster["pattern_id"].startswith("PAT_")
+
+
+def test_conflict_cluster_does_not_publish():
+    candidates = [_candidate("MC_A", ["story_a"]), _candidate("MC_B", ["story_b"])]
+    review = {
+        "variant_pair_id": "MV_AB", "snapshot_id": "child",
+        "member_motif_ids": ["MC_A", "MC_B"], "verdict": "SAME_PATTERN",
+        "order_conflicts": ["顺序冲突"],
+    }
+
+    cluster = app.rebuild_clusters(
+        _lineage_state(candidates, [review], [], []),
+    )["motif_clusters"][0]
+
+    assert cluster["review_status"] == "CONFLICT"
+    assert cluster["status"] == "blocked"
+    assert cluster["pattern_id"] is None
+
+
+def test_incomplete_cluster_does_not_publish():
+    candidates = [
+        _candidate_with_functions("MC_A", "story_a", ["F_0", "F_1", "F_2", "F_3"]),
+        _candidate_with_functions("MC_B", "story_b", ["F_0", "F_1", "F_2", "F_3"]),
+        _candidate_with_functions("MC_C", "story_c", ["F_0", "F_1", "F_2", "F_3"]),
+    ]
+    reviews = [{
+        "variant_pair_id": pair_id, "snapshot_id": "child",
+        "member_motif_ids": [left, right], "verdict": "SAME_PATTERN",
+        "order_conflicts": [],
+    } for pair_id, left, right in (
+        ("MV_AB", "MC_A", "MC_B"), ("MV_BC", "MC_B", "MC_C"),
+    )]
+    state = _lineage_state(candidates, reviews, [], [])
+    state["motif_variant_pairs"] = [{
+        "variant_pair_id": "MV_AC", "snapshot_id": "child",
+        "member_motif_ids": ["MC_A", "MC_C"],
+    }]
+
+    cluster = app.rebuild_clusters(state)["motif_clusters"][0]
+
+    assert cluster["review_status"] == "INCOMPLETE"
+    assert cluster["status"] == "candidate"
+    assert cluster["pattern_id"] is None
+
+
+def test_cluster_story_support_below_two_does_not_publish():
+    cluster = app.rebuild_clusters(
+        _lineage_state([_candidate("MC_A", ["story_a"])], [], [], []),
+    )["motif_clusters"][0]
+
+    assert cluster["anchor_motif_id"] == "MC_A"
+    assert cluster["story_support"] == 1
+    assert cluster["status"] == "candidate"
+    assert cluster["pattern_id"] is None
+
+
+def test_cluster_without_length_four_motif_does_not_publish():
+    candidates = [
+        _candidate_with_functions("MC_A", "story_a", ["F_0", "F_1", "F_2"]),
+        _candidate_with_functions("MC_B", "story_b", ["F_0", "F_1", "F_2"]),
+    ]
+    review = {
+        "variant_pair_id": "MV_AB", "snapshot_id": "child",
+        "member_motif_ids": ["MC_A", "MC_B"], "verdict": "SAME_PATTERN",
+        "order_conflicts": [],
+    }
+
+    cluster = app.rebuild_clusters(
+        _lineage_state(candidates, [review], [], []),
+    )["motif_clusters"][0]
+
+    assert cluster["anchor_motif_id"] == "MC_A"
+    assert cluster["status"] == "candidate"
+    assert cluster["pattern_id"] is None
+
+
+def test_cluster_with_missing_contract_does_not_publish():
+    candidates = [_candidate("MC_A", ["story_a"]), _candidate("MC_B", ["story_b"])]
+    review = {
+        "variant_pair_id": "MV_AB", "snapshot_id": "child",
+        "member_motif_ids": ["MC_A", "MC_B"], "verdict": "SAME_PATTERN",
+        "order_conflicts": [],
+    }
+    state = _lineage_state(candidates, [review], [], [])
+    state["snapshot_manifest"]["function_contracts_file"] = "function_contracts.jsonl"
+
+    cluster = app.rebuild_clusters(state)["motif_clusters"][0]
+
+    assert cluster["status"] == "candidate"
+    assert cluster["pattern_id"] is None
+
+
 def test_update_story_sequences_keeps_zero_observation_story():
     result = app.update_story_sequences({
         "new_story_ids": ["empty_story"],
@@ -123,6 +270,50 @@ def test_update_motif_evidence_refreshes_inherited_function_names(monkeypatch):
     assert result["motif_candidates"][0]["function_names"] == [
         "NEW_A", "NEW_B", "NEW_C",
     ]
+
+
+def test_update_motif_evidence_reads_story_type_for_category_counts(monkeypatch):
+    class EmptyStore:
+        def __init__(self, _path):
+            pass
+
+        def load_motif_evidence(self, _snapshot_id):
+            return []
+
+    monkeypatch.setattr(app, "StoryKnowledgeStore", EmptyStore)
+    functions = {
+        f"F_{index}": {
+            "function_id": f"F_{index}",
+            "function_name": f"FUNCTION_{index}",
+        }
+        for index in range(4)
+    }
+    sequence = [{
+        "order": index + 1,
+        "function_id": f"F_{index}",
+        "function_name": f"FUNCTION_{index}",
+        "status": "MATCHED",
+        "repeat_count": 1,
+        "occurrence_ids": [f"story_a_obs_{anchor}"],
+    } for index, anchor in enumerate((
+        "aabbccddeeff", "bbccddee1122", "ccddee112233", "ddeeff223344",
+    ))]
+
+    result = app.update_motif_evidence({
+        "knowledge_db": "unused",
+        "parent_snapshot_id": None,
+        "snapshot_id": "child",
+        "unchanged_story_ids": [],
+        "new_story_ids": ["story_a"],
+        "changed_story_ids": [],
+        "function_by_id": functions,
+        "story_metadata": {"story_a": {"story_type": "古风仙侠"}},
+        "structural_sequences": {"story_a": sequence},
+    })
+
+    candidate = next(item for item in result["motif_candidates"] if item["length"] == 4)
+    assert candidate["evidence"][0]["category"] == "古风仙侠"
+    assert candidate["category_counts"] == {"古风仙侠": 1}
 
 
 def test_llm_review_failure_has_no_fallback(monkeypatch):

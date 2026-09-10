@@ -143,5 +143,41 @@ def test_confidence_new_signature():
     shutil.rmtree(_bank_tmp, ignore_errors=True)
 
 
+def test_bank_deduplicates_stable_ids_without_order_suffix(tmp_path):
+    bank = object.__new__(ObservationBank)
+    bank.jsonl_path = str(tmp_path / "observations.jsonl")
+    bank._records_by_id = {}
+
+    class Vector:
+        def tolist(self):
+            return [0.0]
+
+    class Embedder:
+        def encode_observations(self, items):
+            return [Vector() for _ in items]
+
+    class Collection:
+        def __init__(self):
+            self.calls = []
+
+        def add(self, **kwargs):
+            self.calls.append(kwargs)
+
+    bank.embedder = Embedder()
+    bank.collection = Collection()
+    first = {
+        "obs_id": "story_obs_stable",
+        "observation_version_id": "OV_1",
+        "observation_order": 1,
+        "story_id": "story",
+        "event": "同一事件",
+        "source_text": "原文锚点",
+    }
+    duplicate = dict(first, observation_version_id="OV_2", observation_order=2)
+
+    assert bank.add([first, duplicate]) == ["story_obs_stable"]
+    assert len(bank.collection.calls[0]["ids"]) == 1
+
+
 if __name__ == "__main__":
     test_confidence_new_signature()

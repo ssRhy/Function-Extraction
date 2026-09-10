@@ -8,7 +8,7 @@ from Contracts.role_projection import project_role_references
 from Contracts.snapshot import publish_snapshot, validate_snapshot
 from Contracts.versioning import observation_version_id
 from FunctionExtract_Agent.Observer import observer as observer_module
-from FunctionExtract_Agent.Observer.observer import ObservationResponse, observer_node
+from FunctionExtract_Agent.Observer.observer import ObservationItem, ObservationResponse, observer_node
 
 
 def _profile():
@@ -74,6 +74,18 @@ def test_observer_returns_profile_and_bound_observation(monkeypatch):
     assert result["observations"][0]["relationship_deltas"][0]["target_id"] == "P2"
 
 
+def test_observation_drops_relationship_delta_without_evidence():
+    item = _observation()
+    item["relationship_deltas"].append({
+        "source_id": "P1", "target_id": "P2", "dimension": "trust",
+        "before": "低", "after": "更低", "evidence_sentence_indices": [],
+    })
+
+    parsed = ObservationItem.model_validate(item)
+
+    assert len(parsed.relationship_deltas) == 1
+
+
 def test_observer_drops_out_of_range_profile_evidence(monkeypatch):
     profile = _profile()
     profile["characters"][0]["evidence_sentence_indices"] = [0, 9]
@@ -92,6 +104,28 @@ def test_observer_drops_out_of_range_profile_evidence(monkeypatch):
     assert output["characters"][0]["evidence_sentence_indices"] == [0]
     assert output["relationships"][0]["evidence_sentence_indices"] == [1]
     assert "丢弃" in result["messages"][0]["content"]
+
+
+def test_observer_drops_out_of_range_relationship_evidence(monkeypatch):
+    partial = _observation()
+    partial["relationship_deltas"][0]["evidence_sentence_indices"] = [1, 9]
+    invalid = _observation()
+    invalid["event"] = "对手再次阻挠"
+    invalid["relationship_deltas"][0]["evidence_sentence_indices"] = [9]
+    response = ObservationResponse(
+        story_profile=_profile(), observations=[partial, invalid],
+    )
+    monkeypatch.setattr(observer_module, "chat_structured", lambda *args, **kwargs: response)
+
+    result = observer_node({
+        "normalized_story": {
+            "metadata": {"story_id": "s1", "story_version_id": "SV_1"},
+            "sentences": ["冲突开始。", "对手阻碍主角。"],
+        },
+    })
+
+    assert result["observations"][0]["relationship_deltas"][0]["evidence_sentence_indices"] == [1]
+    assert result["observations"][1]["relationship_deltas"] == []
 
 
 def test_snapshot_rejects_unknown_person_and_accepts_profile(tmp_path):

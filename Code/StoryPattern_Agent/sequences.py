@@ -155,7 +155,7 @@ def index_function_contexts(state: StoryPatternState) -> dict:
             "structural_order": run["order"],
             "occurrence_ids": list(run["occurrence_ids"]),
         } for run in segment]
-        category = (story_metadata.get(story_id) or {}).get("category")
+        category = (story_metadata.get(story_id) or {}).get("story_type")
         for anchor_index, run in enumerate(segment):
             contexts[run["function_id"]].append({
                 "story_id": story_id,

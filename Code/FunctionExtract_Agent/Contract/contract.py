@@ -123,6 +123,24 @@ def _sanitize_legacy_contract(contract: dict) -> dict:
     return sanitized
 
 
+def _prune_optional_role_slots(contract: dict) -> dict:
+    """只保留 Contract 实际引用的必需角色槽位。"""
+    if not contract:
+        return contract
+    referenced = []
+    for item in [*(contract.get("preconditions") or []), *(contract.get("effects") or [])]:
+        referenced.extend(item.get("role_slots") or [])
+    obligations = contract.get("obligation_effects") or {}
+    for group in ("opens", "advances", "resolves"):
+        for item in obligations.get(group) or []:
+            referenced.extend(item.get("role_slots") or [])
+    required = set(referenced)
+    return {
+        **contract,
+        "role_slots": [role for role in contract.get("role_slots", []) if role in required],
+    }
+
+
 def build_function_contracts(
     functions: list[dict],
     observations: list[dict],
@@ -134,13 +152,19 @@ def build_function_contracts(
         raise ValueError("空 Function 集不能构建 FunctionContract")
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, "function_contracts.jsonl")
-    existing = _read_existing(path)
+    existing = {
+        function_id: _prune_optional_role_slots(_sanitize_legacy_contract(contract))
+        for function_id, contract in _read_existing(path).items()
+    }
     for contract in existing_contracts or []:
-        existing.setdefault(contract["function_id"], _sanitize_legacy_contract(contract))
+        existing.setdefault(
+            contract["function_id"],
+            _prune_optional_role_slots(_sanitize_legacy_contract(contract)),
+        )
     bank = {item.get("obs_id"): item for item in observations if item.get("obs_id")}
     contracts = []
     for function in functions:
-        cached = existing.get(function.get("function_id"))
+        cached = _prune_optional_role_slots(existing.get(function.get("function_id")))
         if cached and cached.get("definition_sha256") == definition_sha256(function):
             try:
                 validate_function_contracts([function], [cached])
@@ -148,7 +172,7 @@ def build_function_contracts(
                 continue
             except ValueError:
                 pass
-        contracts.append(build_function_contract(function, bank))
+        contracts.append(_prune_optional_role_slots(build_function_contract(function, bank)))
         _write_contracts(path, contracts)
     validate_function_contracts(functions, contracts)
     _write_contracts(path, contracts)

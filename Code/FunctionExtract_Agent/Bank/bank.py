@@ -127,7 +127,14 @@ class ObservationBank:
             return []
 
         existing = self._obs_id_set()
-        to_add = [obs for obs in observations if obs.get("obs_id") not in existing]
+        seen = set()
+        to_add = []
+        for obs in observations:
+            obs_id = obs.get("obs_id")
+            if obs_id in existing or obs_id in seen:
+                continue
+            seen.add(obs_id)
+            to_add.append(obs)
 
         if not to_add:
             return []

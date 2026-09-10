@@ -15,7 +15,7 @@ CONTRACT_SYSTEM_PROMPT = """你是叙事 Function 契约分析器。给定一个
 
 要求：
 1. 所有内容必须来自证据的 before_state / after_state / affected_aspect，不能按 Function 名凭空补全。
-2. role_slots 只能从以下标准位置选择：`actor`（行动发起者）、`affected`（受到影响者）、`information_provider`（提供信息者）、`resource_provider`（提供资源者）、`beneficiary`（受益者）、`obstacle`（形成阻碍者）。不要把槽位固定解释为主人公、反派或帮助者；具体人物由 FunctionOccurrence 绑定。
+2. role_slots 只能从以下标准位置选择：`actor`（行动发起者）、`affected`（受到影响者）、`information_provider`（提供信息者）、`resource_provider`（提供资源者）、`beneficiary`（受益者）、`obstacle`（形成阻碍者）。不要把槽位固定解释为主人公、反派或帮助者；具体人物由 FunctionOccurrence 绑定。只声明被本 Function 的 preconditions、effects 或 obligation_effects 实际引用的必需槽位；可有可无的上下文角色不要放入 role_slots，Observation 仍可记录其已有证据。
 3. 状态和债务都去掉人物名、专有物品和题材表层词。
 4. aspect 与 obligation key 使用稳定的英文大写下划线结构类别；同一种状态维度或债务应使用同一个名称。注意：`关系状态` 必须写为 `RELATIONSHIP_STATUS`，`资源状态` 必须写为 `RESOURCE_STATUS`；aspect/key 中绝对不能出现中文、空格、小写字母或连字符。若 effect 的 aspect 是 `RELATIONSHIP_STATUS`（或兼容旧数据的 `RELATIONSHIP`），其 `role_slots` 必须恰好包含两个不同的标准角色槽位，表示关系边的两端；不要用单个 `actor` 表示关系变化。`RELATIONSHIP_SHIFT` 只能作为 obligation key，不能代替当前关系 effect。
 5. opens 表示产生必须由后续情节处理的问题；advances 表示推进已有问题但尚未解决；resolves 表示能清偿已有问题。允许任一数组为空。

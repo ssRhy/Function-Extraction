@@ -1766,3 +1766,71 @@ Best-of-2 最初暂放在 `Pipeline_Agent/app.py`，只为先用最小文件数�
 在当前 serving Snapshot 上用 3 个固定 Seed 完成真实 Planner-only 前后对照。空链 Prompt 为 `108,477 → 33,204` 字符；两个 raw 块合计 `75,219` 字符，基线 43 次调用至少重复发送 `3,234,417` 个该两块字符。真实 prompt token 为 `1,956,863 → 688,248`（`-64.8%`），总 token 为 `1,977,693 → 713,565`（`-63.9%`）；优化后虽然因模型路径调用 `53` 次而不是 `43` 次，成本仍显著下降。
 
 质量信号不稳定：有效候选数 `4/4/2 → 1/4/4`，top-1 分数 `0.865417/0.834833/0.769000 → 0.771893/0.834833/0.959250`；Contract hard issue 两侧均为 `0`，聚合 state issue/state conflict/unresolved obligation 为 `64/40/62 → 57/38/63`。每个 Seed 的返回候选均包含关系型 Function，但候选数、链长度和多样性没有一致方向。因此只接受这处确定的成本收益，不把一次/Seed 的真实样本解释为质量回归或提升，不把 Beam width 从 4 降到 2。
+
+## 272. Observation 身份不能用顺序编号补齐（2026-09-09）
+
+用户明确要求：不得使用 `observation_order`、`obs_001` 或其他抽取顺序编号硬凑 Observation ID，否则会破坏当前基于稳定语义锚点的身份规则。后续遇到同一批重复 `obs_id` 时，只能对内容完全一致的记录去重；若同一 ID 对应内容不一致，必须报告身份冲突并阻断，不能通过追加序号生成新身份。
+
+## 273. 用删除处理重复或无证据输出，不叠加约束（2026-09-09）
+
+用户进一步明确：处理异常数据时用删除代替叠加约束。当前实现因此只删除同一批中后到的重复稳定 `obs_id`，不做内容冲突分支、不追加顺序后缀，也不修改 `observation_id()`；同时在 `ObservationItem` 解析前删除没有证据句子的 `relationship_delta`，保留现有有效关系项和既有身份规则。
+
+按该边界重跑正式 Bootstrap 60 篇：根 Snapshot `story_cli_20260909T072949663195Z_c1b261029498` 已写入，60 个 story、511 个 Observation、36 个 Function 和 36 个 Contract，Snapshot 校验与 SQLite 完整性通过。Pattern 运行本身为 `SUCCESS`，但 8 个 cluster 全部为 candidate、没有 published Pattern，因此公开 Bootstrap 未能 promote serving，不能继续启动正式 Evolve；这属于 Pattern 发布条件未满足，不是数据库或 Observation 身份失败。
+
+## 274. Pattern 门槛暂不动，先把固定回归暴露出的上游边界问题拆开看（2026-09-09）
+
+用户明确要求暂时不改 Pattern 长度门槛，并把同一批 30 条 Observation 固定为回归样本；先处理 5 条多事件 Observation 拆分、6 条 Contract 槽位拦截和 2 条疑似召回遗漏，再用同一批 30 条重放。用户同时重申不能用 `observation_order`、`obs_001` 等顺序编号补 Observation 身份，也不能凭空补角色。
+
+本轮证据把问题分成三层：top-10 中出现的 `ESCAPE_OR_RELEASE` 是 top-5 截断造成的真实召回遗漏；另一条目标 Function 未进 top-10，更像复合 Observation 未拆开而不是单纯 top-k；Contract 侧删除未被契约状态引用的角色槽位后，固定重放的槽位拦截明显下降。Observer 的二次拆分复核对 5 条样本仍有模型波动，因此只作为安全回退的候选改善，不能作为 Pattern 或生成质量的硬证据。
+
+## 275. Contract 最小修复采用全局删除，不继续扩展其他边界（2026-09-09）
+
+用户决定本轮只修改 Contract，Observer、top-k 和 Pattern 暂不继续。既然未被 preconditions/effects/obligation_effects 引用的角色槽位不是必需约束，就在共享 Contract 构建路径对所有 Function 统一删除，不维护已审计 Function 名白名单；当前正式 Snapshot 保持不可变，规则在后续子 Snapshot 构建时生效。
+
+## 276. 先用定向 12 篇验证 Pattern 门槛，再判断完整 60 篇（2026-09-09）
+
+用户提出的定向选择有效：10 篇原 Published Pattern 支持故事加 2 篇已知 NOVEL 故事，既覆盖旧 cluster 的跨故事假支持，也能同时观察 NOVEL 状态和 `story_type`。12 篇真实 Coordinator 链路完成后，`NOVEL→UNCERTAIN=0`，题材不再是 `uncategorized`，且 `published_patterns=0`；这不是要求 Pattern 必须为零，而是说明当前样本没有满足“同一 motif 跨两故事且长度至少 4”的可发布 anchor。
+
+完整 60 篇在 Coordinator 的两次 1800 秒阶段窗口内均未完成 Evolve，最终没有 Snapshot，也没有进入 Pattern。这个结果只说明当前真实全量运行受 LLM 调用成本/阶段超时限制，不能反推三项修复在全量数据上失败；不能把超时副本的部分 StoryVersion 或旧的临时运行记录当作成功证据。后续若继续，应先单独处理可审计的运行时长/阶段超时边界，不借此扩大架构、修改 Pattern 门槛或提升正式数据。
+
+## 277. 延长阶段窗口后暴露的是关系证据越界，而不是超时（2026-09-09）
+
+用户要求从干净副本用更长运行时限重新验证完整 60 篇。新副本固定 Bootstrap 父 Snapshot，不传 top-k 覆盖，Coordinator 的 Evolve 阶段窗口设为 7200 秒。单次 Run `FR_4c77856882334204` 运行约 41 分钟，处理日志到第 50 篇入口，前 49 篇累计 465 条 Observation；因此上次 1800 秒截断的运行时问题已被区分出来。
+
+本次在第 50 篇因 Observer 返回越界的 `relationship_deltas.evidence_sentence_indices` 触发现有句子范围校验，Run 以 `EVOLVE_RUN_FAILED` 结束，没有 Snapshot、没有 Pattern。失败副本 SQLite 完整性与外键检查仍通过，正式库未写入。这个边界不属于本轮三项修复；若要继续完整 60 篇，需先明确是否允许采用“删除没有有效句子证据的关系变化项”的最小防护，而不是默默重跑同一批输入制造成功。
+
+## 278. 关系证据越界采用删除式最小防护（2026-09-10）
+
+为完成完整 60 篇验证，采用最小 Observer 修复：在既有 `validate_event_roles` 前过滤越界关系证据索引；没有任何有效证据的 `relationship_delta` 直接删除。这个处理延续当前“删除无证据输出”的边界，不新增约束层、兼容字段、重试或数据库结构。
+
+聚焦测试 `25 passed`，全仓 `402 passed, 1 skipped`。修复后的新 60 篇副本运行随后被用户主动中断，处理到 3/60 篇，没有 Snapshot 或 Pattern，不能宣称完整 Evolve 成功。
+
+## 279. 完整 60 篇验证成功，但历史继承题材不回填（2026-09-10）
+
+修复关系证据越界后，从干净副本固定 Bootstrap 父 Snapshot，使用长阶段窗口重新跑完整 60 篇。Evolve `FR_350dc918a3d4462a` PASS，Pattern `PR_3d1ed8a272013ba9` SUCCESS；最终没有 Published Pattern，319 个 cluster 全部保持 candidate。这与“核心 anchor 必须同时跨至少两故事且长度至少 4”的门槛一致，不需要为得到非零 Pattern 放宽条件。
+
+本轮新增故事的 81 条 `label=NOVEL` 中，58 条没有最终 Function 支持并正确落为 OTHER；18 条被新 Function 支持后 MATCHED；5 条因 Contract 角色不完整而 UNCERTAIN。因而需要区分“无支持 NOVEL 的状态传递”与“后来被 Function 支持但契约失败”，后者不是本轮 label 丢失问题。
+
+`story_type` 已正确进入新增故事的 motif evidence 和 category_counts；剩余 3 条 `uncategorized` 来自固定父 Snapshot 的历史继承记录。用户要求不迁移、不回写正式或父 Snapshot，因此当前不处理这 3 条。Snapshot、SQLite 完整性和 FK 均通过，正式 serving 数据未改变。
+
+## 280. 零 Published Pattern 需要区分假支持修复与上游重复不足（2026-09-10）
+
+用户质疑 60 篇故事最终没有 Published Pattern 是否合理。复查副本发现：324 个 motif 候选的 `story_support` 全部为 1；319 个 cluster 中 315 个只支持 1 个故事，只有 4 个 cluster 的故事并集为 2，但其中的成员 motif 仍分别只来自单个故事，因此没有任何 motif 同时满足 `story_support >= 2` 且 `length >= 4`。这正是本轮 anchor 门槛拦截的目标：cluster 的故事并集不能冒充完整核心链的跨故事支持。
+
+因此零发布不是题材读取或 Snapshot 完整性失败，也不是“每篇文章没有结构”；它表示当前 Function 序列没有形成可复用的跨故事完整 motif。若产品要求 60 篇至少产出一个 Pattern，后续应单独诊断上游 Function 对齐/序列归纳为何没有产生重复 motif，不能直接放宽当前发布门槛或强行 promotion。
+
+## 282. Observer 保留一次提取，移除重复的二次拆分防御（2026-09-10）
+
+用户要求清除过度防御。复查后确认 Observer 主 Prompt 已表达独立事件拆分，后置二次 LLM 拆分复核只是同一职责的额外调用，并带有 4 次重试、上下文限制、角色重校验和失败回退；该路径模型波动且不能作为稳定质量证据。因此删除二次复核及其专用 schema/prompt/test，只保留关系证据和句子范围的必要边界过滤。相关回归 `13 passed`，全仓 `406 passed, 1 skipped`。
+
+## 281. 采用稳定 anchor 回退，明确代表链与精确重复链的边界（2026-09-10）
+
+用户明确选择恢复 `3dc5bb5` 的稳定 anchor 规则，而不是继续要求 anchor motif 自身 `story_support>=2`。最小回退只改变 anchor 选择：长度至少 4 的成员优先，没有时回退全部成员，再按支持数、长度和 motif ID 稳定排序；`CLEAN`、cluster 跨故事支持、长度和 Contract 发布门槛保持不变。Summary 仍不选择 Function，核心链继续绑定 anchor 的稳定 Function ID。
+
+在固定的 180 篇验证 Snapshot 上重建得到 15 个 Published Pattern。15 个 anchor 均只由一个故事直接提供完整 motif，但其 cluster 由 2 或 3 个故事组成且通过 CLEAN 审查；因此结果应描述为“cluster 跨故事支持下的代表链”，不能描述为“同一 anchor 完整链被两个故事精确重复”。这是用户选择的发布语义边界，换取恢复可用 Pattern，同时保留 cluster review、长度和 Contract 门禁。
+
+## 282. 将稳定 anchor 验证 Snapshot 迁移到正式 serving（2026-09-10）
+
+用户明确选择把 `validation_anchor_revert_20260910` 的完整候选 Snapshot 切换到正式 serving，而不是只复制 15 条 Pattern。迁移前先归档正式 Knowledge DB、Registry 和 Ontology Snapshot；随后复制候选完整数据库、40 个 Function Registry 和 4 个相关 Snapshot 文件，并调用已有 `promote_snapshot()` 切换指针。
+
+迁移后正式 serving 为 `bootstrap60_contract_20260910T034604743139Z_a1100a350fcf`，可读取 180 个故事、40 个 Function、2169 条 Occurrence 和 15 个 Published Pattern；Snapshot 校验、SQLite 完整性和 FK 检查通过。默认 KnowledgeBase catalog 读取 15 个 Pattern；Outline 模块导入验证因当前环境缺少 `langgraph.graph` 阻断，属于环境问题，不改变数据库迁移结论。旧正式 serving 数据保存在 `Code/data/formal_archives/20260910T123846_serving_before_anchor_revert/`，可恢复。

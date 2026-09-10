@@ -356,6 +356,20 @@ def _load_jsonl(path: str) -> list[dict]:
         return [json.loads(line) for line in f if line.strip()]
 
 
+def _merge_observation_labels(observations: list[dict], occurrences: list[dict]) -> list[dict]:
+    """将本轮 Matcher/Critic 的最终 label 按稳定 obs_id 合并回 Observation。"""
+    labels = {
+        occurrence["obs_id"]: occurrence["label"]
+        for occurrence in occurrences
+        if occurrence.get("obs_id") and occurrence.get("label")
+    }
+    return [
+        dict(observation, label=labels[observation["obs_id"]])
+        if observation.get("obs_id") in labels else observation
+        for observation in observations
+    ]
+
+
 def _compare_ontologies(baseline: list[dict], final: list[dict]) -> dict:
     """演化前后对比：函数增删改、supporting/confidence 分布。"""
     def identity(function: dict) -> str:
@@ -442,7 +456,7 @@ def evaluator_final_node(state: dict) -> dict:
             json.dump(mr, f, ensure_ascii=False, indent=2)
 
     function_contracts = []
-    observations = bank.get_all()
+    observations = _merge_observation_labels(bank.get_all(), state.get("occurrences", []))
     if final_report.get("verdict") == "PASS":
         inherited_contracts = []
         base_snapshot_id = state.get("base_snapshot_id")
