@@ -519,9 +519,10 @@ def test_prompts_limit_relationship_state_to_function_evidence():
     assert "历史模板的结局参考" in app.SEED_PROMPT
     assert "用户明确的创作要求优先于它" in app.SEED_PROMPT
     assert "可理解但错误的选择" in app.SEED_PROMPT
-    assert "可理解但错误的选择" in app.DYNAMIC_SEED_PROMPT
     assert "叙事尺度不得超过当前 Function 链" in app.SEED_PROMPT
-    assert "只提供环境压力" in app.DYNAMIC_SEED_PROMPT
+    assert "只提供环境压力" in app.SEED_PROMPT
+    assert "用户明确指定的时代、地点、身份、人物关系、关键事件和结局倾向必须保留" in app.DYNAMIC_SEED_PROMPT
+    assert "不能替换、弱化或反转" in app.DYNAMIC_SEED_PROMPT
     assert "本轮 LLM seed" in app.NARRATIVE_PROMPT
     assert "强钩子必须进入核心因果" in app.NARRATIVE_PROMPT
     assert "一次性完整供述" in app.NARRATIVE_PROMPT
@@ -533,6 +534,16 @@ def test_prompts_limit_relationship_state_to_function_evidence():
     assert "允许制度、阵营和利益冲突继续存在" in app.VALIDATE_PROMPT
     assert "必须单独比较 core_conflict 与 ending 的解决尺度" in app.VALIDATE_PROMPT
     assert "overall_ok 必须为 false" in app.VALIDATE_PROMPT
+
+
+def test_outline_graph_seeds_dynamic_before_planning_but_keeps_published_order():
+    edges = {(edge.source, edge.target) for edge in app._build_graph().get_graph().edges}
+    assert ("__start__", "dynamic_seed") in edges
+    assert ("dynamic_seed", "dynamic_planner") in edges
+    assert ("select_pattern", "planner") in edges
+    assert ("planner", "seed") in edges
+    assert ("seed", "mechanism") in edges
+    assert ("seed", "dynamic_planner") not in edges
 
 
 def _semantic_validation_state(ending, *, final_ledger=None, mechanism_steps=None, validation=None):

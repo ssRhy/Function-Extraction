@@ -19,7 +19,13 @@ DYNAMIC_SEED_PROMPT = """你是网文大纲策划。根据题材和用户故事�
   "ending_direction": "可观察解决动作 → 直接冲突结果 → 稳定终态",
   "ending_requirements": ["core_conflict 中每个主线问题在结局必须展示的可观察直接后果"]
 }
-规则：人物数量保持最少但至少足以承接后续 Function 的角色槽位；主人公的 stance_toward_protagonist 填 self，其他人物只能根据核心冲突和初始关系填 support、obstruct、mixed 或 neutral；role 不自动决定立场。关系只写用户要求或核心冲突明确需要的最低事实，不预设信任、爱情、背叛或和解。当核心冲突涉及人物成长或价值选择时，主人公的 goal 或 motivation 应包含一个相关盲点、私心或错误信念，使其可能做出可理解但错误的选择并承担不可逆代价；不能为了制造错误而违背人物动机。core_conflict 只把本轮 Function 链和 ending 能够实际回答的问题写成核心冲突；战争、国家、宗门、家族、制度或世界危机若只提供环境压力，就留在 world_setting，不得包装成待解决主线。用户明确要求集体或系统后果时，ending_direction 必须给出同一尺度的可观察直接后果。ending_requirements 必须逐项覆盖 core_conflict 中被写成主线的问题，每项只写一个正文可观察的结果，不能用主题判断或“问题得到解决”代替。ending_direction 必须按“可观察解决动作 → 直接冲突结果 → 稳定终态”写成明确的单一结局方向，不能只留下新的危险或悬念；稳定终态是核心选择之后形成的新局面，不等于战争、宗门、家族或制度矛盾被一个人彻底消除。"""
+规则：
+1. 人物数量保持最少但至少足以承接后续 Function 的角色槽位；主人公的 stance_toward_protagonist 填 self，其他人物只能根据核心冲突和初始关系填 support、obstruct、mixed 或 neutral；role 不自动决定立场。题材标签和关系类型不能替代用户要求。关系只写用户要求或核心冲突明确需要的最低事实，不预设信任、爱情、背叛或和解。
+2. user_request 是本轮故事的最高内容约束。用户明确指定的时代、地点、身份、人物关系、关键事件和结局倾向必须保留；Seed 只能补全没有指定的内容，不能替换、弱化或反转。不能相守、失去、死亡、失败、分离等负向结局同样属于稳定终态，不得改写成团聚、共同生活、获救、成功或和解。
+3. 当核心冲突涉及人物成长或价值选择时，主人公的 goal 或 motivation 应包含一个相关盲点、私心或错误信念，使其可能做出可理解但错误的选择并承担不可逆代价；不能为了制造错误而违背人物动机。可理解但错误的选择必须来自用户要求和人物动机，不能由结构模板强行制造。
+4. core_conflict 只把用户要求和后续 Function 链能够实际回答的问题写成核心冲突；战争、国家、宗门、家族、制度或世界危机若只提供环境压力，就留在 world_setting，不得包装成待解决主线。用户明确要求集体或系统后果时，ending_direction 必须给出同一尺度的可观察直接后果。
+5. `ending_spec` 只提供历史模板的结局参考，不是本轮必须照搬的硬合同；用户明确的创作要求优先于它。`ending_direction` 必须按“可观察解决动作 → 直接冲突结果 → 稳定终态”写成明确的单一方向。叙事尺度不得超过当前 Function 链；后续 Function 链的叙事尺度也不得超过本 Seed 和 user_request，不能反过来改写它。
+6. ending_requirements 必须逐项覆盖 core_conflict 中被写成主线的问题，每项只写一个正文可观察的直接后果。个人、关系、集体或系统主线不能互相代偿；不得写抽象主题、评价或“问题得到解决”。"""
 
 
 SEED_PROMPT = """你是网文大纲策划。给定一条包含 FunctionContract 的 Function 序列（叙事结构骨架）和可选的历史模板 ending_spec 参考，生成本轮故事种子。人物必须覆盖合同中的角色槽位，核心冲突必须能承接合同中的前置条件和状态效果。只输出 JSON，字段名严格如下：
@@ -39,7 +45,6 @@ SEED_PROMPT = """你是网文大纲策划。给定一条包含 FunctionContract 
 5. 当核心冲突涉及人物成长或价值选择时，主人公的 goal 或 motivation 应包含一个相关盲点、私心或错误信念，使其可能做出可理解但错误的选择并承担不可逆代价；不能为了制造错误而违背人物动机。稳定终态是核心选择之后形成的新局面，不等于战争、宗门、家族或制度矛盾被一个人的认错、退让或牺牲彻底消除。
 6. core_conflict 的叙事尺度不得超过当前 Function 链和独立 ending 能承接的范围。战争、国家、宗门、家族、制度或世界危机若只提供环境压力，写入 world_setting 而不是待解决的核心冲突；若用户明确要求这些层面的后果，ending_direction 必须分别写出同一尺度的可观察直接后果，不能只以揭露个人反派、洗清主角冤屈、恢复身份或安排人物离开代替。
 7. ending_requirements 必须逐项覆盖 core_conflict 中被写成主线的问题，每项只写一个正文可观察的直接后果。个人、关系、集体或系统主线不能互相代偿；不得写抽象主题、评价或“问题得到解决”。"""
-
 
 MECH_PROMPT = """你是叙事结构机制规划者。给定 Function 序列（含唯一 segment_index、FunctionContract、角色槽位、状态前置条件、状态效果、occurrence_index/occurrence_total）和故事种子人物，为每个 Function 生成最小结构方案。此阶段不设计题材化表面形式、伏笔、反应场景或连接事件。role_bindings 必须覆盖该 FunctionContract 的全部角色槽位。只输出 JSON，字段名严格如下：
 {"steps": [{"segment_index": 1, "function_name": "函数名", "role_bindings": {"角色槽位": "人物ID"}, "who_does_what": "谁对谁做什么", "why": "为何发生", "state_change": "Function造成的总体结构变化", "character_state_changes": {"P1": "变化前状态 → 可观察的触发证据或代价 → 变化后状态"}, "relationship_changes": [{"source_id":"P1","target_id":"P2","dimension":"信任","before":"...","after":"...","evidence":"本步可观察的证据或代价"}], "connects_to_next": "怎么连接下一步"}]}

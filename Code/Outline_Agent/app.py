@@ -1,6 +1,6 @@
 """Outline Agent - 按题材生成单轮短篇大纲。
 
-图流程：published 走 Pattern 选择；dynamic 走 dynamic_seed → dynamic_planner；两者随后共用
+图流程：published 走 Pattern 选择 → Seed，dynamic 走 Seed → Dynamic Planner；两者随后共用
 mechanism → scaffold → realize → validate → export → END。
 读取知识库与派生索引，完整大纲写入知识库并导出 JSON/Markdown。
 
@@ -550,6 +550,8 @@ def select_pattern_node(state):
 
 
 def dynamic_seed_node(state):
+    if state.get("seed"):
+        return {"seed": state["seed"]}
     user = {
         "genre": state["genre"],
         "user_request": state.get("user_request"),
@@ -559,6 +561,7 @@ def dynamic_seed_node(state):
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
     ], StorySeed).model_dump()
     return {"seed": seed}
+
 
 def planner_node(state):
     snapshot_id = resolve_snapshot_id(state.get("snapshot_id"), state["knowledge_db"])
@@ -946,24 +949,14 @@ def _build_graph():
     graph.add_node("export", export_node)
     graph.add_conditional_edges(
         START,
-        lambda state: (
-            "dynamic_planned"
-            if state.get("planner_mode") == "dynamic" and state.get("dynamic_candidate")
-            else "dynamic"
-            if state.get("planner_mode") == "dynamic"
-            else "published"
-        ),
-        {
-            "published": "select_pattern",
-            "dynamic": "dynamic_seed",
-            "dynamic_planned": "dynamic_planner",
-        },
+        lambda state: "dynamic" if state.get("planner_mode") == "dynamic" else "published",
+        {"published": "select_pattern", "dynamic": "dynamic_seed"},
     )
     graph.add_edge("select_pattern", "planner")
     graph.add_edge("planner", "seed")
     graph.add_edge("dynamic_seed", "dynamic_planner")
-    graph.add_edge("dynamic_planner", "mechanism")
     graph.add_edge("seed", "mechanism")
+    graph.add_edge("dynamic_planner", "mechanism")
     graph.add_edge("mechanism", "scaffold")
     graph.add_edge("scaffold", "realize")
     graph.add_edge("realize", "validate")
