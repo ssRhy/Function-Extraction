@@ -397,6 +397,23 @@ def test_rule_check_requires_pattern_ending():
     assert app.rule_check(chain, valid, ending_spec) == []
 
 
+def test_rule_check_rejects_ending_repeating_function_action():
+    chain = [{"function_name": "A"}]
+    outline = {
+        "segments": [{
+            "function_name": "A",
+            "beats": ["P1主动约P2到甲板并明确拒绝继续发展"],
+        }],
+        "ending": {
+            "resolution_actions": ["P1主动约P2到甲板并明确拒绝继续发展"],
+            "conflict_resolution": "关系进入稳定收束",
+            "final_state": "两人各自返回生活",
+        },
+    }
+    issues = app.rule_check(chain, outline)
+    assert any("同一事件只能由一个结构段负责" in issue for issue in issues)
+
+
 def test_narrative_payoff_must_point_forward_or_ending():
     chain = [
         {"segment_index": 1, "function_name": "A"},
@@ -429,6 +446,29 @@ def test_narrative_step_drops_incomplete_setup_payoffs():
     assert [item.content for item in step.setup_payoffs] == ["有效线索"]
 
 
+def _literary_design(function_names):
+    return state.LiteraryDesign(
+        global_design=state.GlobalLiteraryDesign(
+            narrative_strategy="第三人称限知",
+            tone="克制",
+            prose_texture="细腻",
+            character_expression="通过行动表现",
+            active_world_forces=["环境限制"],
+            sensory_strategy=["触感"],
+            expression_boundaries=["不直接总结情绪"],
+        ),
+        steps=[state.LiteraryStep(
+            segment_index=index,
+            function_name=name,
+            behavioral_expression="通过既定行动表现变化",
+            world_pressure="环境改变行动条件",
+            sensory_anchor="冷硬的触感",
+            delivery_mode="DEVELOP",
+            exit_effect="留下未完成的动作",
+        ) for index, name in enumerate(function_names, 1)],
+    )
+
+
 def test_scaffold_retries_invalid_payoff_once(monkeypatch):
     chain = [
         {"segment_index": 1, "function_name": "A", "definition": "", "preconditions": [],
@@ -451,10 +491,17 @@ def test_scaffold_retries_invalid_payoff_once(monkeypatch):
             ),
             state.NarrativeStep(segment_index=2, function_name="B", genre_realization="b"),
         ]),
+        _literary_design(("A", "B")),
     ])
+    calls = []
 
-    def fake_chat(_messages, output_schema, **_kwargs):
-        assert output_schema is app.NarrativePlan
+    def fake_chat(messages, output_schema, **_kwargs):
+        payload = next(
+            json.loads(message["content"])
+            for message in reversed(messages)
+            if message["content"].lstrip().startswith("{")
+        )
+        calls.append((output_schema, payload))
         return next(responses)
 
     monkeypatch.setattr(app, "chat_structured", fake_chat)
@@ -462,9 +509,43 @@ def test_scaffold_retries_invalid_payoff_once(monkeypatch):
         "snapshot_id": "snapshot_x", "knowledge_db": "knowledge.db",
         "chain": chain,
         "seed": {"ending_requirements": ["展示直接结果"]},
-        "mechanism": {}, "ending_spec": None,
+        "mechanism": {}, "ending_spec": None, "user_request": "保留原始要求",
     })
     assert result["narrative"]["steps"][0]["setup_payoffs"][0]["payoff_segment_index"] == 2
+    assert [schema for schema, _payload in calls] == [
+        app.NarrativePlan, app.NarrativePlan, app.LiteraryDesign,
+    ]
+    assert "narrative_plan" not in calls[0][1]
+    assert calls[2][1]["narrative_plan"] == result["narrative"]
+
+
+def test_scaffold_does_not_call_literary_design_after_narrative_failure(monkeypatch):
+    chain = [{
+        "segment_index": 1, "function_name": "A", "definition": "", "preconditions": [],
+        "role_slots": [], "contract": {}, "occurrence_index": 1, "occurrence_total": 1,
+    }]
+    invalid = app.NarrativePlan(steps=[state.NarrativeStep(
+        segment_index=1,
+        function_name="A",
+        genre_realization="a",
+        setup_payoffs=[state.SetupPayoff(content="线索", payoff_segment_index=1, payoff="兑现")],
+    )])
+    schemas = []
+
+    def fake_chat(_messages, output_schema, **_kwargs):
+        schemas.append(output_schema)
+        return invalid
+
+    monkeypatch.setattr(app, "chat_structured", fake_chat)
+    with pytest.raises(ValueError, match="叙事展开方案不合法"):
+        app.scaffold_node({
+            "chain": chain,
+            "seed": {"ending_requirements": ["展示直接结果"]},
+            "mechanism": {},
+            "ending_spec": None,
+            "user_request": "保留原始要求",
+        })
+    assert schemas == [app.NarrativePlan, app.NarrativePlan]
 
 
 def test_validate_distinguishes_seed_ending_target_from_generated_ending(monkeypatch):
@@ -513,6 +594,12 @@ def test_validate_distinguishes_seed_ending_target_from_generated_ending(monkeyp
 
 
 def test_prompts_limit_relationship_state_to_function_evidence():
+    assert not hasattr(app, "INTERPRET_REQUEST_PROMPT")
+    assert not hasattr(app, "CreativeBrief")
+    assert "creative_brief" not in app.DYNAMIC_SEED_PROMPT
+    assert "creative_brief" not in app.SEED_PROMPT
+    assert "creative_brief" not in app.NARRATIVE_PROMPT
+    assert "creative_brief" not in app.VALIDATE_PROMPT
     assert "题材标签" in app.SEED_PROMPT
     assert "关系类型" in app.SEED_PROMPT
     assert "可观察解决动作 → 直接冲突结果 → 稳定终态" in app.SEED_PROMPT
@@ -527,6 +614,8 @@ def test_prompts_limit_relationship_state_to_function_evidence():
     assert "强钩子必须进入核心因果" in app.NARRATIVE_PROMPT
     assert "一次性完整供述" in app.NARRATIVE_PROMPT
     assert "保持冲突尺度一致" in app.NARRATIVE_PROMPT
+    assert "对立或互补的行为方式" in app.NARRATIVE_PROMPT
+    assert "动作或物件作为记忆锚点" in app.NARRATIVE_PROMPT
     assert "不由 Pattern 的 `ending_spec` 直接提供" in app.VALIDATE_PROMPT
     assert "状态上界" in app.REALIZE_PROMPT
     assert "可以保留制度阻力" in app.REALIZE_PROMPT
@@ -536,9 +625,54 @@ def test_prompts_limit_relationship_state_to_function_evidence():
     assert "overall_ok 必须为 false" in app.VALIDATE_PROMPT
 
 
-def test_outline_graph_seeds_dynamic_before_planning_but_keeps_published_order():
+def test_literary_design_prompt_and_schema_are_independent_from_narrative_plan():
+    assert "文学性设计不负责创造新的核心结构" in app.LITERARY_DESIGN_PROMPT
+    assert "全局文学设计" in app.LITERARY_DESIGN_PROMPT
+    assert "逐结构段文学实现" in app.LITERARY_DESIGN_PROMPT
+    assert "已经完成并校验通过的 NarrativePlan" in app.LITERARY_DESIGN_PROMPT
+    assert "组合输出协议" not in app.NARRATIVE_PROMPT
+    assert "组合输出协议" not in app.LITERARY_DESIGN_PROMPT
+    assert "steps" in app.NARRATIVE_PROMPT
+    assert "global_design" in app.LITERARY_DESIGN_PROMPT
+    assert not hasattr(app, "ScaffoldDesignResponse")
+    assert not hasattr(state, "ScaffoldDesignResponse")
+    assert state.LiteraryDesign.model_fields["global_design"]
+    assert state.LiteraryDesign.model_fields["steps"]
+    assert state.NarrativePlan.model_fields.get("literary_design") is None
+
+
+def test_dynamic_seed_receives_raw_user_request_without_brief(monkeypatch):
+    seen = {}
+
+    def fake_chat(messages, output_schema, **_kwargs):
+        assert output_schema is app.StorySeed
+        seen.update(json.loads(messages[-1]["content"]))
+        return app.StorySeed(
+            genre="现代情感", world_setting="w", characters=[{
+                "id": "P1", "label": "主角", "role": "hero", "goal": "g",
+                "motivation": "m", "relationships": {}, "stance_toward_protagonist": "self",
+            }], core_conflict="c", ending_direction="e",
+            ending_requirements=["完成c的可观察结果"],
+        )
+
+    monkeypatch.setattr(app, "chat_structured", fake_chat)
+    app.dynamic_seed_node({
+        "genre": "03_现代情感",
+        "user_request": "保留这句原始创作要求",
+    })
+    assert seen == {
+        "genre": "03_现代情感",
+        "user_request": "保留这句原始创作要求",
+    }
+
+
+def test_outline_graph_starts_with_mode_specific_seed_or_pattern_path():
     edges = {(edge.source, edge.target) for edge in app._build_graph().get_graph().edges}
     assert ("__start__", "dynamic_seed") in edges
+    assert ("__start__", "select_pattern") in edges
+    assert ("__start__", "interpret_request") not in edges
+    assert ("interpret_request", "dynamic_seed") not in edges
+    assert ("interpret_request", "select_pattern") not in edges
     assert ("dynamic_seed", "dynamic_planner") in edges
     assert ("select_pattern", "planner") in edges
     assert ("planner", "seed") in edges
@@ -719,6 +853,8 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
         if output_schema is app.NarrativePlan:
             payload = json.loads(messages[-1]["content"])
             assert payload["reference_motifs"] == []
+            assert payload["user_request"] is None
+            assert "narrative_plan" not in payload
             return app.NarrativePlan(steps=[
                 state.NarrativeStep(
                     segment_index=index,
@@ -731,6 +867,13 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
                 )
                 for index, name in reversed(list(enumerate(functions, 1)))
             ])
+        if output_schema is app.LiteraryDesign:
+            payload = json.loads(messages[-1]["content"])
+            assert payload["reference_motifs"] == []
+            assert payload["user_request"] is None
+            assert payload["narrative_plan"]["steps"][0]["genre_realization"] == "题材化-1"
+            assert "literary_design" not in payload
+            return _literary_design(functions)
         if output_schema is app.OutlineRealization:
             payload = json.loads(messages[-1]["content"])
             assert payload["narrative_plan"]["steps"][0]["genre_realization"] == "题材化-1"
@@ -779,12 +922,13 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
         "genre": "01_悬疑惊悚", "out_dir": str(tmp_path),
         "pattern_request": None, "user_request": None, "pattern_id": None,
         "pattern_name": "", "chain": [], "seed": None, "mechanism": None,
-        "narrative": None, "outline": None, "validation": None,
+        "narrative": None, "literary_design": None, "outline": None, "validation": None,
         "outline_id": "", "result_path": "",
     })
     assert [step["function_name"] for step in result["chain"]] == list(functions)
     assert [step["function_name"] for step in result["mechanism"]["steps"]] == list(functions)
     assert [step["function_name"] for step in result["narrative"]["steps"]] == list(functions)
+    assert [step["function_name"] for step in result["literary_design"]["steps"]] == list(functions)
     assert [segment["function_name"] for segment in result["outline"]["segments"]] == list(functions)
     assert result["ending_spec"] == ending_spec
     assert result["outline"]["ending"]["final_state"] == "主角恢复稳定"
@@ -793,5 +937,6 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
     exported = json.loads(open(result["result_path"], encoding="utf-8").read())
     assert exported["outline_id"] == "OUT_TEST"
     assert exported["narrative_plan"]["steps"][0]["genre_realization"] == "题材化-1"
+    assert exported["literary_design"]["global_design"]["tone"] == "克制"
     assert os.path.exists(result["result_path"])
     assert os.path.exists(result["result_path"].replace(".json", ".md"))

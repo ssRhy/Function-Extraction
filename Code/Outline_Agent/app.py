@@ -15,6 +15,7 @@ import re
 import sys
 import time
 from collections import Counter, defaultdict
+from difflib import SequenceMatcher
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _VENDOR = os.path.join(_ROOT, "vendor")
@@ -34,6 +35,7 @@ from Outline_Agent.state import (
     StorySeed,
     MechanismPlan,
     NarrativePlan,
+    LiteraryDesign,
     OutlineRealization,
     OutlineValidation,
     PatternSelection,
@@ -46,6 +48,9 @@ from Outline_Agent.Prompt.Outline_prompt import (
     REALIZE_PROMPT,
     SEED_PROMPT,
     VALIDATE_PROMPT,
+)
+from Outline_Agent.Prompt.Literary_prompt import (
+    LITERARY_DESIGN_PROMPT,
 )
 from Outline_Agent.dynamic_planner import build_dynamic_references, plan_dynamic_outline
 
@@ -373,6 +378,45 @@ def _align(chain, items):
     return aligned
 
 
+def _event_text_units(value):
+    return [
+        re.sub(r"[\W_]+", "", unit)
+        for unit in re.split(r"[。！？；：:,，\n]", str(value or ""))
+        if len(re.sub(r"[\W_]+", "", unit)) >= 6
+    ]
+
+
+def _event_similarity(left, right):
+    left_units = _event_text_units(left)
+    right_units = _event_text_units(right)
+    if not left_units or not right_units:
+        return 0.0
+    return max(
+        1.0 if left_unit in right_unit or right_unit in left_unit
+        else SequenceMatcher(None, left_unit, right_unit).ratio()
+        for left_unit in left_units
+        for right_unit in right_units
+    )
+
+
+def _ending_overlap_issues(outline):
+    segments = (outline or {}).get("segments") or []
+    actions = ((outline or {}).get("ending") or {}).get("resolution_actions") or []
+    issues = []
+    for action_index, action in enumerate(actions, 1):
+        for segment_index, segment in enumerate(segments, 1):
+            if any(
+                _event_similarity(action, beat) >= 0.85
+                for beat in segment.get("beats") or []
+            ):
+                issues.append(
+                    f"ending 第{action_index}个解决动作重复了第{segment_index}段 Function 的核心行动；"
+                    "同一事件只能由一个结构段负责"
+                )
+                break
+    return issues
+
+
 def rule_check(chain, outline, ending_spec=None):
     issues = []
     actual = [segment["function_name"] for segment in outline["segments"]]
@@ -392,6 +436,7 @@ def rule_check(chain, outline, ending_spec=None):
         for field in ("resolution_actions", "conflict_resolution", "final_state"):
             if not ending.get(field):
                 issues.append(f"结局收束缺少 {field}")
+    issues.extend(_ending_overlap_issues(outline))
     return issues
 
 
@@ -693,7 +738,8 @@ def mechanism_node(state):
 
 
 def scaffold_node(state):
-    user = {
+    common_user = {
+        "user_request": state.get("user_request"),
         "chain": _compact_chain(state["chain"]),
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
@@ -701,26 +747,37 @@ def scaffold_node(state):
         "ending_budget": build_ending_budget(state),
         "reference_motifs": (state.get("planner_references") or {}).get("motifs", []),
     }
-    messages = [
+    narrative_messages = [
         {"role": "system", "content": NARRATIVE_PROMPT},
-        {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
+        {"role": "user", "content": json.dumps(common_user, ensure_ascii=False)},
     ]
     for attempt in range(2):
-        data = chat_structured(messages, NarrativePlan).model_dump()
-        data["steps"] = _align(state["chain"], data["steps"])
-        issues = narrative_plan_issues(state["chain"], data)
+        narrative = chat_structured(narrative_messages, NarrativePlan).model_dump()
+        narrative["steps"] = _align(state["chain"], narrative["steps"])
+        issues = narrative_plan_issues(state["chain"], narrative)
         if not issues:
-            return {"narrative": data}
+            break
         if attempt == 0:
-            messages = messages + [{
+            narrative_messages = narrative_messages + [{
                 "role": "user",
                 "content": (
                     "叙事展开方案存在确定性错误：" + "；".join(issues)
                     + "。请只修正 payoff_segment_index：只能填当前链中后续段的整数，"
-                    "最后一段只能填 null；保持其他内容不变，并重新输出完整 JSON。"
+                    "最后一段只能填 null，并重新输出完整 NarrativePlan JSON。"
                 ),
             }]
-    raise ValueError("叙事展开方案不合法: " + "；".join(issues))
+        else:
+            raise ValueError("叙事展开方案不合法: " + "；".join(issues))
+
+    literary_user = dict(common_user)
+    literary_user["narrative_plan"] = narrative
+    literary_messages = [
+        {"role": "system", "content": LITERARY_DESIGN_PROMPT},
+        {"role": "user", "content": json.dumps(literary_user, ensure_ascii=False)},
+    ]
+    literary_design = chat_structured(literary_messages, LiteraryDesign).model_dump()
+    literary_design["steps"] = _align(state["chain"], literary_design["steps"])
+    return {"narrative": narrative, "literary_design": literary_design}
 
 
 def realize_node(state):
@@ -731,6 +788,7 @@ def realize_node(state):
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
         "narrative_plan": state["narrative"],
+        "literary_design": state.get("literary_design"),
         "contract_ledger": state.get("contract_ledger"),
     }
     messages = [
@@ -767,10 +825,12 @@ def validate_node(state):
         ],
         "ending_target": build_ending_target(state["seed"]),
         "ending_budget": build_ending_budget(state),
+        "user_request": state.get("user_request"),
         "generated_ending": (state.get("outline") or {}).get("ending"),
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
         "narrative_plan": state["narrative"],
+        "literary_design": state.get("literary_design"),
         "outline": state["outline"],
         "contract_ledger": validation_ledger,
     }
@@ -802,6 +862,9 @@ def _render_markdown(result):
         f"# 大纲：{result['pattern_name']}（{result['genre']}）",
         "",
         f"核心链：{' → '.join(result['chain'])}",
+        "",
+        "## 用户创作要求",
+        f"{result.get('user_request') or '无'}",
         "",
         "## 故事种子",
         f"- 世界观：{result['seed']['world_setting']}",
@@ -841,6 +904,38 @@ def _render_markdown(result):
     if not relation_changes:
         lines.append("- 无有证据支持的关系变化")
     lines.append("")
+    literary = result.get("literary_design") or {}
+    global_design = literary.get("global_design") or {}
+    if global_design:
+        lines.extend([
+            "## 文学性设计",
+            f"- 叙述方式：{global_design.get('narrative_strategy', '')}",
+            f"- 整体气质：{global_design.get('tone', '')}",
+            f"- 语言质地：{global_design.get('prose_texture', '')}",
+            f"- 人物表达：{global_design.get('character_expression', '')}",
+            f"- 世界作用力：{'；'.join(global_design.get('active_world_forces') or []) or '无'}",
+            f"- 感官策略：{'；'.join(global_design.get('sensory_strategy') or []) or '无'}",
+        ])
+        motif = global_design.get("motif_plan")
+        if motif:
+            lines.append(
+                f"- 核心意象：{motif.get('motif', '')}（{motif.get('initial_meaning', '')} → "
+                f"{motif.get('transformation', '')} → {motif.get('final_payoff', '')}）"
+            )
+        lines.append(
+            f"- 表达边界：{'；'.join(global_design.get('expression_boundaries') or []) or '无'}"
+        )
+        lines.append("")
+        for step in literary.get("steps") or []:
+            lines.append(
+                f"- 第{step.get('segment_index')}段文学实现："
+                f"行为={step.get('behavioral_expression', '')}；"
+                f"世界压力={step.get('world_pressure', '')}；"
+                f"感官={step.get('sensory_anchor', '')}；"
+                f"节奏={step.get('delivery_mode', '')}；"
+                f"段末={step.get('exit_effect', '')}"
+            )
+        lines.append("")
     lines.append("## 分段大纲")
     for index, segment in enumerate(result["outline"]["segments"], 1):
         lines.append(f"### {index}. {segment['function_name']}")
@@ -903,6 +998,7 @@ def export_node(state):
         "seed": state["seed"],
         "mechanism_plan": state["mechanism"],
         "narrative_plan": state["narrative"],
+        "literary_design": state.get("literary_design"),
         "contract_ledger": state.get("contract_ledger"),
         "planner_references": state.get("planner_references"),
         "dynamic_candidate": state.get("dynamic_candidate"),
@@ -1018,6 +1114,7 @@ def main():
         "seed": None,
         "mechanism": None,
         "narrative": None,
+        "literary_design": None,
         "contract_ledger": None,
         "outline": None,
         "validation": None,

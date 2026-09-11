@@ -21,8 +21,8 @@ def test_build_command_maps_three_operations_without_shell(tmp_path):
         sys.executable, "-u", "-X", "utf8", "-m", "StoryCLI",
         "bootstrap", "--input", str(input_path), "--reset-formal",
     ]
-    assert app.build_command("evolve", input_path)[-3:] == [
-        "--input", str(input_path), "--promote",
+    assert app.build_command("evolve", input_path)[-2:] == [
+        "--input", str(input_path),
     ]
     assert app.build_command(
         "story", "古风仙侠：写一个完整故事", genre="02_古风仙侠",

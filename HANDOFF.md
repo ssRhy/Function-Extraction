@@ -2270,3 +2270,48 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - `StoryUI.router` 的 LLM schema 现在只有 `genre`；操作类型直接取 UI 已选择的 `mode`。Bootstrap/Evolve 不再为回显操作额外调用 LLM，Story 入口仍先识别题材再执行 CLI。
 - 题材别名归一化仍在 StoryUI 命令边界完成，Dynamic Seed 收到的请求只保留一个规范前缀和原始创作要求。
 - StoryUI + StoryCLI 聚焦回归 `31 passed`；全仓回归待本次代码变更完成后复跑。
+
+### 本轮补充（2026-09-11）：公开 Evolve 默认 serving
+
+- `Code/StoryCLI/app.py` 现在把 Evolve 的 `promote_snapshot()` 放进 Function → Pattern 成功路径；公开 `StoryCLI evolve` 不再需要 `--promote`，成功后 `function_run.json` 记录新的 `serving_snapshot_id` 并输出 serving 指针。
+- `Code/StoryUI/app.py`、公开 README 和 Evolve skill 同步移除手动 promote 说明。`promote_snapshot()` 原有的 Pattern 成功、Published Pattern 和 Snapshot 校验门禁不变；失败仍保留原 serving。
+- `FunctionCoordinator_Agent` 和 `release_pipeline.py` 保持 candidate/最终回归门禁语义，避免隔离发布流程在 Outline/Story 检查前提前切换 serving。
+
+### 本轮补充（2026-09-11）：Story skill 先询问规划方式
+
+- `/Users/hy/.codex/skills/function-extraction-story/SKILL.md` 和仓库内对应副本现在要求：用户未指定时，Story 启动前先询问 Pattern 或 Dynamic，并分别解释为“已发布结构、稳定可控”和“用户要求先成 Seed、动态组合 Function、灵活性更高”。
+- 用户选择后才调用 `StoryCLI story generate --planner-mode published|dynamic`；后续 Outline/Story 保持自动执行，不新增项目生成逻辑。
+
+### 本轮补充（2026-09-11）：Outline 共享创作要求解析与审计传递
+
+- `Code/Outline_Agent/app.py` 新增共享 `interpret_request` 节点，图实际数据流为 `START → interpret_request → (dynamic_seed | select_pattern)`；节点只做一次结构化 `CreativeBrief` 解析，不选择题材、模式、Pattern、Function 或命令。无原始创作要求时不额外调用 LLM。
+- `CreativeBrief` 按 `explicit`/`inferred` 分组记录 `core_focus`、`must_develop`、`ending_obligations`、`forbidden_drift`；原始 `user_request` 始终独立保留并同时传给 Dynamic Seed、Published Pattern 选择、Published Seed 和校验链。Outline JSON/Markdown、Story 来源文档和 Pipeline manifest 均保留 brief 以便审计。
+- Story/Outline Validator Prompt 现在检查显式核心焦点是否成为主线、必须发展的内容是否展开、结尾义务是否以可观察行动及直接后果兑现；inferred 只能补全空白，不能覆盖原文。没有运行真实 LLM 文学质量验证，不能据此宣称用户请求保真或正文质量已证明。
+- 聚焦回归 `73 passed`，全仓回归 `425 passed, 1 skipped`；`compileall` 与 `git diff --check` 通过。未启动真实 LLM，未写正式 SQLite；其他工作区脏改动未纳入本次行为变更。
+
+### 本轮补充（2026-09-11）：移除 CreativeBrief 中间层，技巧回归既有 Prompt
+
+- 删除 Outline 开头的 `interpret_request` 节点、`CreativeBrief` schema、状态字段和全链路透传；Pipeline manifest、Outline 导出和 Story 来源文档不再生成或保存 `creative_brief`。
+- Outline 图恢复为模式分叉直连：Dynamic 为 `START → dynamic_seed → dynamic_planner`，Published 为 `START → select_pattern → planner → seed`；两条路径都保留原始 `user_request`，Dynamic 仍先由用户要求生成 Seed。
+- 动态 Planner 不再接收 `creative_brief`；NarrativePlan 和 Story Prompt 保留动作化情绪、人物反差、记忆锚点、证据递进和避免机械重复等写作技巧，但不把它们变成新的 Function、关系阶段或结局义务。
+- CreativeBrief 专属测试已删除，新增/调整测试验证中间层不存在、原始请求仍在 Seed/Story 边界保留，且 Pipeline manifest 不再输出该字段。全仓回归 `423 passed, 1 skipped`；未启动真实 LLM，未写正式 SQLite。
+
+## 298. 文学性设计作为独立对象接入 NarrativePlan 执行链（2026-09-11）
+
+- 按用户确认的最小方案，新增 `Outline_Agent` 的独立 `LiteraryDesign` Schema 和 `Prompt/Literary_prompt.py`。它分为全局文学设计与逐结构段文学实现，规定叙述方式、整体气质、语言质地、人物表达、世界作用力、感官策略、核心意象、表达边界、可观察行为、潜台词、感官落点和节奏，不重新创造 Function 结构。
+- 现有 `scaffold_node` 暂不拆成新节点或新 LLM 调用；一次结构化响应同时返回平级的 `narrative_plan` 与 `literary_design`。两者按相同 `segment_index` 对齐，文学设计不能改写 MechanismPlan 的行动主体、状态结果、关系上界或结局目标。
+- 文学设计随 Outline JSON/Markdown 独立导出，并由 Outline 的 `realize`/校验和 Story 的场景计划、场景开发、正文及 Validator 接收。正文 Prompt 将其作为表达指导；文学质量不进入机械 `overall_ok` 门禁。
+- 为兼容历史 Outline，`SourceOutlineDocument.literary_design` 暂时可缺省；新生成的 Outline 必须由 `ScaffoldDesignResponse` 生成该对象。当前未启动真实 LLM 或修改正式 SQLite；Outline/Contract/Dynamic 聚焦回归 `57 passed`，Story/Pipeline/CLI 聚焦回归 `40 passed`，全仓回归 `425 passed, 1 skipped`。
+
+## 299. Function 与 ending 的事件所有权边界（2026-09-11）
+
+- 针对真实产物中“最后 Function 已完成拒绝/下船，独立 ending 又完整重复”的问题，Outline `rule_check` 增加明显解决动作重叠检查；同一核心行动只能由一个 Function 段或 ending 实际完成。
+- `REALIZE_PROMPT`、`VALIDATE_PROMPT`、Story 场景计划/正文/Validator Prompt 统一改为：ending_target 的目标动作在 Function 或 ending 中完成一次即可；若 Function 已完成，ending 只写直接后果、余波或其他尚未完成的收束动作。
+- Story `_scene_plan_issues` 对 Function 场景与 ending 场景的明显 beats 重复再次拦截，避免历史或外部输入绕过 Outline 校验进入正文；只做标准库文本相似度的明显重复检测，不新增 LLM 调用或质量评分层。
+- 聚焦 Outline/Story 回归 `60 passed`；使用真实产物 `OUT_5cc4b730a7659f52_story_20260911T140607.json` 离线检查，分别识别出 1 个 Outline 重复动作和 2 个 ScenePlan 重复场景。全仓测试当前环境收集阶段受 `chromadb` 缺失及 `transformers/torch` 的 `NameError: nn` 阻断；未启动真实 LLM，未修改正式 SQLite。
+
+## 300. NarrativePlan 先于 LiteraryDesign 顺序生成（2026-09-11）
+
+- `Code/Outline_Agent/app.py` 保留原有 `scaffold_node`，但将一次 `ScaffoldDesignResponse` 联合调用改为两次顺序调用：先用独立 `NarrativePlan` 生成并校验叙事展开，再把完整结果传给独立 `LiteraryDesign` 生成。叙事校验失败时不会调用文学设计；两者仍分别写入状态并由下游同时读取。
+- `Code/Outline_Agent/Prompt/Outline_prompt.py` 与 `Prompt/Literary_prompt.py` 各自拥有独立输出协议；删除 `ScaffoldDesignResponse` 和 `SCAFFOLD_OUTPUT_PROMPT`，文学 Prompt 明确读取已经完成并校验通过的 NarrativePlan。没有新增 LangGraph 节点、Agent、数据库字段、Best-of-N 或正文后置润色层。
+- Outline 测试新增调用顺序、NarrativePlan 失败短路和 LiteraryDesign 输入完整 NarrativePlan 的断言，并迁移 Dynamic/Contract 图测试。Outline/Story 回归 `61 passed`，Dynamic/Contract 回归 `20 passed`；`compileall` 与 `git diff --check` 通过。全仓测试仍在收集阶段受环境中的 `chromadb` 缺失及 `transformers/torch` 的 `NameError: nn` 阻断；未启动真实 LLM，未修改正式 SQLite。

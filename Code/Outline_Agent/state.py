@@ -25,6 +25,7 @@ class OutlineState(TypedDict):
     seed: dict | None
     mechanism: dict | None
     narrative: dict | None
+    literary_design: dict | None
     contract_ledger: dict | None
     outline: dict | None
     validation: dict | None
@@ -129,6 +130,41 @@ class NarrativeStep(BaseModel):
 
 class NarrativePlan(BaseModel):
     steps: list[NarrativeStep]
+
+
+class MotifPlan(BaseModel):
+    motif: str = Field(min_length=1)
+    initial_meaning: str = Field(min_length=1)
+    transformation: str = Field(min_length=1)
+    final_payoff: str = Field(min_length=1)
+
+
+class GlobalLiteraryDesign(BaseModel):
+    narrative_strategy: str = Field(min_length=1)
+    tone: str = Field(min_length=1)
+    prose_texture: str = Field(min_length=1)
+    character_expression: str = Field(min_length=1)
+    active_world_forces: list[str] = Field(default_factory=list, max_length=6)
+    sensory_strategy: list[str] = Field(default_factory=list, max_length=6)
+    motif_plan: MotifPlan | None = None
+    expression_boundaries: list[str] = Field(default_factory=list, max_length=8)
+
+
+class LiteraryStep(BaseModel):
+    segment_index: int = Field(ge=1)
+    function_name: str = Field(min_length=1)
+    behavioral_expression: str = Field(min_length=1)
+    world_pressure: str = Field(min_length=1)
+    dialogue_subtext: str = ""
+    sensory_anchor: str = Field(min_length=1)
+    motif_state: str = ""
+    delivery_mode: Literal["DRAMATIZE", "DEVELOP", "COMPRESS"]
+    exit_effect: str = Field(min_length=1)
+
+
+class LiteraryDesign(BaseModel):
+    global_design: GlobalLiteraryDesign
+    steps: list[LiteraryStep]
 
 
 class OutlineSegment(BaseModel):

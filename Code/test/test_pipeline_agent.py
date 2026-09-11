@@ -65,6 +65,7 @@ def test_pipeline_connects_outline_story_and_export(tmp_path, monkeypatch):
     manifest = json.loads((tmp_path / "run" / "pipeline_manifest.json").read_text(encoding="utf-8"))
     assert manifest["pattern_name"] == "P"
     assert manifest["user_request"] == "女主必须在暴雨夜揭开真相"
+    assert "creative_brief" not in manifest
     assert manifest["planner_mode"] == "dynamic"
     assert manifest["outline_id"] == "OUT_TEST"
     assert manifest["story_markdown"] == os.path.abspath(story_path.with_suffix(".md"))

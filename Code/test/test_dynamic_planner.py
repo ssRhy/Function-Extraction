@@ -9,6 +9,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import Outline_Agent.app as outline
 import Outline_Agent.dynamic_planner as dynamic
+import Outline_Agent.state as outline_state
 from KnowledgeBase import StoryKnowledgeStore
 
 
@@ -56,6 +57,21 @@ def _seed():
     return {"characters": [{"id": "P1"}], "core_conflict": "c"}
 
 
+def _literary_design(function_names):
+    return outline_state.LiteraryDesign(
+        global_design=outline_state.GlobalLiteraryDesign(
+            narrative_strategy="第三人称限知", tone="克制", prose_texture="细腻",
+            character_expression="通过行动表现", active_world_forces=["环境限制"],
+            sensory_strategy=["触感"], expression_boundaries=["不直说"],
+        ),
+        steps=[outline_state.LiteraryStep(
+            segment_index=index, function_name=name,
+            behavioral_expression="通过既定行动表现", world_pressure="环境改变条件",
+            sensory_anchor="冷硬触感", delivery_mode="DEVELOP", exit_effect="留下停顿",
+        ) for index, name in enumerate(function_names, 1)],
+    )
+
+
 def test_beam_prompt_omits_raw_role_and_relationship_blocks():
     references = _references()
     references["role_stats"] = {"F1": {"positions": {"actor": {"binding_count": 4}}}}
@@ -67,6 +83,8 @@ def test_beam_prompt_omits_raw_role_and_relationship_blocks():
     assert '"relationship_cases"' not in prompt
     assert '"transitions"' in prompt
     assert '"motif_menu"' in prompt
+    assert '"creative_brief"' not in prompt
+    assert '"user_request"' in prompt
 
 
 def test_dynamic_operations_expand_only_declared_motifs_and_functions():
@@ -319,6 +337,8 @@ def test_dynamic_graph_keeps_candidate_in_memory_and_exports_null_pattern_id(tmp
             return outline.NarrativePlan(steps=[{
                 "segment_index": 1, "function_name": "A", "genre_realization": "行动",
             }])
+        if output_schema is outline.LiteraryDesign:
+            return _literary_design(("A",))
         if output_schema is outline.OutlineRealization:
             return outline.OutlineRealization(
                 segments=[{"segment_index": 1, "function_name": "A", "beats": ["完成"], "link": ""}],
@@ -357,7 +377,7 @@ def test_dynamic_graph_keeps_candidate_in_memory_and_exports_null_pattern_id(tmp
         "pattern_id": None, "pattern_name": "", "pattern_source": "dynamic",
         "pattern_selection": None, "ending_spec": None, "chain": [],
         "planner_references": None, "dynamic_candidates": [], "dynamic_candidate": None,
-        "seed": None, "mechanism": None, "narrative": None, "contract_ledger": None,
+        "seed": None, "mechanism": None, "narrative": None, "literary_design": None, "contract_ledger": None,
         "outline": None, "validation": None, "outline_id": "", "result_path": "",
     })
     assert result["pattern_id"] is None

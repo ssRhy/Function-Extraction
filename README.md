@@ -187,7 +187,7 @@ cd Code
 # 1. 文本 → Function → Pattern → serving
 python -X utf8 -m StoryCLI bootstrap --input /path/to/bootstrap_texts
 
-# 2. 新文本 → Function 增量 → Pattern 增量 → candidate
+# 2. 新文本 → Function 增量 → Pattern 增量 → serving
 python -X utf8 -m StoryCLI evolve --input /path/to/new_texts
 
 # 3. 用户要求 → serving → Outline → Story
@@ -195,7 +195,7 @@ python -X utf8 -m StoryCLI story generate \
   --request "古风仙侠：写一个雨夜寻药故事，结局必须完成真相揭示"
 ```
 
-Bootstrap 首次需要清空并归档当前正式资产时增加 `--reset-formal`；Evolve 确认候选可用时增加 `--promote`。归档位于 `Code/data/formal_archives/<时间戳>/`，不会永久删除。详细参数见 [`Code/StoryCLI/README.md`](Code/StoryCLI/README.md)。
+Bootstrap 首次需要清空并归档当前正式资产时增加 `--reset-formal`；Evolve 在 Function 和 Pattern 成功后自动将新 Snapshot 切换为 serving。归档位于 `Code/data/formal_archives/<时间戳>/`，不会永久删除。详细参数见 [`Code/StoryCLI/README.md`](Code/StoryCLI/README.md)。
 
 ### 轻量桌面交互窗口
 
@@ -238,7 +238,7 @@ python -X utf8 -m StoryCLI outline batch --genre 悬疑惊悚 --count 3 --patter
 ```
 
 - `bootstrap` 支持多个文件和递归目录输入；当前正式资产只有在显式传 `--reset-formal` 时才会先归档。Function Snapshot 发布后自动运行 Pattern，Bootstrap 和 Pattern 成功后根 Snapshot 自动成为 serving。
-- `evolve` 默认从当前 serving 增量，支持多个文件和递归目录输入；Evolve 生成的子 Snapshot 默认是候选，不自动 promote。确认候选后给同一条 Evolve 命令增加 `--promote`，无需填写 Snapshot ID。
+- `evolve` 默认从当前 serving 增量，支持多个文件和递归目录输入；Function 和 Pattern 成功后，生成的子 Snapshot 自动成为 serving，无需填写 Snapshot ID 或再次执行 promote。
 - `function bootstrap/evolve` 是保留的调试级底层入口；公开用户使用顶层 `bootstrap/evolve` 即可。`function_run.json` 只记录运行结果，Pattern 节点不读取它。
 - `template build` 从统一 DB 中指定 Snapshot 的 published PatternSet 选择 Pattern；Pattern 与一次具体 Outline 一起写入 `template_bundle.json`。
 - `story write` 没有 `--request` 时复用 Bundle 中的 `outline_id`；有 `--request` 时固定 Pattern、重新生成 Outline 入库，再交给 Story_Agent 写正文。

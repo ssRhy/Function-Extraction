@@ -47,7 +47,7 @@ def build_command(mode, value, reset_formal=False, genre=None, planner_mode="dyn
         if reset_formal:
             command.append("--reset-formal")
     elif mode == "evolve":
-        command += ["evolve", "--input", value, "--promote"]
+        command += ["evolve", "--input", value]
     else:
         if genre not in GENRES:
             raise ValueError("生成文章需要 LLM 识别出一个有效题材")

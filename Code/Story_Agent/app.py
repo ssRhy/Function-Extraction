@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import time
+from difflib import SequenceMatcher
 
 _ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 _VENDOR = os.path.join(_ROOT, "vendor")
@@ -42,7 +43,7 @@ from Story_Agent.validation import _function_execution_issues
 
 
 _DATA = os.path.join(_ROOT, "data")
-_MIN_CHINESE_CHARS = 6000
+_MIN_CHINESE_CHARS = 10000
 
 
 def load_outline_document(knowledge_db, outline_id):
@@ -63,6 +64,46 @@ def _ending_target(source):
         "must_show": list(source.get("seed", {}).get("ending_requirements") or []),
         "final_state": source.get("seed", {}).get("ending_direction", ""),
     }
+
+
+def _event_text_units(value):
+    return [
+        re.sub(r"[\W_]+", "", unit)
+        for unit in re.split(r"[。！？；：:,，\n]", str(value or ""))
+        if len(re.sub(r"[\W_]+", "", unit)) >= 6
+    ]
+
+
+def _event_similarity(left, right):
+    left_units = _event_text_units(left)
+    right_units = _event_text_units(right)
+    if not left_units or not right_units:
+        return 0.0
+    return max(
+        1.0 if left_unit in right_unit or right_unit in left_unit
+        else SequenceMatcher(None, left_unit, right_unit).ratio()
+        for left_unit in left_units
+        for right_unit in right_units
+    )
+
+
+def _ending_scene_overlap_issues(plan):
+    function_scenes = [scene for scene in plan["scenes"] if not scene.get("is_ending")]
+    ending_scenes = [scene for scene in plan["scenes"] if scene.get("is_ending")]
+    issues = []
+    for ending_scene in ending_scenes:
+        for function_scene in function_scenes:
+            if any(
+                _event_similarity(ending_beat, function_beat) >= 0.85
+                for ending_beat in ending_scene.get("beats") or []
+                for function_beat in function_scene.get("beats") or []
+            ):
+                issues.append(
+                    f"{ending_scene['scene_id']} 重复了 {function_scene['scene_id']} 的核心行动；"
+                    "同一事件只能由一个结构段负责"
+                )
+                break
+    return issues
 
 
 def _scene_plan_issues(source, plan):
@@ -101,6 +142,7 @@ def _scene_plan_issues(source, plan):
     ending_scenes = [scene for scene in plan["scenes"] if scene.get("is_ending")]
     if not ending_scenes or plan["scenes"][-1] not in ending_scenes:
         issues.append("场景计划缺少位于 Function 场景之后的独立结局场景")
+    issues.extend(_ending_scene_overlap_issues(plan))
     return issues
 
 
@@ -208,6 +250,7 @@ def load_outline_node(state):
 def function_constraints_node(state):
     source = state["outline_data"]
     user = {
+        "user_request": source.get("user_request"),
         "seed": source["seed"],
         "mechanism_plan": source["mechanism_plan"],
         "contract_ledger": source.get("contract_ledger"),
@@ -233,6 +276,7 @@ def plan_scenes_node(state):
         ],
         "mechanism_plan": source["mechanism_plan"],
         "narrative_plan": source["narrative_plan"],
+        "literary_design": source.get("literary_design"),
         "source_segments": _indexed_segments(source),
         "function_constraints": state["function_constraints"],
         "ending": source["outline"]["ending"],
@@ -270,6 +314,7 @@ def develop_scenes_node(state):
         "narrative_plan": source["narrative_plan"],
         "function_constraints": state["function_constraints"],
         "scene_plan": state["scene_plan"],
+        "literary_design": source.get("literary_design"),
         "ending": source["outline"]["ending"],
     }
     developments = chat_structured([
@@ -293,6 +338,7 @@ def write_story_node(state):
         "function_constraints": state["function_constraints"],
         "scene_plan": state["scene_plan"],
         "scene_developments": state["scene_developments"],
+        "literary_design": source.get("literary_design"),
         "user_request": user_request,
         "writing_requirements": {
             "min_chinese_chars": _MIN_CHINESE_CHARS,
@@ -344,6 +390,7 @@ def validate_story_node(state):
         "function_constraints": state["function_constraints"],
         "scene_plan": state["scene_plan"],
         "scene_developments": state["scene_developments"],
+        "literary_design": source.get("literary_design"),
         "ending_target": _ending_target(source),
         "ending": source["outline"]["ending"],
         "story": state["story"],

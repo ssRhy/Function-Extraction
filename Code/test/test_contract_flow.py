@@ -36,6 +36,21 @@ def _mechanism(name):
     }
 
 
+def _literary_design(function_names):
+    return outline_state.LiteraryDesign(
+        global_design=outline_state.GlobalLiteraryDesign(
+            narrative_strategy="第三人称限知", tone="克制", prose_texture="细腻",
+            character_expression="通过行动表现", active_world_forces=["环境限制"],
+            sensory_strategy=["触感"], expression_boundaries=["不直说"],
+        ),
+        steps=[outline_state.LiteraryStep(
+            segment_index=index, function_name=name,
+            behavioral_expression="通过既定行动表现", world_pressure="环境改变条件",
+            sensory_anchor="冷硬触感", delivery_mode="DEVELOP", exit_effect="留下停顿",
+        ) for index, name in enumerate(function_names, 1)],
+    )
+
+
 def test_contract_ledger_applies_effects_and_resolves_obligation():
     opening = {"key": "REPAIR_TRUST", "role_slots": ["actor"], "description": "修复信任", "satisfied_when": "信任恢复"}
     chain = [
@@ -219,6 +234,8 @@ def test_outline_graph_consumes_contract_and_exports_closed_ledger(tmp_path, mon
                 segment_index=1, function_name="A", genre_realization="P1执行题材化行动",
                 connective_event="进入结局",
             )])
+        if output_schema is outline.LiteraryDesign:
+            return _literary_design(("A",))
         if output_schema is outline.OutlineRealization:
             return outline.OutlineRealization(
                 segments=[outline_state.OutlineSegment(segment_index=1, function_name="A", beats=["完成变化"], link="进入结局收束")],
@@ -264,7 +281,7 @@ def test_outline_graph_consumes_contract_and_exports_closed_ledger(tmp_path, mon
         "knowledge_db": str(tmp_path / "knowledge.db"),
         "pattern_request": None, "user_request": None, "pattern_id": None,
         "pattern_name": "", "chain": [],
-        "seed": None, "mechanism": None, "narrative": None, "contract_ledger": None,
+        "seed": None, "mechanism": None, "narrative": None, "literary_design": None, "contract_ledger": None,
         "outline": None, "validation": None, "outline_id": "", "result_path": "",
     })
 

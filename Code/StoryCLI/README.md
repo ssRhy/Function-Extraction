@@ -4,7 +4,7 @@ StoryCLI 是本项目面向用户的命令行入口。公开使用分成三个�
 
 ```text
 bootstrap：文本 → Function → Pattern → serving
-evolve：新文本 → Function 增量 → Pattern 增量 → candidate
+evolve：新文本 → Function 增量 → Pattern 增量 → serving
 story：用户要求 → serving → Outline → Story
 ```
 
@@ -17,7 +17,7 @@ cd /path/to/Function-Extraction/Code
 .venv/bin/python -X utf8 -m StoryUI
 ```
 
-窗口中的 1、2、3 分别对应 Bootstrap、Evolve 和生成文章。生成文章时，窗口只调用现有结构化 LLM 识别题材，操作类型由用户已选择的入口固定；程序去除原文开头已有的题材别名，只补一个规范前缀，再以固定参数启动 StoryCLI；模型不会生成或执行任意 shell 命令。生成文章可选择 Dynamic Planner 或 Published Pattern；Evolve 固定在成功后执行 `--promote`。Bootstrap 至少需要两个 `.txt` 故事，单篇新故事应使用 Evolve；“归档并重建正式库”默认关闭，勾选后还需要确认。
+窗口中的 1、2、3 分别对应 Bootstrap、Evolve 和生成文章。生成文章时，窗口只调用现有结构化 LLM 识别题材，操作类型由用户已选择的入口固定；程序去除原文开头已有的题材别名，只补一个规范前缀，再以固定参数启动 StoryCLI；模型不会生成或执行任意 shell 命令。生成文章可选择 Dynamic Planner 或 Published Pattern；Evolve 成功后自动切换新 Snapshot 为 serving。Bootstrap 至少需要两个 `.txt` 故事，单篇新故事应使用 Evolve；“归档并重建正式库”默认关闭，勾选后还需要确认。
 
 ## 1. 准备环境
 
@@ -83,22 +83,14 @@ cd /path/to/Function-Extraction/Code
 
 ### 3.2 Evolve：增量演化 Function 和 Pattern
 
-Evolve 默认读取当前 serving Snapshot 作为父版本，成功后只生成候选 Snapshot：
+Evolve 默认读取当前 serving Snapshot 作为父版本，成功后自动将新 Snapshot 切换为 serving：
 
 ```bash
 .venv/bin/python -X utf8 -m StoryCLI evolve \
   --input /path/to/my_data/evolve
 ```
 
-如果确认候选版本可以成为后续默认版本，加 `--promote`；不需要填写 Snapshot ID：
-
-```bash
-.venv/bin/python -X utf8 -m StoryCLI evolve \
-  --input /path/to/my_data/evolve \
-  --promote
-```
-
-不加 `--promote` 时，当前 serving 保持不变。
+只有 Function 和 Pattern 都成功、且新 Snapshot 存在可发布 Pattern 时，才会切换 serving；失败时保留原 serving。
 
 ### 3.3 Story：根据用户要求生成故事
 
@@ -181,7 +173,7 @@ pipeline_runs/<时间戳>/
 
 Bootstrap/Evolve 终端会打印 `function_run` 路径和 Snapshot 信息；Story 终端会打印 `pipeline_manifest` 路径。
 
-Story 默认使用 serving，不会自动读取未 promote 的 Evolve 候选。先审查候选，再在 Evolve 命令中增加 `--promote`，即可让它成为后续 Story 的默认版本。
+Story 默认使用 serving，因此 Evolve 成功后生成的新 Snapshot 会自动成为后续 Story 的默认版本；失败时不会切换 serving。
 
 也可以指定 Story 输出目录：
 

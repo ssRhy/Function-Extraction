@@ -59,6 +59,40 @@ def _source():
                 "setup_payoffs": [],
             },
         ]},
+        "literary_design": {
+            "global_design": {
+                "narrative_strategy": "第三人称限知",
+                "tone": "克制",
+                "prose_texture": "细腻",
+                "character_expression": "通过行动表现",
+                "active_world_forces": ["环境限制"],
+                "sensory_strategy": ["触感"],
+                "motif_plan": None,
+                "expression_boundaries": ["不直接总结情绪"],
+            },
+            "steps": [
+                {
+                    "segment_index": 1, "function_name": "F1",
+                    "behavioral_expression": "通过发现动作表现警觉",
+                    "world_pressure": "街道环境限制视线",
+                    "dialogue_subtext": "确认彼此掌握的信息",
+                    "sensory_anchor": "冷硬触感",
+                    "motif_state": "",
+                    "delivery_mode": "DEVELOP",
+                    "exit_effect": "留下继续追查的停顿",
+                },
+                {
+                    "segment_index": 2, "function_name": "F2",
+                    "behavioral_expression": "通过关闭危险表现决定",
+                    "world_pressure": "仓库结构增加行动代价",
+                    "dialogue_subtext": "",
+                    "sensory_anchor": "刺鼻气味",
+                    "motif_state": "",
+                    "delivery_mode": "DRAMATIZE",
+                    "exit_effect": "危险解除后保留余波",
+                },
+            ],
+        },
         "contract_ledger": {
             "enabled": False, "states": [], "obligations": [], "transitions": [], "issues": [],
         },
@@ -310,12 +344,20 @@ def test_prompts_do_not_promote_relationships_beyond_outline_evidence():
     assert "不让人物替作者总结主题" in app.STORY_PROMPT
     assert "不得把个人觉悟写成整个世界立即恢复正常" in app.STORY_PROMPT
     assert "保持正文的问题规模与结局规模一致" in app.STORY_PROMPT
+    assert "具体动作、对话、物件变化、身体反应" in app.STORY_PROMPT
+    assert "机械排比" in app.STORY_PROMPT
+    assert "作为记忆锚点" in app.STORY_PROMPT
+    assert "creative_brief" not in app.STORY_PROMPT
     assert "不是结局义务" in app.STORY_VALIDATOR_PROMPT
     assert "可以保留制度、阵营和利益冲突" in app.STORY_VALIDATOR_PROMPT
     assert "同一层面的可观察直接后果" in app.STORY_VALIDATOR_PROMPT
     assert "ending_evidence" in app.STORY_VALIDATOR_PROMPT
     assert "function_execution_evidence" in app.STORY_VALIDATOR_PROMPT
     assert "仅作结局行动与后果的诊断记录" in app.STORY_VALIDATOR_PROMPT
+    assert "事件所有权规则" in app.SCENE_PLAN_PROMPT
+    assert "不得再次重演" in app.STORY_PROMPT
+    assert "固定输入矛盾" in app.STORY_VALIDATOR_PROMPT
+    assert "creative_brief" not in app.STORY_VALIDATOR_PROMPT
 
 
 def test_scene_plan_appends_independent_ending_scene():
@@ -325,6 +367,14 @@ def test_scene_plan_appends_independent_ending_scene():
     assert plan["scenes"][2]["is_ending"] is True
     assert plan["scenes"][2]["source_segment_indices"] == []
     assert app._scene_plan_issues(_source(), plan) == []
+
+
+def test_scene_plan_rejects_ending_repeating_function_action():
+    source = _source()
+    plan = app.build_scene_plan(source, _scene_plan_draft().model_dump())
+    plan["scenes"][-1]["beats"] = ["P1解决危险"]
+    issues = app._scene_plan_issues(source, plan)
+    assert any("同一事件只能由一个结构段负责" in issue for issue in issues)
 
 
 def test_scene_development_keeps_only_execution_hints():
@@ -411,23 +461,26 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
         if output_schema is state.ScenePlanDraft:
             assert payload["function_constraints"]["segments"][0]["function_name"] == "F1"
             assert payload["narrative_plan"]["steps"][0]["genre_realization"]
+            assert payload["literary_design"]["global_design"]["tone"] == "克制"
             assert payload["allowed_character_ids"] == ["P1"]
             return _scene_plan_draft()
         if output_schema is state.SceneDevelopmentPlan:
             assert payload["scene_plan"]["scenes"][0]["scene_id"] == "S1"
             assert payload["scene_plan"]["scenes"][-1]["is_ending"] is True
             assert "mechanism_plan" not in payload
+            assert payload["literary_design"]["steps"][0]["delivery_mode"] == "DEVELOP"
             return _scene_developments()
         if output_schema is state.StoryDraft:
             assert _kwargs["reasoning_effort"] == "medium"
             assert "story" not in payload["function_constraints"]
             assert "mechanism_plan" not in payload
             assert "narrative_plan" not in payload
+            assert payload["literary_design"]["global_design"]["tone"] == "克制"
             assert [item["scene_id"] for item in payload["scene_developments"]["developments"]] == ["S1", "S2", "S3"]
             assert payload["writing_requirements"] == {
-                "min_chinese_chars": 6000,
+                "min_chinese_chars": 10000,
             }
-            long_text = "他在仓库里解决了危险。" * 300
+            long_text = "他在仓库里解决了危险。" * 340
             return state.StoryDraft(title="雾中灯塔", character_names={"P1": "林晚"}, scenes=[
                 state.StoryScene(scene_id="S2", text=long_text),
                 state.StoryScene(scene_id="S1", text=long_text),
@@ -460,6 +513,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
     ]
     assert [item["segment_index"] for item in exported["function_constraints"]["segments"]] == [1, 2]
     assert exported["source_outline"]["contract_ledger"]["enabled"] is False
+    assert exported["source_outline"]["literary_design"]["global_design"]["tone"] == "克制"
     assert exported["source_outline"]["validation"]["overall_ok"] is True
     assert exported["source_outline_id"] == "OUT_TEST"
     assert exported["story"]["character_names"] == {"P1": "林晚"}
@@ -491,7 +545,7 @@ def _run_story_graph(tmp_path, monkeypatch, validations):
             story_calls += 1
             if story_calls > 1:
                 assert "Story Validator" in messages[-1]["content"]
-            long_text = "他在仓库里解决了危险。" * 200
+            long_text = "他在仓库里解决了危险。" * 340
             return state.StoryDraft(
                 title="雾中灯塔", character_names={"P1": "林晚"}, scenes=[
                     state.StoryScene(scene_id="S1", text=long_text),

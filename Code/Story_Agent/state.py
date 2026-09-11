@@ -4,7 +4,7 @@ from typing import Literal, TypedDict
 
 from pydantic import BaseModel, Field
 
-from Outline_Agent.state import MechanismPlan, NarrativePlan
+from Outline_Agent.state import LiteraryDesign, MechanismPlan, NarrativePlan
 
 
 class StoryState(TypedDict):
@@ -52,6 +52,7 @@ class SourceOutlineDocument(BaseModel):
     seed: dict
     mechanism_plan: MechanismPlan
     narrative_plan: NarrativePlan
+    literary_design: LiteraryDesign | None = None
     contract_ledger: dict | None = None
     outline: SourceOutline
     ending_spec: dict | None = None

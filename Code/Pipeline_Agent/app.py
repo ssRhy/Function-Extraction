@@ -33,6 +33,7 @@ def _outline_input(state, out_dir, **overrides):
         "seed": None,
         "mechanism": None,
         "narrative": None,
+        "literary_design": None,
         "contract_ledger": None,
         "outline": None,
         "validation": None,

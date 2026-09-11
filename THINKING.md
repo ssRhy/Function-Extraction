@@ -1870,3 +1870,51 @@ Best-of-2 最初暂放在 `Pipeline_Agent/app.py`，只为先用最小文件数�
 ## 290. 操作由 UI 固定，路由 LLM 只负责 Story 题材（2026-09-10）
 
 进一步收窄路由职责：UI 已经确定 Bootstrap、Evolve 或 Story，不再让 LLM 回显或判断 action；只有 Story 入口调用结构化 LLM 返回 `genre`。Bootstrap/Evolve 直接执行既有公开命令，减少一次无意义的模型调用和一个失败点。
+
+## 291. 阶段内部自动串联，不在 Codex skill 间重复确认（2026-09-10）
+
+用户指出阶段运行不应被拆成多次人工确认。Bootstrap skill 应直接使用已有公开 CLI 完成 `Function → Pattern → serving`；Evolve skill 应直接完成 `Function 增量 → Pattern`，必要时使用 `FunctionCoordinator_Agent` 的重试和超时；Story skill 应直接完成 `Pattern → Outline → Story`。三个 skill 只按用户选择启动一个顶层阶段，不把内部子阶段再次交回用户确认。清空正式库和切换 Evolve candidate 为 serving 仍是独立的正式状态变更，只有请求明确包含时才执行。
+
+## 292. Evolve skill 成功后自动切换 serving（2026-09-11）
+
+用户进一步明确：通过 Evolve skill 运行时，Evolve 和 Pattern 成功后必须自动 promote 新 Snapshot 为 serving，不再把 promote 交回用户确认。公开 `StoryCLI evolve` 调用固定带 `--promote`；若使用只负责 `Evolve → Pattern` 的 `FunctionCoordinator_Agent`，成功后由 skill 读取新 Snapshot 并调用既有 `promote_snapshot()`。失败时不切换 serving，Bootstrap、Story 的顶层边界保持独立。
+
+## 293. 公开 Evolve 默认切换 serving，隔离发布流程保留 candidate 门禁（2026-09-11）
+
+用户明确要求默认 serving。当前公开 `StoryCLI evolve` 在 Function 和 Pattern 成功、且 `promote_snapshot()` 的 Published Pattern 门禁通过后，自动将新 Snapshot 切为 serving；不再要求 `--promote`。Story 因而会直接读取本次成功的 Evolve 结果。`FunctionCoordinator_Agent` 仍保留 candidate 语义，因为 `release_pipeline.py` 需要在 Outline/Story/回归门禁完成后才正式 promote；这条隔离发布路径不随公开 Evolve 默认行为改变。
+
+## 294. Story 生成前先选择 Pattern 或 Dynamic（2026-09-11）
+
+用户要求 Story 启动时先询问规划方式，并简要说明差异。Story skill 现在在用户未明确指定时只询问一次：Pattern 使用 serving 中已发布结构，稳定且可控；Dynamic 先从用户要求生成 Seed，再动态组合兼容 Function，灵活性更高。选择后显式传入 `--planner-mode published|dynamic`，Outline 和正文不再插入确认。
+
+## 295. 用户创作要求需要共享解析边界，但不应变成提示词改写器（2026-09-11）
+
+用户提出是否应由 LLM 优化用户提示词，以及是否需要独立 LangGraph 节点。决策是保留原始 `user_request`，增加一个位于 Outline 分叉前的 `interpret_request` 节点，仅把一次结构化解析结果整理为 `creative_brief`；它不选择模式、题材、Pattern 或 Function，也不把推断内容写回原请求。`explicit` 与 `inferred` 分离后，Dynamic 和 Published 都能复用同一创作边界，同时保留可审计的原文。
+
+这次只把 brief 接入已有 Seed、Pattern 选择、Outline/Story 校验和 manifest 传递，没有新增 Agent、子图、数据库或 Best-of-N。机械测试证明数据流与字段保留，仍不能证明真实模型在所有题材上能准确解析要求或生成高质量文学结果；后续若发现语义漂移，应先用固定请求、Snapshot 和 DB 副本检查 Seed/Outline/Story，而不是直接扩大解析层。
+
+## 296. Function 因果结构与文学宏观结构如何结合（2026-09-11，待决策）
+
+用户提出：如果把本项目的结构能力与文学性结合起来，二者应如何分工。当前思考是保持 `user_request → Seed → Dynamic Planner` 和既有 Function/Contract 因果边界，由 Function 负责可执行行动、状态变化、关系变化、义务与结局闭合；五幕节奏、人物缺点、环境参与、核心意象、伏笔类型和文风等文学要求应由 `creative_brief` 与 `NarrativePlan` 承接，并映射到 Function 段，而不是改写 Function 定义或把每一幕等同为一个 Function。
+
+其中可观察的明确要求（例如五个阶段是否覆盖、海上因素是否实际改变选择、指定伏笔是否回收、结局动作是否发生）可以进入现有 Outline/Story Validator；克制、浪漫、余韵、自然对话等主观文学质量仍需直接阅读产物判断，不能由 `overall_ok` 或新增通用分数代替。本条仅记录架构问题和最小方向，尚未决定字段设计，也未授权修改 Prompt、Schema、Validator 或生成流程。
+
+## 297. 用户要求直接进入 Seed，附件技巧只进入 NarrativePlan 与 Story Prompt（2026-09-11）
+
+用户进一步确认：删除默认 Pipeline 开头的 CreativeBrief/`plot_hints` 处理，保留原始 `user_request → Seed`，把附件中值得借鉴的技巧直接融合到已有 NarrativePlan 和 Story Prompt。由此撤销上一条关于 `creative_brief` 中间层的试行设计：它增加了一次 LLM 解释和一套重复的意图边界，却没有提供结构上不可替代的信息。
+
+新的职责边界是：user_request 是唯一创作意图来源；Seed 负责故事级落实；Function/Contract 负责可执行结构和状态闭合；NarrativePlan 负责在既定 Function 内安排人物动机、关系互动、反差、记忆锚点和伏笔回收；Story Prompt 负责通过行动、对话、物件和身体反应完成文本表达。附件中的平台套路、固定节奏、强制爽点和审稿分数不进入默认生成规则。
+
+本次实现只做删层和 Prompt 清理，没有新增 Agent、Schema、存储或质量评分层；全仓测试为 `423 passed, 1 skipped`。该结果证明代码路径和机械约束回归通过，不等同于真实 LLM 生成的文学质量已被验证。
+
+## 299. 先分配事件所有权，再进行文学实现（2026-09-11）
+
+用户确认“一个结构上的情节写出来以后，再文学性地拓展润色”的方向后，进一步明确：文学层不能修复结构重复；同一个核心事件必须先由一个 Function 段或 ending 单独负责，LiteraryDesign 只为这一次事件安排动作、感官、潜台词、意象和节奏。
+
+复查海上爱情真实产物时发现，最后一个 `REFUSAL_IMPACT` Function 已包含拒绝和下船，`ending` 又要求同样的拒绝和下船，Story 因此生成了两组重复场景。修复采用最小边界：ending 可以概述前序事件的结果，但不得把已完成的 Function 行动再次列为 ending 解决动作；Outline 和 Story 各自增加明显重复拦截，语义不确定部分仍由既有 Validator/人工审读处理，不新增第二个文学 Agent 或 Best-of-N。
+
+## 300. NarrativePlan 先于 LiteraryDesign 顺序生成（2026-09-11）
+
+用户追问“为什么合并、到底实现了什么”，最终将设计边界明确为真正的顺序依赖，而不是联合生成：先完成并校验 NarrativePlan，再让 LiteraryDesign 读取它并只设计呈现方式。两个对象仍保持独立，只有在 Realize、ScenePlan 和正文阶段被同时读取；“合并”只描述下游输入，不描述生成接口。
+
+本轮实现还确认一个结构前提：文学层不能替结构层修复重复事件；只有一个 Function 段或 ending 先拥有某个核心行动，文学设计才能把这一次行动写深。由此新增的顺序测试证明 NarrativePlan 失败时 LiteraryDesign 不会调用，不能替代真实 LLM 产物的文学质量判断。

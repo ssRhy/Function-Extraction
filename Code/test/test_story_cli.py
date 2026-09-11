@@ -405,7 +405,7 @@ def test_story_generate_rejects_two_request_sources(monkeypatch):
     assert called == []
 
 
-def test_evolve_does_not_promote_candidate(tmp_path, monkeypatch):
+def test_evolve_promotes_snapshot_by_default(tmp_path, monkeypatch):
     source = tmp_path / "story.txt"
     source.write_text("新故事", encoding="utf-8")
     output_dir = tmp_path / "run" / "output"
@@ -431,6 +431,7 @@ def test_evolve_does_not_promote_candidate(tmp_path, monkeypatch):
 
         def promote_snapshot(self, _snapshot_id):
             captured["promote"] += 1
+            return {"snapshot_id": _snapshot_id}
 
     import StoryPattern_Agent.app as pattern_app
 
@@ -447,7 +448,8 @@ def test_evolve_does_not_promote_candidate(tmp_path, monkeypatch):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["base_snapshot_id"] == "BASE"
     assert manifest["snapshot_id"] == snapshot.name
-    assert captured["promote"] == 0
+    assert manifest["serving_snapshot_id"] == snapshot.name
+    assert captured["promote"] == 1
 
 
 def test_evolve_inherits_serving_snapshot_namespace(tmp_path, monkeypatch):
@@ -475,6 +477,9 @@ def test_evolve_inherits_serving_snapshot_namespace(tmp_path, monkeypatch):
         def load_snapshot_manifest(self, _snapshot_id):
             return {"namespace": "real_coordinator"}
 
+        def promote_snapshot(self, _snapshot_id):
+            return {"snapshot_id": _snapshot_id}
+
     import StoryPattern_Agent.app as pattern_app
 
     monkeypatch.setattr(app, "_run_module", fake_run_module)
@@ -491,7 +496,6 @@ def test_evolve_inherits_serving_snapshot_namespace(tmp_path, monkeypatch):
 
 def test_main_dispatches_public_bootstrap_and_evolve_without_internal_ids(monkeypatch, tmp_path):
     calls = []
-    promoted = []
     bootstrap_manifest = tmp_path / "bootstrap" / "function_run.json"
     evolve_manifest = tmp_path / "evolve" / "function_run.json"
 
@@ -502,16 +506,11 @@ def test_main_dispatches_public_bootstrap_and_evolve_without_internal_ids(monkey
         return path
 
     monkeypatch.setattr(app, "run_function", fake_run_function)
-    monkeypatch.setattr(
-        app.StoryKnowledgeStore, "promote_snapshot",
-        lambda *args: promoted.append(args[-1]),
-    )
-
     assert app.main([
         "bootstrap", "--input", "boot-a.txt", "boot-dir", "--reset-formal",
     ]) == 0
     assert app.main([
-        "evolve", "--input", "new-a.txt", "new-dir", "--promote",
+        "evolve", "--input", "new-a.txt", "new-dir",
     ]) == 0
     assert calls[0][0][:2] == ("bootstrap", ["boot-a.txt", "boot-dir"])
     assert calls[0][0][3] == app.PUBLIC_NAMESPACE
@@ -519,4 +518,3 @@ def test_main_dispatches_public_bootstrap_and_evolve_without_internal_ids(monkey
     assert calls[1][0][:2] == ("evolve", ["new-a.txt", "new-dir"])
     assert calls[1][0][3] is None
     assert calls[1][1]["batch_size"] is None
-    assert promoted == ["candidate"]

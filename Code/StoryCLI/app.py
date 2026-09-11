@@ -232,7 +232,7 @@ def run_function(
     if mode == "bootstrap" and count < 2:
         raise ValueError("Bootstrap 至少需要 2 个 .txt 故事，单篇故事请使用 Evolve")
     archive_path = _archive_formal_assets() if mode == "bootstrap" and reset_formal else None
-    store = StoryKnowledgeStore(KNOWLEDGE_DB) if mode == "evolve" else None
+    store = StoryKnowledgeStore(KNOWLEDGE_DB) if mode in ("bootstrap", "evolve") else None
     if mode == "evolve" and not base_snapshot:
         base_snapshot = store.serving_snapshot_id()
     if mode == "evolve" and base_snapshot:
@@ -274,9 +274,7 @@ def run_function(
     from StoryPattern_Agent.app import run_pattern_evolve
 
     pattern_result = run_pattern_evolve(snapshot_id, KNOWLEDGE_DB)
-    promoted = None
-    if mode == "bootstrap":
-        promoted = StoryKnowledgeStore(KNOWLEDGE_DB).promote_snapshot(snapshot_id)
+    promoted = store.promote_snapshot(snapshot_id) if store else None
     manifest = {
         "schema_version": 1,
         "run_id": run_id,
@@ -300,9 +298,8 @@ def run_function(
     path = root / "function_run.json"
     _write_json(path, manifest)
     print(f"[StoryCLI] function_run={path}")
-    if mode == "evolve":
-        print(f"[StoryCLI] candidate_snapshot={snapshot_id}")
-        print(f"[StoryCLI] promote: python -X utf8 -c 'from KnowledgeBase.store import StoryKnowledgeStore; print(StoryKnowledgeStore().promote_snapshot(\"{snapshot_id}\"))'")
+    if promoted:
+        print(f"[StoryCLI] serving_snapshot={promoted['snapshot_id']}")
     return path
 
 
@@ -330,6 +327,7 @@ def _outline_state(
         "seed": None,
         "mechanism": None,
         "narrative": None,
+        "literary_design": None,
         "contract_ledger": None,
         "outline": None,
         "validation": None,
@@ -640,8 +638,6 @@ def main(argv=None):
                                help="新文本文件或目录，可重复")
     public_evolve.add_argument("--batch-size", type=int, default=None)
     public_evolve.add_argument("--top-k", type=int, default=None)
-    public_evolve.add_argument("--promote", action="store_true",
-                               help="成功后将候选 Snapshot 切换为 serving")
     public_evolve.add_argument("--out-dir", default=None)
 
     library = commands.add_parser("library", help="统一知识库")
@@ -704,14 +700,10 @@ def main(argv=None):
                 PUBLIC_NAMESPACE, args.no_revise, reset_formal=args.reset_formal,
             )
         elif args.command == "evolve":
-            manifest_path = run_function(
+            run_function(
                 "evolve", _flatten_inputs(args.input), args.out_dir,
                 None, batch_size=args.batch_size, top_k=args.top_k,
             )
-            if args.promote:
-                snapshot_id = _read_json(manifest_path)["snapshot_id"]
-                StoryKnowledgeStore(KNOWLEDGE_DB).promote_snapshot(snapshot_id)
-                print(f"[StoryCLI] serving_snapshot={snapshot_id}")
         elif args.command == "library" and args.library_command == "status":
             show_library_status()
         elif args.command == "function" and args.function_command == "bootstrap":
