@@ -2,9 +2,15 @@
 
 from typing import Literal, TypedDict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
-from Outline_Agent.state import LiteraryDesign, MechanismPlan, NarrativePlan
+from Outline_Agent.state import (
+    GlobalLiteraryDesign,
+    LiteraryDesign,
+    LiteraryStep,
+    MechanismPlan,
+    NarrativePlan,
+)
 
 
 class StoryState(TypedDict):
@@ -41,6 +47,13 @@ class SourceOutline(BaseModel):
     ending: SourceEnding
 
 
+class LegacyLiteraryDesign(BaseModel):
+    """读取旧版 Outline 的文学设计；新生成仍使用完整 LiteraryDesign。"""
+
+    global_design: GlobalLiteraryDesign
+    steps: list[LiteraryStep]
+
+
 class SourceOutlineDocument(BaseModel):
     outline_id: str
     snapshot_id: str
@@ -52,13 +65,27 @@ class SourceOutlineDocument(BaseModel):
     seed: dict
     mechanism_plan: MechanismPlan
     narrative_plan: NarrativePlan
-    literary_design: LiteraryDesign | None = None
+    literary_design: LiteraryDesign | LegacyLiteraryDesign | None = None
     contract_ledger: dict | None = None
     outline: SourceOutline
     ending_spec: dict | None = None
     ending_target: dict | None = None
     ending_budget: dict | None = None
     validation: dict | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def adapt_legacy_narrative_ending(cls, values):
+        if not isinstance(values, dict):
+            return values
+        narrative = values.get("narrative_plan")
+        outline = values.get("outline") or {}
+        if isinstance(narrative, dict) and "ending" not in narrative and outline.get("ending"):
+            narrative = dict(narrative)
+            narrative["ending"] = outline["ending"]
+            values = dict(values)
+            values["narrative_plan"] = narrative
+        return values
 
 
 class FunctionSegmentConstraint(BaseModel):

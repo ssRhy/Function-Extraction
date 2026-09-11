@@ -771,6 +771,7 @@ def scaffold_node(state):
 
     literary_user = dict(common_user)
     literary_user["narrative_plan"] = narrative
+    literary_user["ending_budget"] = build_ending_budget({**state, "narrative": narrative})
     literary_messages = [
         {"role": "system", "content": LITERARY_DESIGN_PROMPT},
         {"role": "user", "content": json.dumps(literary_user, ensure_ascii=False)},
@@ -802,13 +803,14 @@ def realize_node(state):
             "content": (
                 "Validator 上次指出以下语义问题："
                 + "；".join(state["validation"].get("issues") or [])
-                + "。只修正被指出的 beats 或 ending 身份、因果、关系措辞和义务兑现；"
+                + "。只修正被指出的 beats、final_ledger、因果、关系措辞和义务兑现；"
                 "固定 seed、Function chain、role_bindings、mechanism、relationship_changes、narrative，"
-                "不得新增人物、真相、证据、解决方案或改变结构，并重新输出完整 JSON。"
+                "不得新增人物、真相、证据、解决方案或改变 narrative_plan.ending，并重新输出完整 JSON。"
             ),
         })
     data = chat_structured(messages, OutlineRealization).model_dump()
     data["segments"] = _align(state["chain"], data["segments"])
+    data["ending"] = state["narrative"]["ending"]
     return {
         "outline": data,
         "realize_retry_count": state.get("realize_retry_count", 0) + int(retry),
@@ -935,6 +937,19 @@ def _render_markdown(result):
                 f"节奏={step.get('delivery_mode', '')}；"
                 f"段末={step.get('exit_effect', '')}"
             )
+        literary_ending = literary.get("literary_ending")
+        if literary_ending:
+            lines.extend([
+                "",
+                "- 结局文学实现："
+                f"进入状态={literary_ending.get('entry_state', '')}；"
+                f"结局呈现={literary_ending.get('resolution_expression', '')}；"
+                f"人物余波={literary_ending.get('character_aftereffect', '')}；"
+                f"世界余波={literary_ending.get('world_aftereffect', '')}；"
+                f"感官={literary_ending.get('sensory_anchor', '')}；"
+                f"节奏={literary_ending.get('delivery_mode', '')}；"
+                f"收束={literary_ending.get('closing_action_or_image', '')}",
+            ])
         lines.append("")
     lines.append("## 分段大纲")
     for index, segment in enumerate(result["outline"]["segments"], 1):

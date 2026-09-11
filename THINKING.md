@@ -1918,3 +1918,25 @@ Best-of-2 最初暂放在 `Pipeline_Agent/app.py`，只为先用最小文件数�
 用户追问“为什么合并、到底实现了什么”，最终将设计边界明确为真正的顺序依赖，而不是联合生成：先完成并校验 NarrativePlan，再让 LiteraryDesign 读取它并只设计呈现方式。两个对象仍保持独立，只有在 Realize、ScenePlan 和正文阶段被同时读取；“合并”只描述下游输入，不描述生成接口。
 
 本轮实现还确认一个结构前提：文学层不能替结构层修复重复事件；只有一个 Function 段或 ending 先拥有某个核心行动，文学设计才能把这一次行动写深。由此新增的顺序测试证明 NarrativePlan 失败时 LiteraryDesign 不会调用，不能替代真实 LLM 产物的文学质量判断。
+
+## 301. 结构结局与结局文学实现分别归属两层（2026-09-11）
+
+用户进一步追问“ending 为什么不能在 NarrativePlan 一起写上”，由此把前一轮的顺序依赖继续收紧为清晰的双层接口：`NarrativePlan` 在 `steps` 之外、同一次调用中生成 `ending`，负责确定结局发生什么；`LiteraryDesign` 在第二次调用中读取完整 NarrativePlan，新增 `literary_ending`，负责确定这个既定结局如何被看见、听见和感受到。这里“独立”指字段和对象职责独立，不意味着再增加一次单独的结局 LLM 调用。
+
+Realize 不再生成 ending，而是只实现 Function 段并产出 `final_ledger`，由代码把已校验的 `narrative.ending` 复制为最终 `outline.ending`。这样既保持最终大纲对 Story 的稳定输入，又消除了 NarrativePlan、Realize 两套结构结局互相漂移的可能；文学层也不能借 `literary_ending` 新增解决行动、关系升级或结局转折。
+
+## 302. LiteraryDesign 的可选意象必须是完整分支（2026-09-11）
+
+一次 Dynamic 运行暴露出：`motif_plan` 虽然允许为空，但模型可能返回缺少必需子字段的半对象；结构化重试又可能返回多个 JSON。由此确认可选嵌套对象不能只依赖 Schema 报错后的泛化提示，Prompt 必须明确 `null` 或完整对象的二选一协议，共享重试层也必须把字段路径和单对象边界反馈给模型。保持严格失败比静默删掉半个意象设计更安全；历史产物继续保留，但不作为本次运行结果。
+
+## 303. 结局类型由 Dynamic Seed 自主决定（2026-09-11）
+
+用户指出，若在 Prompt 中额外暗示分离、开放或团圆，会让 Seed 偏离原始创作要求。决策：保留 `ending_direction` 作为必须输出的结构接口，但删除对具体结局类型的预设；未指定结局时由 Seed 根据 user_request、人物目标和核心冲突自主选择。爱情题材只需明确回答关系终态，不预设相守或分离。
+
+Dynamic 的顺序保持为 `user_request → Seed → Dynamic Planner`：Seed 先形成故事需要的冲突与结局方向，必须覆盖用户明确提出的所有主线；不再要求 Seed 迁就尚未生成的 Function 链，Planner 再选择能够承接该结局的 Function 链，不能反向改写 Seed。未提出的关系或主题不由 Seed 凭空加入。此次没有新增 Agent、Schema、存储或评分层。
+
+## 304. Prompt 审计必须适配项目而不是照搬 Anthropic 规则（2026-09-11）
+
+用户提出为 Function-Extraction 定制项目级 `prompt-audit` Skill。关键判断是：Anthropic 官方文档可以提供审计流程和过时模式目录，但其中关于当前 Claude 行为的删除理由不能直接套用到项目当前的 DeepSeek 请求。Skill 因此把实际 `messages` 组装、Pydantic/JSON 契约、阶段边界和历史 diff 纳入同一审计面，并将 Function/Contract、事件所有权、用户请求保真、文学结构分工和 Snapshot/正式库保护列为默认不可弱化的负载边界。
+
+默认输出审计报告和 proposed diff，不自动改文件；明确要求落地时也必须逐个问题修改、逐个测试。文本变短不是质量证明，真实生成对照仍需固定请求、Snapshot、planner mode 和数据库副本后重复验证。

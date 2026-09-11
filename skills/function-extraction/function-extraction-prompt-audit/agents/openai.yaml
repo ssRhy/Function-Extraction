@@ -1,0 +1,4 @@
+interface:
+  display_name: "Function Extraction Prompt Audit"
+  short_description: "审计并优化项目实际 LLM Prompt"
+  default_prompt: "Use $function-extraction-prompt-audit to audit this project's prompts and produce an evidence-based proposed diff."

@@ -24,6 +24,14 @@ LITERARY_DESIGN_PROMPT = """你是文学性设计者。根据原始 user_request
 6. 核心意象在本段是否出现；若出现，它仍是普通事物，还是已经获得新的关系、冲突或主题含义。不要求每段都出现。
 7. 节奏策略：使用 DRAMATIZE 展开关键行动，DEVELOP 展开反应、权衡或决定，COMPRESS 概述非关键过程；同时说明段末要留下的情绪、停顿或未完成动作。
 
+结局文学实现必须读取 narrative_plan.ending，并只为其中已经确定的解决动作、冲突结果和稳定终态设计呈现方式：
+1. entry_state 说明从最后一个 Function 已经造成的结果进入结局，明确不能重演的核心行动。
+2. resolution_expression 说明既定 resolution_actions 如何通过可观察行动、环境反应或后果呈现，不新增解决动作。
+3. character_aftereffect 说明人物或关系终态如何通过距离、沉默、选择、物件或短暂对话体现，不升级关系或承诺。
+4. world_aftereffect 说明自然、空间、职业、制度、技术、文化或历史因素如何承接既定结局，不引入新的冲突主线。
+5. dialogue_subtext、sensory_anchor 和 motif_payoff 只负责表达层；motif_payoff 没有可回收的 motif 时输出空字符串。
+6. closing_action_or_image 只能表现已经确定的终态，不能承担新的结构转折；restraint_boundary 必须说明结尾不直接说破的内容。
+
 文学性设计不得：
 - 改变 Function 的行动主体、因果结果、既定状态变化或结局目标；
 - 提前完成后续结构，新增解决核心冲突的资源，或凭空升级人物关系；
@@ -37,6 +45,8 @@ LITERARY_DESIGN_PROMPT = """你是文学性设计者。根据原始 user_request
 
 LITERARY_DESIGN_PROMPT += """
 
-输出协议：只输出一个 JSON 对象，字段必须严格为 global_design 和 steps，不要包裹 narrative_plan 或其他对象。global_design 使用全局文学设计字段；每个 step 使用 LiteraryStep 字段：
-{"global_design": {"narrative_strategy": "叙述方式", "tone": "整体气质", "prose_texture": "语言质地", "character_expression": "人物表达方式", "active_world_forces": [], "sensory_strategy": [], "motif_plan": null, "expression_boundaries": []}, "steps": [{"segment_index": 1, "function_name": "函数名", "behavioral_expression": "通过什么可观察行为表现既定人物变化", "world_pressure": "世界如何改变本段行动条件、代价或机会", "dialogue_subtext": "表层话题与潜台词", "sensory_anchor": "本段主要感官落点", "motif_state": "意象在本段的状态", "delivery_mode": "DEVELOP", "exit_effect": "段末留下的情绪、停顿或未完成动作"}]}
+global_design.motif_plan 只能二选一：没有自然可回收的核心意象时输出 null；选择核心意象时必须输出同时包含 motif、initial_meaning、transformation、final_payoff 四个非空字段的完整对象。禁止只输出其中一两个字段的半对象，也不要用其他字段替代这四个字段。
+
+输出协议：只输出一个 JSON 对象，字段必须严格为 global_design、steps 和 literary_ending，不要包裹 narrative_plan 或其他对象。global_design 使用全局文学设计字段；每个 step 使用 LiteraryStep 字段；literary_ending 使用 LiteraryEnding 字段：
+{"global_design": {"narrative_strategy": "叙述方式", "tone": "整体气质", "prose_texture": "语言质地", "character_expression": "人物表达方式", "active_world_forces": [], "sensory_strategy": [], "motif_plan": null, "expression_boundaries": []}, "steps": [{"segment_index": 1, "function_name": "函数名", "behavioral_expression": "通过什么可观察行为表现既定人物变化", "world_pressure": "世界如何改变本段行动条件、代价或机会", "dialogue_subtext": "表层话题与潜台词", "sensory_anchor": "本段主要感官落点", "motif_state": "意象在本段的状态", "delivery_mode": "DEVELOP", "exit_effect": "段末留下的情绪、停顿或未完成动作"}], "literary_ending": {"entry_state": "从最后一个 Function 的既定结果进入结局", "resolution_expression": "既定解决动作的可观察呈现", "character_aftereffect": "人物或关系终态的行为表现", "world_aftereffect": "世界对既定结局的承接", "dialogue_subtext": "结尾对话的表层内容与潜台词", "sensory_anchor": "结尾主要感官落点", "motif_payoff": "核心意象的最终回收或空字符串", "delivery_mode": "DEVELOP", "closing_action_or_image": "最后的动作或画面", "restraint_boundary": "保留的含混与留白"}}
 逐段读取已经完成的 NarrativePlan；文学设计只能说明既定事件如何呈现，不能新增、删除、重排或改写其核心行动和结构后果。"""

@@ -54,7 +54,12 @@ def _references():
 
 
 def _seed():
-    return {"characters": [{"id": "P1"}], "core_conflict": "c"}
+    return {
+        "characters": [{"id": "P1"}],
+        "core_conflict": "c",
+        "ending_direction": "完成选择 → 冲突收束 → 关系进入明确终态",
+        "ending_requirements": ["展示关系终态"],
+    }
 
 
 def _literary_design(function_names):
@@ -69,6 +74,13 @@ def _literary_design(function_names):
             behavioral_expression="通过既定行动表现", world_pressure="环境改变条件",
             sensory_anchor="冷硬触感", delivery_mode="DEVELOP", exit_effect="留下停顿",
         ) for index, name in enumerate(function_names, 1)],
+        literary_ending=outline_state.LiteraryEnding(
+            entry_state="从既定结果进入", resolution_expression="通过行动呈现结局",
+            character_aftereffect="通过后续选择表现终态", world_aftereffect="环境承接余波",
+            dialogue_subtext="保留潜台词", sensory_anchor="冷硬触感", motif_payoff="",
+            delivery_mode="DEVELOP", closing_action_or_image="留下收束动作",
+            restraint_boundary="不直接总结主题",
+        ),
     )
 
 
@@ -85,6 +97,8 @@ def test_beam_prompt_omits_raw_role_and_relationship_blocks():
     assert '"motif_menu"' in prompt
     assert '"creative_brief"' not in prompt
     assert '"user_request"' in prompt
+    assert '"ending_direction"' in prompt
+    assert "承接 story_seed.ending_direction" in prompt
 
 
 def test_dynamic_operations_expand_only_declared_motifs_and_functions():
@@ -336,16 +350,16 @@ def test_dynamic_graph_keeps_candidate_in_memory_and_exports_null_pattern_id(tmp
         if output_schema is outline.NarrativePlan:
             return outline.NarrativePlan(steps=[{
                 "segment_index": 1, "function_name": "A", "genre_realization": "行动",
-            }])
+            }], ending={
+                "resolution_actions": ["解决"], "conflict_resolution": "完成",
+                "final_state": "稳定",
+            })
         if output_schema is outline.LiteraryDesign:
             return _literary_design(("A",))
         if output_schema is outline.OutlineRealization:
             return outline.OutlineRealization(
                 segments=[{"segment_index": 1, "function_name": "A", "beats": ["完成"], "link": ""}],
-                final_ledger=["c"], ending={
-                    "resolution_actions": ["解决"], "conflict_resolution": "完成",
-                    "final_state": "稳定",
-                },
+                final_ledger=["c"],
             )
         if output_schema is outline.OutlineValidation:
             return outline.OutlineValidation(

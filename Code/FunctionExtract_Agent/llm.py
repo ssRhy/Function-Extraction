@@ -113,6 +113,13 @@ def _repair_json(content: str) -> str:
     return re.sub(r",\s*([}\]])", r"\1", repaired)
 
 
+def _validation_error_details(error: ValidationError) -> str:
+    return "；".join(
+        f"{'.'.join(str(part) for part in item['loc'])}: {item['msg']}"
+        for item in error.errors()
+    )
+
+
 def chat_structured(messages: list, output_schema: type, model: str = "deepseek-v4-flash",
                     reasoning_effort: str = "none", max_retries: int = _STRUCTURED_RETRY,
                     temperature: float | None = None):
@@ -146,11 +153,15 @@ def chat_structured(messages: list, output_schema: type, model: str = "deepseek-
                 try:
                     return output_schema.model_validate(data)
                 except ValidationError as e:
-                    last_error = f"字段校验失败: {str(e)[:300]}"
+                    last_error = f"字段校验失败: {_validation_error_details(e)}"
         if attempt < max_retries:
             print(f"  [llm] 结构化输出重试 {attempt + 1}/{max_retries}: {last_error}")
             messages = list(messages) + [{
                 "role": "user",
-                "content": f"你上次的输出解析失败：{last_error}\n请只重新输出符合要求的 JSON。",
+                "content": (
+                    f"你上次的输出解析失败：{last_error}\n"
+                    "请严格只重新输出一个 JSON 对象；不要输出第二个 JSON、"
+                    "Markdown 围栏、解释文字或 JSON 对象之外的任何内容。"
+                ),
             }]
     raise ValueError(f"结构化输出 {max_retries} 次重试后仍失败: {last_error}\n原始内容: {last_content[:200]}")

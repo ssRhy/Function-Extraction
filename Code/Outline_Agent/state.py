@@ -128,8 +128,15 @@ class NarrativeStep(BaseModel):
         return values
 
 
+class NarrativeEnding(BaseModel):
+    resolution_actions: list[str] = Field(min_length=1)
+    conflict_resolution: str = Field(min_length=1)
+    final_state: str = Field(min_length=1)
+
+
 class NarrativePlan(BaseModel):
     steps: list[NarrativeStep]
+    ending: NarrativeEnding
 
 
 class MotifPlan(BaseModel):
@@ -162,9 +169,23 @@ class LiteraryStep(BaseModel):
     exit_effect: str = Field(min_length=1)
 
 
+class LiteraryEnding(BaseModel):
+    entry_state: str = Field(min_length=1)
+    resolution_expression: str = Field(min_length=1)
+    character_aftereffect: str = Field(min_length=1)
+    world_aftereffect: str = Field(min_length=1)
+    dialogue_subtext: str = ""
+    sensory_anchor: str = Field(min_length=1)
+    motif_payoff: str = ""
+    delivery_mode: Literal["DRAMATIZE", "DEVELOP", "COMPRESS"]
+    closing_action_or_image: str = Field(min_length=1)
+    restraint_boundary: str = Field(min_length=1)
+
+
 class LiteraryDesign(BaseModel):
     global_design: GlobalLiteraryDesign
     steps: list[LiteraryStep]
+    literary_ending: LiteraryEnding
 
 
 class OutlineSegment(BaseModel):
@@ -174,16 +195,9 @@ class OutlineSegment(BaseModel):
     link: str = Field(default="", description="衔接：如何过渡到下一个 Function，最后一段为空")
 
 
-class EndingRealization(BaseModel):
-    resolution_actions: list[str] = Field(min_length=1)
-    conflict_resolution: str = Field(min_length=1)
-    final_state: str = Field(min_length=1)
-
-
 class OutlineRealization(BaseModel):
     segments: list[OutlineSegment]
     final_ledger: list[str]
-    ending: EndingRealization
 
 
 class SegmentCheck(BaseModel):

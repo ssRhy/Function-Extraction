@@ -48,6 +48,13 @@ def _literary_design(function_names):
             behavioral_expression="通过既定行动表现", world_pressure="环境改变条件",
             sensory_anchor="冷硬触感", delivery_mode="DEVELOP", exit_effect="留下停顿",
         ) for index, name in enumerate(function_names, 1)],
+        literary_ending=outline_state.LiteraryEnding(
+            entry_state="从既定结果进入", resolution_expression="通过行动呈现结局",
+            character_aftereffect="通过后续选择表现终态", world_aftereffect="环境承接余波",
+            dialogue_subtext="保留潜台词", sensory_anchor="冷硬触感", motif_payoff="",
+            delivery_mode="DEVELOP", closing_action_or_image="留下收束动作",
+            restraint_boundary="不直接总结主题",
+        ),
     )
 
 
@@ -233,18 +240,17 @@ def test_outline_graph_consumes_contract_and_exports_closed_ledger(tmp_path, mon
             return outline.NarrativePlan(steps=[outline_state.NarrativeStep(
                 segment_index=1, function_name="A", genre_realization="P1执行题材化行动",
                 connective_event="进入结局",
-            )])
+            )], ending=outline_state.NarrativeEnding(
+                resolution_actions=["完成解决"],
+                conflict_resolution="核心冲突已解决",
+                final_state="达到稳定终态",
+            ))
         if output_schema is outline.LiteraryDesign:
             return _literary_design(("A",))
         if output_schema is outline.OutlineRealization:
             return outline.OutlineRealization(
                 segments=[outline_state.OutlineSegment(segment_index=1, function_name="A", beats=["完成变化"], link="进入结局收束")],
                 final_ledger=["目标已处理"],
-                ending=outline_state.EndingRealization(
-                    resolution_actions=["完成解决"],
-                    conflict_resolution="核心冲突已解决",
-                    final_state="达到稳定终态",
-                ),
             )
         if output_schema is outline.OutlineValidation:
             assert "warnings" not in json.loads(_messages[-1]["content"])["contract_ledger"]

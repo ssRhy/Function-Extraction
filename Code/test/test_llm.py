@@ -70,6 +70,23 @@ def test_retry_after_validation_error():
     print("缺字段 → 反馈重试成功: OK")
 
 
+def test_retry_after_extra_json():
+    responses = iter([
+        '{"name": "a", "age": 1} {"name": "b", "age": 2}',
+        '{"name": "a", "age": 2}',
+    ])
+    calls = []
+    orig = _patch_chat(lambda messages, response_format=None, **kw: (calls.append(messages) or next(responses)))
+    try:
+        r = llm.chat_structured([], _Item)
+        assert r.age == 2
+    finally:
+        llm.chat = orig
+    assert len(calls) == 2
+    assert "只重新输出一个 JSON 对象" in calls[1][-1]["content"]
+    print("多余 JSON → 明确反馈重试成功: OK")
+
+
 def test_fails_after_retries():
     orig = _patch_chat(lambda messages, response_format=None, **kw: "not json at all")
     try:
@@ -88,5 +105,6 @@ if __name__ == "__main__":
     test_retry_after_bad_json()
     test_repair_trailing_comma()
     test_retry_after_validation_error()
+    test_retry_after_extra_json()
     test_fails_after_retries()
     print("\n全部 llm JSON 数据层测试通过")

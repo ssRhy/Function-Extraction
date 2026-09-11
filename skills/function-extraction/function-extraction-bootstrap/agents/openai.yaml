@@ -1,0 +1,4 @@
+interface:
+  display_name: "Function Extraction Bootstrap"
+  short_description: "只运行 Function-Extraction 的 Bootstrap 根库阶段"
+  default_prompt: "Use $function-extraction-bootstrap to run Bootstrap and automatically complete its internal Function-to-Pattern flow."

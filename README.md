@@ -372,7 +372,7 @@ contracts = load_function_contracts(snapshot_path)
 
 当前消费链为 `Snapshot loader → StoryPattern Pattern → Outline Planner → Mechanism Plan → Contract Ledger → Validator`：StoryPattern 只读当前 Snapshot 的冻结 Functions、FunctionOccurrence 和 Contracts；Outline 以同一 Snapshot 的合同为权威输入，Planner 检查相邻状态效果，Mechanism 绑定角色槽位并生成状态/义务账本，Validator 将合同断裂合并为失败项。
 
-PatternCatalog schema v2 可在 Pattern 摘要中携带可选的模板级 `ending_spec`：它描述需要解决的核心冲突、结局必须出现的抽象动作和稳定终态，不是新的 Function。Outline 将其传给 Seed、Realizer 和 Validator，并在结果中保留结构化 `ending`；没有 `ending_spec` 的历史 Pattern 继续兼容。
+PatternCatalog schema v2 可在 Pattern 摘要中携带可选的模板级 `ending_spec`：它描述需要解决的核心冲突、结局必须出现的抽象动作和稳定终态，不是新的 Function。Outline 将其作为历史软参考传给 Seed、NarrativePlan 和 Validator；NarrativePlan 在 Function `steps` 之外生成结构化 `ending`，随后 LiteraryDesign 生成独立的 `literary_ending`，Realize 只生成分段内容和 `final_ledger`，最终 `outline.ending` 从 NarrativePlan 复制。没有 `ending_spec` 的历史 Pattern 继续兼容。
 
 真实 `evolve_250` 验收已生成 Snapshot `evolve_250_contracts_20260827T100511324434Z_670b7cbb13d1`：62/62 个 Function 合同、2193 条 Observation，Snapshot 校验 PASS。合同词汇统计为 94 个 aspect、398 个 state、139 个 obligation key；以同一 Function 集合的历史 71 个 Pattern 做严格相邻链扫描，226 条边中 0 条达到 exact compatibility。该结果说明当前合同词汇仍存在离散化和命名漂移，不能据此直接重发布 PatternCatalog 或重跑盲评；下一步需先建立证据约束下的状态词汇规范化与链边语义规则。
 

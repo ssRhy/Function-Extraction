@@ -58,7 +58,11 @@ def _source():
                 "reaction_beat": "P1确认危险解除后处理余波",
                 "setup_payoffs": [],
             },
-        ]},
+        ], "ending": {
+            "resolution_actions": ["P1解决危险"],
+            "conflict_resolution": "危险消失",
+            "final_state": "P1安全",
+        }},
         "literary_design": {
             "global_design": {
                 "narrative_strategy": "第三人称限知",
@@ -92,6 +96,18 @@ def _source():
                     "exit_effect": "危险解除后保留余波",
                 },
             ],
+            "literary_ending": {
+                "entry_state": "从危险已经解除后的结局进入",
+                "resolution_expression": "通过解除后的余波表现结局",
+                "character_aftereffect": "通过继续行动表现稳定状态",
+                "world_aftereffect": "仓库恢复安静",
+                "dialogue_subtext": "确认余波而不直接表白",
+                "sensory_anchor": "潮湿墙面",
+                "motif_payoff": "",
+                "delivery_mode": "DEVELOP",
+                "closing_action_or_image": "P1收起工具",
+                "restraint_boundary": "不直接总结主题",
+            },
         },
         "contract_ledger": {
             "enabled": False, "states": [], "obligations": [], "transitions": [], "issues": [],
@@ -245,6 +261,19 @@ def test_load_outline_document_requires_existing_id(monkeypatch):
         app.load_outline_document("knowledge.db", "OUT_MISSING")
 
 
+def test_load_outline_document_adapts_legacy_ending_and_literary_design(monkeypatch):
+    source = _source()
+    source["narrative_plan"].pop("ending")
+    source["literary_design"].pop("literary_ending")
+    _mock_store(monkeypatch, source)
+
+    loaded = app.load_outline_document("knowledge.db", "OUT_TEST")
+
+    assert loaded["narrative_plan"]["ending"] == source["outline"]["ending"]
+    assert "literary_ending" not in loaded["literary_design"]
+    assert loaded["literary_design"]["steps"][0]["function_name"] == "F1"
+
+
 def test_load_outline_document_rejects_failed_validation(monkeypatch):
     source = _source()
     source["validation"]["overall_ok"] = False
@@ -347,6 +376,7 @@ def test_prompts_do_not_promote_relationships_beyond_outline_evidence():
     assert "具体动作、对话、物件变化、身体反应" in app.STORY_PROMPT
     assert "机械排比" in app.STORY_PROMPT
     assert "作为记忆锚点" in app.STORY_PROMPT
+    assert "literary_design.literary_ending" in app.STORY_PROMPT
     assert "creative_brief" not in app.STORY_PROMPT
     assert "不是结局义务" in app.STORY_VALIDATOR_PROMPT
     assert "可以保留制度、阵营和利益冲突" in app.STORY_VALIDATOR_PROMPT
@@ -461,7 +491,9 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
         if output_schema is state.ScenePlanDraft:
             assert payload["function_constraints"]["segments"][0]["function_name"] == "F1"
             assert payload["narrative_plan"]["steps"][0]["genre_realization"]
+            assert payload["narrative_plan"]["ending"]["final_state"] == "P1安全"
             assert payload["literary_design"]["global_design"]["tone"] == "克制"
+            assert payload["literary_design"]["literary_ending"]["sensory_anchor"] == "潮湿墙面"
             assert payload["allowed_character_ids"] == ["P1"]
             return _scene_plan_draft()
         if output_schema is state.SceneDevelopmentPlan:
@@ -469,6 +501,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             assert payload["scene_plan"]["scenes"][-1]["is_ending"] is True
             assert "mechanism_plan" not in payload
             assert payload["literary_design"]["steps"][0]["delivery_mode"] == "DEVELOP"
+            assert payload["literary_design"]["literary_ending"]["delivery_mode"] == "DEVELOP"
             return _scene_developments()
         if output_schema is state.StoryDraft:
             assert _kwargs["reasoning_effort"] == "medium"
@@ -476,6 +509,7 @@ def test_graph_end_to_end(tmp_path, monkeypatch):
             assert "mechanism_plan" not in payload
             assert "narrative_plan" not in payload
             assert payload["literary_design"]["global_design"]["tone"] == "克制"
+            assert payload["literary_design"]["literary_ending"]["closing_action_or_image"] == "P1收起工具"
             assert [item["scene_id"] for item in payload["scene_developments"]["developments"]] == ["S1", "S2", "S3"]
             assert payload["writing_requirements"] == {
                 "min_chinese_chars": 10000,

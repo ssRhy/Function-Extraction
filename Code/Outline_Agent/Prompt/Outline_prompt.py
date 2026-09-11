@@ -20,12 +20,13 @@ DYNAMIC_SEED_PROMPT = """你是网文大纲策划。根据题材和用户故事�
   "ending_requirements": ["core_conflict 中每个主线问题在结局必须展示的可观察直接后果"]
 }
 规则：
-1. 人物数量保持最少但至少足以承接后续 Function 的角色槽位；主人公的 stance_toward_protagonist 填 self，其他人物只能根据核心冲突和初始关系填 support、obstruct、mixed 或 neutral；role 不自动决定立场。题材标签和关系类型不能替代用户要求。关系只写用户要求或核心冲突明确需要的最低事实，不预设信任、爱情、背叛或和解。
-2. user_request 是本轮故事的最高内容约束。用户明确指定的时代、地点、身份、人物关系、关键事件和结局倾向必须保留；Seed 只能补全没有指定的内容，不能替换、弱化或反转。不能相守、失去、死亡、失败、分离等负向结局同样属于稳定终态，不得改写成团聚、共同生活、获救、成功或和解。
+1. 人物数量保持最少但足以承接用户要求和 Seed 自主规划的完整故事；主人公的 stance_toward_protagonist 填 self，其他人物只能根据核心冲突和初始关系填 support、obstruct、mixed 或 neutral；role 不自动决定立场。题材标签和关系类型不能替代用户要求。关系只写用户要求或核心冲突明确需要的最低事实，不预设信任、爱情、背叛或和解。
+2. user_request 是本轮故事的最高内容约束。用户明确指定的时代、地点、身份、人物关系、关键事件和结局倾向必须保留；Seed 只能补全没有指定的内容，不能替换、弱化或反转。用户未指定结局时，不预设任何结局类型，由 Seed 根据用户要求、人物目标和核心冲突自主选择。
 3. 当核心冲突涉及人物成长或价值选择时，主人公的 goal 或 motivation 应包含一个相关盲点、私心或错误信念，使其可能做出可理解但错误的选择并承担不可逆代价；不能为了制造错误而违背人物动机。可理解但错误的选择必须来自用户要求和人物动机，不能由结构模板强行制造。
-4. core_conflict 只把用户要求和后续 Function 链能够实际回答的问题写成核心冲突；战争、国家、宗门、家族、制度或世界危机若只提供环境压力，就留在 world_setting，不得包装成待解决主线。用户明确要求集体或系统后果时，ending_direction 必须给出同一尺度的可观察直接后果。
-5. `ending_spec` 只提供历史模板的结局参考，不是本轮必须照搬的硬合同；用户明确的创作要求优先于它。`ending_direction` 必须按“可观察解决动作 → 直接冲突结果 → 稳定终态”写成明确的单一方向。叙事尺度不得超过当前 Function 链；后续 Function 链的叙事尺度也不得超过本 Seed 和 user_request，不能反过来改写它。
-6. ending_requirements 必须逐项覆盖 core_conflict 中被写成主线的问题，每项只写一个正文可观察的直接后果。个人、关系、集体或系统主线不能互相代偿；不得写抽象主题、评价或“问题得到解决”。"""
+4. core_conflict 应忠实表达 user_request 中明确提出的主线，以及 Seed 为完成故事自主补全的核心矛盾；不要为了迁就尚未生成的 Function 链而缩小或改写冲突。战争、国家、宗门、家族、制度或世界危机可以成为主线，也可以只是环境压力，由 Seed 根据用户要求和故事判断决定；一旦作为主线，ending_direction 必须给出同一尺度的可观察直接后果。
+5. `ending_spec` 只提供历史模板的结局参考，不是本轮必须照搬的硬合同；用户明确的创作要求优先于它。`ending_direction` 必须按“可观察解决动作 → 直接冲突结果 → 稳定终态”写成明确的单一方向。Dynamic Planner 尚未生成 Function 链时，Seed 不受预设结构结局上限约束；Planner 必须随后选择能够承接本 Seed 结局的 Function 链，不能反向改写 user_request 或 ending_direction。
+6. user_request 中明确提出的每条个人、关系、集体或系统主线，都必须进入 core_conflict 和 ending_requirements；ending_direction 必须说明这些主线在结局后的对应终态。未提出的关系或主题不能凭空加入，已提出的主线不能只用另一条主线代偿。
+7. ending_requirements 必须逐项覆盖 core_conflict 中被写成主线的问题，每项只写一个正文可观察的直接后果。不得写抽象主题、评价或“问题得到解决”。"""
 
 
 SEED_PROMPT = """你是网文大纲策划。给定一条包含 FunctionContract 的 Function 序列（叙事结构骨架）和可选的历史模板 ending_spec 参考，生成本轮故事种子。人物必须覆盖合同中的角色槽位，核心冲突必须能承接合同中的前置条件和状态效果。只输出 JSON，字段名严格如下：
@@ -63,11 +64,11 @@ MECH_PROMPT = """你是叙事结构机制规划者。给定 Function 序列（�
 10. reference_transitions 只用于让 connects_to_next 与真实后继关系保持合理；不得修改既定 Function 顺序。reference_instance_cases 只用于理解可迁移的动作机制，不得照搬其中的人名、地点或题材设定。reference_role_stats 用来选择与 Function 位置相容的人物，不是硬编码主人公/反派；reference_relationship_cases 只用来校准关系变化的证据强度和最小幅度。reference_motifs 只用于校准局部结构，不得新增、删除或重排 Function。"""
 
 
-NARRATIVE_PROMPT = """你是故事大纲的叙事展开设计者。给定 Function 序列、故事种子、结构机制方案、真实实例案例、局部 motif 证据和 ending_target，为每个链位置设计唯一的题材化实现及必要叙事支架。只负责输出 NarrativePlan，不设计 literary_design。
+NARRATIVE_PROMPT = """你是故事大纲的叙事展开设计者。给定 Function 序列、故事种子、结构机制方案、真实实例案例、局部 motif 证据和 ending_target，为每个链位置设计唯一的题材化实现及必要叙事支架，并同时规划独立结局 ending。只负责输出 NarrativePlan，不设计 literary_design。
 
 输入中的 reference_motifs 是所选 Pattern 的局部 motif 证据；每个 chain step 中的 reference_instance_cases 是 Function 的真实实现参考；二者只用于题材化，不改变既定 Function 链。`ending_target` 是实际结局目标，始终来自本轮 LLM seed 的 core_conflict 和 ending_direction；Pattern 的 `ending_spec` 只在 Seed 阶段作为历史模板软参考，不是需要复制的硬要求。`ending_spec=null` 不表示缺少结局。`ending_budget` 中的伏笔、义务和关系状态是 ending 可使用的前序证据范围。
 规则：
-1. steps 必须与 Function 链逐项对应，segment_index 和 function_name 原样保留，不新增、删除或重排 Function。
+1. steps 必须与 Function 链逐项对应，segment_index 和 function_name 原样保留，不新增、删除或重排 Function；ending 是与 steps 并列的独立结局字段，不绑定新的 Function。
 2. genre_realization 必须使用 seed.world_setting、人物身份、职业、资源和限制，将 mechanism_plan.who_does_what 实现为当前题材中可发生的具体行动；可以参考 reference_instance_cases，但不得照搬与当前题材或人物不符的表面形式。
 3. genre_realization 必须保持 role_bindings、state_change 和 character_state_changes 的结构后果，不得替换行动主体、改变 Function 含义、提前完成后续 Function 或 ending。
 4. motivation_setup 只补足 mechanism_plan.why 在情节中需要预先可见的事实、利益、恐惧或代价；已有充分依据时输出空字符串，不创造新目标。
@@ -82,22 +83,22 @@ NARRATIVE_PROMPT = """你是故事大纲的叙事展开设计者。给定 Functi
 13. 当 seed 已设置主人公盲点时，在既定 Function 内落实其可理解的错误选择和不可逆代价。重大揭露后，既有利益、制度或现实条件仍须形成阻力；认错、觉悟、退兵或牺牲不能自动清除多个无直接因果关系的系统问题。不得为此新增、删除或重排 Function。
 14. 保持冲突尺度一致：core_conflict 中每个被写成主线的个人、关系、集体或系统问题，都必须由某个既定 Function、setup_payoff 或 ending 获得同一尺度的可观察后果；无法由当前结构承接的宏大内容只能作为 world_setting 背景，不得继续升级成阴谋主线。
 15. 在不改变既定人物状态的前提下，可用对立或互补的行为方式表现人物差异：让目标、恐惧和关系态度通过具体选择、对话和代价显现，不用抽象性格标签代替情节。
-16. 可选择一个与当前世界、职业或人物习惯相符的动作或物件作为记忆锚点，并在后续既定 Function 或 ending 中改变其含义或用途。没有自然回收位置时不要强行加入；不为追求爆点强制增加悬念、多重反转或极端事件。"""
+16. 可选择一个与当前世界、职业或人物习惯相符的动作或物件作为记忆锚点，并在后续既定 Function 或 ending 中改变其含义或用途。没有自然回收位置时不要强行加入；不为追求爆点强制增加悬念、多重反转或极端事件。
+17. ending 必须把 ending_target 转化为具体的 resolution_actions、conflict_resolution 和 final_state；只能使用 Function 链已形成的条件、证据、资源、选择或关系状态，不能新增解决方案、人物或关键资源。ending 的核心行动不能重演任何 Function 已经完成的核心行动；如果某个解决动作已在 Function 段完成，ending 只能承担其直接后果、余波或其他尚未完成的结局动作。"""
 
 NARRATIVE_PROMPT += """
 
-输出协议：只输出一个 JSON 对象，字段必须严格为 steps，不要包裹 narrative_plan 或 literary_design。每个 step 使用 NarrativeStep 字段：
-{"steps": [{"segment_index": 1, "function_name": "函数名", "genre_realization": "题材化实现", "motivation_setup": "动机铺垫或空字符串", "connective_event": "连接事件或空字符串", "reaction_beat": "必要反应或空字符串", "setup_payoffs": []}]}
-steps 必须与输入 Function 链逐项对应；不要复制或输出 MechanismPlan 之外的结构对象。"""
+输出协议：只输出一个 JSON 对象，字段必须严格为 steps 和 ending，不要包裹 narrative_plan 或 literary_design。每个 step 使用 NarrativeStep 字段，ending 使用 NarrativeEnding 字段：
+{"steps": [{"segment_index": 1, "function_name": "函数名", "genre_realization": "题材化实现", "motivation_setup": "动机铺垫或空字符串", "connective_event": "连接事件或空字符串", "reaction_beat": "必要反应或空字符串", "setup_payoffs": []}], "ending": {"resolution_actions": ["具体解决动作"], "conflict_resolution": "核心冲突的直接结果", "final_state": "稳定终态"}}
+steps 必须与输入 Function 链逐项对应；ending 不得伪装成 Function 或放入 steps；不要复制或输出 MechanismPlan 之外的结构对象。"""
 
 
-REALIZE_PROMPT = """你是大纲实现者。给定 Function 序列（含唯一 segment_index、FunctionContract、状态前置条件、状态效果、义务效果、occurrence_index/occurrence_total）、ending_target、ending_budget、故事种子、结构机制方案、叙事展开方案和文学性设计方案，写成分段因果大纲，不写场景、不写正文。只输出 JSON，字段名严格如下：
-{"segments": [{"segment_index": 1, "function_name": "函数名", "beats": ["因果要点"], "link": "衔接说明"}], "final_ledger": ["结局前的人物目标/关系/秘密/资源/未解决冲突/世界规则"], "ending": {"resolution_actions": ["具体解决动作"], "conflict_resolution": "核心冲突如何解决", "final_state": "主角或核心关系的稳定终态"}}
-其中 final_ledger 必须是字符串数组；每一项都是一条可读的状态记录，不得输出对象、字典、嵌套数组或额外字段。`ending_target` 是必须回应的唯一实际结局目标，来源是本轮 LLM seed，而不是 Pattern 的 `ending_spec`；`ending_budget` 是 ending 允许使用的前序证据和关系状态上限。`ending_spec` 只保留在上游/导出结果中供审计，不把它的具体解决动作、must_show 或 final_state重新变成硬要求。实际结局始终写在输出的 `ending` 字段中。ending 的解决尺度必须与 core_conflict 一致：核心冲突若包含集体、制度或世界层面的主线，ending 必须展示该层面的可观察直接后果；仅揭露一个反派、洗清个人冤屈、恢复身份或安排人物迁移，不足以代替这些后果。稳定终态只要求核心人物的选择及其直接后果落定，可以保留制度阻力、利益冲突和无法挽回的损失；不得把个人认错、退让或牺牲写成整个战争、宗门、家族或社会系统自动恢复正常。
-每段写 2-4 个因果要点：先按需落实 narrative_plan.motivation_setup，再让 genre_realization 及其结构行动实际发生，随后按需落实 reaction_beat 和在本段兑现的 setup_payoffs。文学性设计只用于选择行动的可观察表现、对话、感官、环境和节奏，不得替代或改写结构行动。不得自行创造另一套题材表现、动机、反应或伏笔。link 使用 narrative_plan.connective_event；若该字段为空，只能直接表述 mechanism_plan.connects_to_next 已有的结构条件，最后一段写清它如何把已形成的条件交给独立 ending。人物变化必须落实 mechanism_plan.character_state_changes 中的触发证据，状态结果不得超出 mechanism_plan，不得提前完成下一 Function。单次救援、真相揭露、资源获取、情感表达或共同对抗，只能产生证据直接支持的状态变化。若某 Function 重复出现，每段必须按 narrative_plan 的不同题材实现递进，禁止雷同。ending 是全部 Function 段之后的独立结局收束单元，不占用新的 Function 位置；它必须回收 ending_budget 中列出的 payoff_segment_index=null 伏笔和必要义务，并依据前序形成的证据、资源、选择、对手弱点或关系条件实际完成 ending_target 的 resolution_actions。ending 只能完成已由 Function 链开启并获得充分条件的变化，不是新的 Function；其关系类型、关系阶段和承诺强度不得超过 ending_budget 的关系状态上限（关系状态上界）。恢复信任、形成合作、解除敌意、承担责任或表达关心只能在各自维度内收束，不得自动推出另一种关系或永久承诺。若 ending_target 的表述宽泛，必须使用前序已证明的最小终态兑现。真正解决核心冲突的行动必须发生；逮捕、晋升、制度变化等解决后的社会结果可以在 final_state 中概述，不要求扩展成新的主要情节。setup_payoff 或义务的兑现必须写成“可观察动作 → 产生后果”，不能只写抽象的“已解决/已履行”。"""
+REALIZE_PROMPT = """你是大纲实现者。给定 Function 序列（含唯一 segment_index、FunctionContract、状态前置条件、状态效果、义务效果、occurrence_index/occurrence_total）、ending_target、ending_budget、故事种子、结构机制方案、叙事展开方案和文学性设计方案，写成分段因果大纲，不写场景、不写正文。NarrativePlan.ending 已经确定结构结局，LiteraryDesign.literary_ending 已经确定结局的表达方向；本阶段只实现它们，不重新设计结局。只输出 JSON，字段名严格如下：
+{"segments": [{"segment_index": 1, "function_name": "函数名", "beats": ["因果要点"], "link": "衔接说明"}], "final_ledger": ["结局前的人物目标/关系/秘密/资源/未解决冲突/世界规则"]}
+其中 final_ledger 必须是字符串数组；每一项都是一条可读的状态记录，不得输出对象、字典、嵌套数组或额外字段。ending 不在本阶段输出，由 NarrativePlan.ending 作为最终 outline.ending 的唯一结构来源。实现前序 Function 段和 final_ledger 时，必须尊重 ending_budget 的关系状态上界（状态上界），可以保留制度阻力、阵营和利益冲突，不得把尚未发生的结局选择提前写进 Function 段。每段写 2-4 个因果要点：先按需落实 narrative_plan.motivation_setup，再让 genre_realization 及其结构行动实际发生，随后按需落实 reaction_beat 和在本段兑现的 setup_payoffs。文学性设计只用于选择行动的可观察表现、对话、感官、环境和节奏，不得替代或改写结构行动；literary_design.literary_ending 只用于指导结局如何呈现，不得改变 narrative_plan.ending。不得自行创造另一套题材表现、动机、反应、伏笔或结局。link 使用 narrative_plan.connective_event；若该字段为空，只能直接表述 mechanism_plan.connects_to_next 已有的结构条件，最后一段写清它如何把已形成的条件交给独立 ending。人物变化必须落实 mechanism_plan.character_state_changes 中的触发证据，状态结果不得超出 mechanism_plan，不得提前完成下一 Function。单次救援、真相揭露、资源获取、情感表达或共同对抗，只能产生证据直接支持的状态变化。若某 Function 重复出现，每段必须按 narrative_plan 的不同题材实现递进，禁止雷同。"""
 
 
-REALIZE_PROMPT += " 补充硬规则：Function 段与 ending 必须分配唯一的事件所有权。每个核心行动只能在一个 Function 段或 ending 中实际发生；若 ending_target 的某个 resolution_action 已由 segments.beats 明确完成，ending 的 resolution_actions 只能写该行动的直接后果、余波或尚未完成的其他结局动作，不得再次安排或重演。conflict_resolution 和 final_state 可以概述前序已完成的行动，但概述不算新的 ending 行动。"
+REALIZE_PROMPT += " 补充硬规则：Function 段与 ending 必须分配唯一的事件所有权。每个核心行动只能在一个 Function 段或 ending 中实际发生；ending 已由 NarrativePlan 确定，Realize 不得重新生成或改写 ending。"
 
 
 VALIDATE_PROMPT = """你是大纲校验者。给定原始 user_request、带唯一 segment_index 的目标 Function 序列、FunctionContract 账本、ending_target、ending_budget、故事种子、结构机制方案、叙事展开方案、文学性设计方案和分段大纲，逐段检查情节能否恢复出目标 Function，并检查合同前置条件、状态连续性、角色一致性、义务是否清偿和结局闭合。只输出 JSON，字段名严格如下：

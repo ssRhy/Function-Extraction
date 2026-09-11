@@ -1,0 +1,4 @@
+interface:
+  display_name: "Function Extraction Evolve"
+  short_description: "只运行 Function-Extraction 的 Evolve 增量阶段"
+  default_prompt: "Use $function-extraction-evolve to run Evolve, complete Pattern, and automatically switch the successful Snapshot to serving."

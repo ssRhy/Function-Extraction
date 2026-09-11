@@ -23,7 +23,7 @@ SCENE_PLAN_PROMPT = """你是短篇故事场景结构策划。把既定大纲拆
 6. 每场必须明确目标、阻碍、关键行动和状态变化；transition 只承接已经确定的 connective_event 或 causal_to_next。
 7. `ending` 必须至少包含一个、最多三个场景，并且只能放在全部 Function 场景之后。它是独立结局，不绑定新的 Function；必须把 ending_target 的 resolution_actions、ending_must_show 和 required_final_state 分配为可观察行动及后果。最后一个 ending 场景必须完成结局兑现，不能只写准备、承诺或为后续故事埋伏笔。
 8. 场景只能实现已有关系变化，不得把理解、信任、合作、和解或关心升级为另一种关系或更高承诺。
-9. 若输入提供 literary_design，只把它作为场景的表达、环境、感官和节奏依据；不得把文学设计改写成新的核心事件、人物、资源、关系变化或结局方案。"""
+9. 若输入提供 literary_design，只把它作为场景的表达、环境、感官和节奏依据；Function 场景使用对应 steps，ending 场景使用 literary_design.literary_ending；不得把文学设计改写成新的核心事件、人物、资源、关系变化或结局方案。"""
 
 
 DEVELOP_SCENES_PROMPT = """你是场景叙事开发器。输入中的情节、场景顺序和结局已经确定；只标出需要重点展开的既定行动，不改变情节，只输出 JSON：
@@ -35,7 +35,7 @@ DEVELOP_SCENES_PROMPT = """你是场景叙事开发器。输入中的情节、�
 3. 重大行动、不可逆转折或核心结局用 DRAMATIZE；动机形成、重大事件后的消化或关键决定用 DEVELOP；时间移动、信息衔接或既定重复过程可用 COMPRESS。
 4. expand_points 只列本场已有但容易被一句带过的关键行动、证据、代价、状态变化或结局动作，不新增人物、冲突、线索、援助、解决方案或文学要求。
 5. 不撰写正文，不评估或修订上游计划。
-6. 若输入提供 literary_design，使用其中的 delivery_mode 和表达边界作为轻量提示；不得把它扩展成新的情节或结构要求。"""
+6. 若输入提供 literary_design，Function 场景使用对应 steps 的 delivery_mode，ending 场景使用 literary_ending.delivery_mode 和 restraint_boundary 作为轻量提示；不得把它扩展成新的情节或结构要求。"""
 
 
 STORY_PROMPT = """你是中文短篇小说作者。把输入中已经确定的场景结构和叙事开发方案写成一篇完整短篇小说，只输出 JSON，字段名严格如下：
@@ -59,7 +59,8 @@ STORY_PROMPT = """你是中文短篇小说作者。把输入中已经确定的�
 14. 避免连续使用相同句式、机械排比、同义反复、形容词堆砌、极端程度词和过多感叹号。每段环境或感官描写都应影响人物此刻的行动、判断、关系互动或伏笔回收，不能只作装饰和字数填充。
 15. 人物反差应通过同一人物在公开职责与私人选择、外在克制与实际行动之间的差异自然显现；可复用既定场景中的动作或物件作为记忆锚点，但只能回收已有 setup_payoffs，不新增情节、关系或结局方案。
 16. 若输入提供 literary_design，落实其中的 global_design 和对应 segment_index 的文学实现：遵守叙述方式、整体气质、语言质地、人物表达、世界作用力、感官策略、核心意象和表达边界。文学设计只决定既定结构如何被看见、听见和感受到，可以补充不具有独立结构后果的动作、物件、对话、沉默、环境反应和感官细节；不得改变 scene_plan、function_constraints、人物状态、关系结果或结局目标。
-17. literary_design 中的文学质量要求不是机械结局条件；如果它与原始 user_request 或固定结构输入冲突，以原始要求和固定结构输入为准。"""
+17. 若输入提供 literary_design，ending 场景还必须落实 literary_design.literary_ending 的 entry_state、resolution_expression、character_aftereffect、world_aftereffect、dialogue_subtext、sensory_anchor、motif_payoff、closing_action_or_image 和 restraint_boundary；这些字段只决定既定 ending 如何呈现，不得新增或改写 ending 的解决动作和稳定终态。
+18. literary_design 中的文学质量要求不是机械结局条件；如果它与原始 user_request 或固定结构输入冲突，以原始要求和固定结构输入为准。"""
 
 
 STORY_VALIDATOR_PROMPT = """你是 Story Validator。只依据输入中的原始 user_request、seed、Function 约束、场景计划、场景展开方案、结局目标和正文，判断正文是否可以导出，只输出 JSON：
@@ -77,4 +78,4 @@ STORY_VALIDATOR_PROMPT = """你是 Story Validator。只依据输入中的原始
 
 SCENE_PLAN_PROMPT += " 事件所有权规则：每个核心行动只能在一个 Function 场景或 ending 场景中实际发生。若 ending_target 的 resolution_action 已由 Function 场景的 beats 明确完成，ending 只能安排其直接后果、余波或尚未完成的其他结局动作，不得重复安排或重演同一行动。"
 STORY_PROMPT += " 事件所有权规则：ending 只执行尚未由 Function 场景完成的结局动作；已经在 Function 场景发生的动作，在 ending 中只能通过直接后果、余波或稳定终态回收，不得再次重演。"
-STORY_VALIDATOR_PROMPT += " 事件所有权规则：目标结局动作只要在某个 Function 场景或 ending 场景中有一次可观察完成即可；如果固定 scene_plan 要求同一核心行动既由 Function 场景完成又由 ending 场景再次完成，属于固定输入矛盾，overall_ok 必须为 false、repairable 必须为 false，并说明重复的 scene_id。"
+STORY_VALIDATOR_PROMPT += " 事件所有权规则：目标结局动作只要在某个 Function 场景或 ending 场景中有一次可观察完成即可；如果固定 scene_plan 要求同一核心行动既由 Function 场景完成又由 ending 场景再次完成，属于固定输入矛盾，overall_ok 必须为 false、repairable 必须为 false，并说明重复的 scene_id。literary_design.literary_ending 只作结局表达依据，不得被正文改写成新的结局动作或终态。"

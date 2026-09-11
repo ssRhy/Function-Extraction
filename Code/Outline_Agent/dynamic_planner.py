@@ -257,6 +257,8 @@ def _planner_prompt(seed, user_request, chain, references):
         "每次最多输出 3 个 extensions；每个 extension 必须包含 operation、function_ids、motif_ids、"
         "reason、expected_state、overlap_sizes、novelty_reason、goal_fit、complete 字段。"
         "每次只扩展当前链，不要改写当前链；候选链是否完整只根据 story_seed、user_request 和 FunctionContract 判断。"
+        "必须优先选择能够实际承接 story_seed.ending_direction 和 ending_requirements 的 Function，"
+        "不能用过短或不相容的链把 Seed 已确定的关系终态改写成另一种结局。"
         "链总长度不能超过 8。complete=true 表示当前链已经足够。JSON 形状示例："
         '{"extensions":[{"operation":"EXPLORE","function_ids":["F_ID"],'
         '"motif_ids":[],"reason":"理由","expected_state":"状态变化",'

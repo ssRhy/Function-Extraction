@@ -1,0 +1,4 @@
+interface:
+  display_name: "Function Extraction Story"
+  short_description: "只运行 Function-Extraction 的 Story 故事生成阶段"
+  default_prompt: "Use $function-extraction-story to run Story and automatically complete Pattern, Outline, and正文 generation."

@@ -2315,3 +2315,33 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - `Code/Outline_Agent/app.py` 保留原有 `scaffold_node`，但将一次 `ScaffoldDesignResponse` 联合调用改为两次顺序调用：先用独立 `NarrativePlan` 生成并校验叙事展开，再把完整结果传给独立 `LiteraryDesign` 生成。叙事校验失败时不会调用文学设计；两者仍分别写入状态并由下游同时读取。
 - `Code/Outline_Agent/Prompt/Outline_prompt.py` 与 `Prompt/Literary_prompt.py` 各自拥有独立输出协议；删除 `ScaffoldDesignResponse` 和 `SCAFFOLD_OUTPUT_PROMPT`，文学 Prompt 明确读取已经完成并校验通过的 NarrativePlan。没有新增 LangGraph 节点、Agent、数据库字段、Best-of-N 或正文后置润色层。
 - Outline 测试新增调用顺序、NarrativePlan 失败短路和 LiteraryDesign 输入完整 NarrativePlan 的断言，并迁移 Dynamic/Contract 图测试。Outline/Story 回归 `61 passed`，Dynamic/Contract 回归 `20 passed`；`compileall` 与 `git diff --check` 通过。全仓测试仍在收集阶段受环境中的 `chromadb` 缺失及 `transformers/torch` 的 `NameError: nn` 阻断；未启动真实 LLM，未修改正式 SQLite。
+
+## 301. NarrativePlan 统一承接结构结局，LiteraryDesign 独立承接结局表达（2026-09-11）
+
+- `NarrativePlan` 新增必需的 `NarrativeEnding`，与 `steps` 并列；同一次 NarrativePlan 调用同时确定 Function 段如何发生、结局解决动作、冲突结果和稳定终态。`ending` 不是新的 Function，不占用 `segment_index`。
+- `LiteraryDesign` 新增必需的 `LiteraryEnding`，第二次调用读取已完成的 `narrative_plan`（包括其 `ending`），只安排结局的进入状态、表现方式、人物/世界余波、感官落点、意象回收、节奏和留白，不改写结构结局。
+- `OutlineRealization` 删除 LLM 生成的 `ending` 字段；`realize_node` 只请求 `segments` 与 `final_ledger`，随后确定性地把 `narrative.ending` 复制为最终 `outline.ending`。因此最终大纲仍保留 `outline.ending`，但不再存在第二个结局生成来源。
+- Story 的场景计划、场景开发和正文 Prompt 对 ending 场景明确读取 `literary_design.literary_ending`；Function 场景继续读取对应文学 steps。NarrativePlan、LiteraryDesign 和最终 Outline 仍作为独立对象导出。
+- Outline/Story/Dynamic/Contract 聚焦回归 `82 passed`；其中 Story 读取端保留旧版 `narrative_plan`/`literary_design` 的兼容适配。全仓测试收集仍被环境中的 `chromadb` 缺失及 `transformers/torch` 的 `NameError: nn` 阻断。未启动真实 LLM，未修改正式 SQLite。
+
+## 302. LiteraryDesign 结构化输出契约收紧（2026-09-11）
+
+- 一次 Dynamic 真实运行在 LiteraryDesign 阶段失败：模型先返回不完整的 `global_design.motif_plan`，随后在重试中返回多余 JSON；已有历史 Outline/Story 文件不能作为本次成功结果。
+- `LiteraryDesign` Prompt 现在明确规定 `motif_plan` 只能为 `null`，或同时包含 `motif`、`initial_meaning`、`transformation`、`final_payoff` 四个非空字段的完整对象；没有放宽 Schema，也没有静默丢弃半对象。
+- 共享 `chat_structured` 重试反馈改为列出完整字段路径，并明确禁止第二个 JSON、Markdown 围栏和对象外解释，保持单一 JSON 解析契约。
+- `test_llm.py` 与 Outline/Story/Dynamic/Contract 聚焦回归分别通过（`46 passed`、`82 passed`），`compileall` 与 `git diff --check` 通过；本轮未重跑真实 LLM，未修改正式 SQLite。
+
+## 303. Dynamic Seed 自主决定结局倾向（2026-09-11）
+
+- Dynamic Seed Prompt 删除了对负向/分离结局的单向暗示；用户未指定结局时，不预设团圆、分离或开放等类型，由 Seed 根据原始请求、人物目标和核心冲突自主决定。
+- 所有用户明确提出的个人、关系、集体或系统主线，都必须在 `core_conflict`、`ending_requirements` 和 `ending_direction` 中得到对应终态；不凭空添加未提出的关系或主题，也不规定任何具体结局类型。`ending_direction` 继续作为结构接口，要求“可观察选择 → 直接结果 → 稳定终态”。
+- Dynamic Seed 不再要求 `core_conflict` 必须能被尚未生成的 Function 链回答；Seed 可以自主决定冲突尺度，后续 Dynamic Planner 负责寻找能够承接它的 Function 链。
+- Dynamic Planner Prompt 明确必须选择能够承接 Seed 已确定结局的 Function 链，不能用过短或不相容的链反向改写 Seed 的关系终态。未新增 Agent、字段或数据库结构。
+- 聚焦回归 `52 passed`；未启动真实 LLM，未修改正式 SQLite。
+
+### 本轮补充（2026-09-11）：新增项目级 Prompt Audit Skill
+
+- 新增 `skills/function-extraction/function-extraction-prompt-audit/`，按 Anthropic 官方 `prompt-audit` 的盘点、provenance、模式扫描、报告/proposed diff 结构定制为本项目流程。
+- Skill 明确审计范围覆盖实际 Prompt、请求组装、Schema/结构化重试及项目 Skill；保留 `user_request → Seed → Planner`、Function/Contract、事件所有权、LiteraryDesign 边界、Validator 证据和 Snapshot/正式库安全，不把 Claude 模型结论直接套用到当前 DeepSeek。
+- 默认只读审计；只有用户明确要求落地时才应用修改。真实 LLM 对照必须固定请求、Snapshot、planner mode 并使用数据库副本，不能把机械 PASS 当作文学质量证明。
+- `quick_validate.py`、`compileall` 和 `git diff --check` 通过；未启动真实 LLM，未修改正式 SQLite。
