@@ -614,7 +614,7 @@ def test_validate_distinguishes_seed_ending_target_from_generated_ending(monkeyp
     assert result["validation"]["overall_ok"] is True
 
 
-def test_prompts_limit_relationship_state_to_function_evidence():
+def test_prompts_keep_seed_and_narrative_boundaries():
     assert not hasattr(app, "INTERPRET_REQUEST_PROMPT")
     assert not hasattr(app, "CreativeBrief")
     assert "creative_brief" not in app.DYNAMIC_SEED_PROMPT
@@ -622,25 +622,29 @@ def test_prompts_limit_relationship_state_to_function_evidence():
     assert "creative_brief" not in app.SEED_PROMPT
     assert "creative_brief" not in app.NARRATIVE_PROMPT
     assert "creative_brief" not in app.VALIDATE_PROMPT
-    assert "题材标签" in app.SEED_PROMPT
     assert "关系类型" in app.SEED_PROMPT
     assert "可观察解决动作 → 直接冲突结果 → 稳定终态" in app.SEED_PROMPT
-    assert "历史模板的结局参考" in app.SEED_PROMPT
-    assert "用户明确的创作要求优先于它" in app.SEED_PROMPT
-    assert "可理解但错误的选择" in app.SEED_PROMPT
-    assert "叙事尺度不得超过当前 Function 链" in app.SEED_PROMPT
-    assert "只提供环境压力" in app.SEED_PROMPT
-    assert "用户明确指定的时代、地点、身份、人物关系、关键事件和结局倾向必须保留" in app.DYNAMIC_SEED_PROMPT
-    assert "不能替换、弱化或反转" in app.DYNAMIC_SEED_PROMPT
-    assert "用户未指定结局时，不预设任何结局类型" in app.DYNAMIC_SEED_PROMPT
-    assert "user_request 中明确提出的每条个人、关系、集体或系统主线" in app.DYNAMIC_SEED_PROMPT
-    assert "如果 user_request 明确要求爱情故事" not in app.DYNAMIC_SEED_PROMPT
-    assert "不能相守、失去、死亡、失败、分离等负向结局" not in app.DYNAMIC_SEED_PROMPT
-    assert "后续 Function 链能够实际回答" not in app.DYNAMIC_SEED_PROMPT
-    assert "不要为了迁就尚未生成的 Function 链" in app.DYNAMIC_SEED_PROMPT
+    for prompt in (app.DYNAMIC_SEED_PROMPT, app.SEED_PROMPT):
+        assert "用户明确指定的时代、地点、人物关系、核心事件和结局事实必须保留" in prompt
+        assert "不得替换、弱化或反转" in prompt
+        assert "core_conflict 应说明故事开始时已经存在的具体压力、主人公当下的目标" in prompt
+        assert "人物的 goal 和 motivation 必须能够解释其行动" in prompt
+        assert "用户明确指定分离、失败、死亡、不复合或其他结局事实时" in prompt
+        assert "只补充实现过程、直接后果和稳定终态" in prompt
+    assert "`ending_spec` 只作历史参考，不能覆盖用户要求" in app.SEED_PROMPT
+    assert "可理解但错误的选择" not in app.DYNAMIC_SEED_PROMPT
+    assert "可理解但错误的选择" not in app.SEED_PROMPT
+    assert "user_request 中明确提出的每条个人、关系、集体或系统主线" not in app.DYNAMIC_SEED_PROMPT
+    assert "不要为了迁就尚未生成的 Function 链" not in app.DYNAMIC_SEED_PROMPT
     assert "ending_target 来自本轮 Seed" in app.NARRATIVE_PROMPT
-    assert "异常、秘密或威胁" in app.NARRATIVE_PROMPT
-    assert "改变选择或解决条件" in app.NARRATIVE_PROMPT
+    assert "genre_realization 必须把 mechanism_plan 的核心行动题材化" in app.NARRATIVE_PROMPT
+    assert "尽早呈现已有的主要处境和压力" in app.NARRATIVE_PROMPT
+    assert "只用于补足既定行动的动机、前因、反应和信息揭示" in app.NARRATIVE_PROMPT
+    assert "每个 step 都应让已有的行动、信息、压力、选择、代价或关系变化得到进一步落实" in app.NARRATIVE_PROMPT
+    assert "setup_payoffs 只能服务后续已有 Function 或 ending" in app.NARRATIVE_PROMPT
+    assert "ending 必须把 Seed 的 ending_direction 和 ending_requirements 具体化" in app.NARRATIVE_PROMPT
+    assert "异常、秘密或威胁" not in app.NARRATIVE_PROMPT
+    assert "改变选择或解决条件" not in app.NARRATIVE_PROMPT
     assert "一次性完整供述" not in app.NARRATIVE_PROMPT
     assert "对立或互补的行为方式" not in app.NARRATIVE_PROMPT
     assert "动作或物件作为记忆锚点" not in app.NARRATIVE_PROMPT
@@ -658,40 +662,27 @@ def test_prompts_limit_relationship_state_to_function_evidence():
     assert "overall_ok 必须为 false" in app.VALIDATE_PROMPT
 
 
-def test_outline_core_prompt_lengths_match_compression_target():
-    before = {
-        "NARRATIVE_PROMPT": 3131,
-        "REALIZE_PROMPT": 1323,
-        "VALIDATE_PROMPT": 2558,
-    }
-    after = {
-        "NARRATIVE_PROMPT": len(app.NARRATIVE_PROMPT),
-        "REALIZE_PROMPT": len(app.REALIZE_PROMPT),
-        "VALIDATE_PROMPT": len(app.VALIDATE_PROMPT),
-    }
-    assert after == {
-        "NARRATIVE_PROMPT": 1652,
-        "REALIZE_PROMPT": 811,
-        "VALIDATE_PROMPT": 1106,
-    }
-    reduction = 1 - sum(after.values()) / sum(before.values())
-    assert 0.35 <= reduction <= 0.50
-
-
 def test_literary_design_prompt_and_schema_are_independent_from_narrative_plan():
-    assert "文学性设计不负责创造新的核心结构" in app.LITERARY_DESIGN_PROMPT
-    assert "全局文学设计" in app.LITERARY_DESIGN_PROMPT
-    assert "逐结构段文学实现" in app.LITERARY_DESIGN_PROMPT
+    assert "文学设计只能改变既定结构的呈现方式" in app.LITERARY_DESIGN_PROMPT
+    assert "全局设计应确定" in app.LITERARY_DESIGN_PROMPT
+    assert "逐结构段只说明" in app.LITERARY_DESIGN_PROMPT
     assert "已经完成并校验通过的 NarrativePlan" in app.LITERARY_DESIGN_PROMPT
-    assert "开头应尽快让读者看见人物欲望、现实压力或当前异常" in app.LITERARY_DESIGN_PROMPT
+    assert "从哪个已有的具体处境进入故事" in app.LITERARY_DESIGN_PROMPT
+    assert "使读者尽早理解人物目标和压力" in app.LITERARY_DESIGN_PROMPT
     assert "语言应清晰、流畅、适合连续阅读" in app.LITERARY_DESIGN_PROMPT
-    assert "可理解的情绪反馈" in app.LITERARY_DESIGN_PROMPT
-    assert "不单独堆砌氛围" in app.LITERARY_DESIGN_PROMPT
-    assert "自然出现且能在结局回收" in app.LITERARY_DESIGN_PROMPT
-    assert "连续低强度段落" in app.LITERARY_DESIGN_PROMPT
-    assert "本段结束后留下的新压力、信息、选择或情绪余波" in app.LITERARY_DESIGN_PROMPT
+    assert "关键选择和关系变化必须清楚" in app.LITERARY_DESIGN_PROMPT
+    assert "不能为了制造氛围增加新的结构事件" in app.LITERARY_DESIGN_PROMPT
+    assert "`motif_plan` 与 `expression_boundaries`" in app.LITERARY_DESIGN_PROMPT
+    assert "只有自然出现且能够回收的物件、动作或景象才设置 motif" in app.LITERARY_DESIGN_PROMPT
+    assert "连续低强度" in app.LITERARY_DESIGN_PROMPT
+    assert "既定核心行动如何被读者看见" in app.LITERARY_DESIGN_PROMPT
+    assert "本段采用 DRAMATIZE、DEVELOP 或 COMPRESS 的原因" in app.LITERARY_DESIGN_PROMPT
+    assert "段末如何保留已有的后果、未决问题、选择或情绪余波" in app.LITERARY_DESIGN_PROMPT
+    assert "motif_state" in app.LITERARY_DESIGN_PROMPT
     assert "现实、浪漫、冷峻、荒诞、悬疑或诗性" not in app.LITERARY_DESIGN_PROMPT
     assert "文学性设计不得" not in app.LITERARY_DESIGN_PROMPT
+    assert "文学性设计不负责创造新的核心结构" not in app.LITERARY_DESIGN_PROMPT
+    assert "最终输出中的 literary_design" not in app.LITERARY_DESIGN_PROMPT
     assert "开篇钩子" not in app.LITERARY_DESIGN_PROMPT
     assert "motif_plan 只能二选一" in app.LITERARY_DESIGN_PROMPT
     assert "同时包含 motif、initial_meaning、transformation、final_payoff 四个非空字段" in app.LITERARY_DESIGN_PROMPT

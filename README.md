@@ -94,10 +94,10 @@ Pattern 是对故事结构组合方式的更高层总结，不等同于某一篇
 - `StoryCLI` 是面向用户的统一命令行入口。
 - `StoryUI` 提供 Bootstrap、Evolve 和 Story 的轻量 Tkinter 界面。
 
-Story 有两种规划方式：
+Story 有两种规划方式，Story Skill 默认使用 Dynamic：
 
-- **Published Pattern**：读取 serving Snapshot 中已发布的 Pattern，结构更稳定、可控。
 - **Dynamic Planner**：遵循“用户要求 → Seed → Planner”，根据当前创作要求动态组合兼容的 Function，更灵活。
+- **Published Pattern**：只有明确选择时才读取 serving Snapshot 中已发布的 Pattern，结构更稳定、可控。
 
 ### 持久化与版本
 
@@ -235,28 +235,28 @@ Evolve 成功的前提是 Function 和 Pattern 阶段都通过。成功后新 Sn
 调用：function-extraction-story
 ```
 
-它会自动执行：
+它会自动执行（默认使用 Dynamic）：
 
 ```text
-用户要求 → Pattern 或 Dynamic Planner → Outline → Story 正文
+用户要求 → Dynamic Planner（默认）/ Published Pattern（显式选择）→ Outline → Story 正文
 ```
 
-Published Pattern：
-
-```bash
-cd Code
-.venv/bin/python -X utf8 -m StoryCLI story generate \
-  --request "现代情感：写一次克制的家庭关系修复，结局要有可观察的解决行动" \
-  --planner-mode published
-```
-
-Dynamic Planner：
+默认 Dynamic Planner：
 
 ```bash
 cd Code
 .venv/bin/python -X utf8 -m StoryCLI story generate \
   --request "古风仙侠：写一个雨夜寻药故事，结局必须完成真相揭示" \
   --planner-mode dynamic
+```
+
+明确选择 Published Pattern：
+
+```bash
+cd Code
+.venv/bin/python -X utf8 -m StoryCLI story generate \
+  --request "现代情感：写一次克制的家庭关系修复，结局要有可观察的解决行动" \
+  --planner-mode published
 ```
 
 较长的创作要求可以改用 `--request-file`，它和 `--request` 二选一。创作要求中应包含且只包含一个可识别的题材方向。Story Skill 只消费 serving Snapshot，不运行 Bootstrap 或 Evolve。

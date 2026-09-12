@@ -680,7 +680,7 @@ def generate_dynamic_candidates(
                 {"role": "user", "content": _planner_prompt(
                     seed, user_request, current_ids, references,
                 )},
-            ], DynamicPlanResponse)
+            ], DynamicPlanResponse, reasoning_effort="medium")
             extensions = response.extensions[:max_extensions]
             for extension in extensions:
                 try:

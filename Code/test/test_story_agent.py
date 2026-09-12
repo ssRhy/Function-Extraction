@@ -367,6 +367,9 @@ def test_prompts_do_not_promote_relationships_beyond_outline_evidence():
     assert "中篇网文小说场景结构策划" in app.SCENE_PLAN_PROMPT
     assert "短篇故事场景结构策划" not in app.SCENE_PLAN_PROMPT
     assert "allowed_character_ids" in app.SCENE_PLAN_PROMPT
+    assert "相邻场景应把已有的压力、信息、选择、代价或关系变化继续向前落实" in app.SCENE_PLAN_PROMPT
+    assert "transition 只承接已有的 connective_event、causal_to_next 或未决后果" in app.SCENE_PLAN_PROMPT
+    assert "不新增核心事件" in app.SCENE_PLAN_PROMPT
     assert "pacing_mode" not in app.SCENE_PLAN_PROMPT
     assert "pacing_mode" in app.DEVELOP_SCENES_PROMPT
     assert "literary_plan" not in app.DEVELOP_SCENES_PROMPT
@@ -375,15 +378,17 @@ def test_prompts_do_not_promote_relationships_beyond_outline_evidence():
     assert "中篇网文小说作者" in app.STORY_PROMPT
     assert "短篇小说作者" not in app.STORY_PROMPT
     assert "避免抽象总结" in app.STORY_PROMPT
-    assert "正文可以补充不改变主线结果的配角" in app.STORY_PROMPT
-    assert "关系上界和结局方向" in app.STORY_PROMPT
+    assert "scene_plan 规定的是结构结果，不是逐句写法" in app.STORY_PROMPT
+    assert "可以补充不改变主线因果的对话、心理、身体反应、职业细节、环境反应、日常动作和自然过渡" in app.STORY_PROMPT
+    assert "关系上界、核心冲突或用户指定的结局" in app.STORY_PROMPT
     assert "具体动作、对话、证据、物件变化、身体反应" in app.STORY_PROMPT
     assert "根据情节重要性和 pacing_mode 自然分配篇幅" in app.STORY_PROMPT
     assert "DRAMATIZE 充分展开" in app.STORY_PROMPT
     assert "DEVELOP 适度展开" in app.STORY_PROMPT
     assert "COMPRESS 简洁处理" in app.STORY_PROMPT
-    assert "10000 字以上" in app.STORY_PROMPT
-    assert "软性建议" in app.STORY_PROMPT
+    assert "整体篇幅必须达到 10000 字以上" in app.STORY_PROMPT
+    assert "不得通过重复或注水凑数" in app.STORY_PROMPT
+    assert "软性建议" not in app.STORY_PROMPT
     assert "writing_requirements" not in app.STORY_PROMPT
     assert "机械重复" in app.STORY_PROMPT
     assert "作为记忆锚点" not in app.STORY_PROMPT
@@ -391,6 +396,10 @@ def test_prompts_do_not_promote_relationships_beyond_outline_evidence():
     assert "重演 Function 核心行动" not in app.STORY_PROMPT
     assert "literary_ending 的表达边界" not in app.STORY_PROMPT
     assert "creative_brief" not in app.STORY_PROMPT
+    assert "不得新增核心人物、冲突、关键线索、援助、解决方案或关系升级" not in app.STORY_PROMPT
+    assert "Function 场景只完成指定行动" not in app.STORY_PROMPT
+    assert "literary_design 作为表达和局部展开依据" in app.STORY_PROMPT
+    assert "视角、气质、感官、意象和潜台词" in app.STORY_PROMPT
     assert "不是必须完成的结局义务" in app.STORY_VALIDATOR_PROMPT
     assert "允许制度、阵营和利益余波存在" in app.STORY_VALIDATOR_PROMPT
     assert "同尺度的直接后果" in app.STORY_VALIDATOR_PROMPT
@@ -400,32 +409,17 @@ def test_prompts_do_not_promote_relationships_beyond_outline_evidence():
     assert "事件所有权规则" in app.SCENE_PLAN_PROMPT
     assert "固定输入" in app.STORY_VALIDATOR_PROMPT
     assert "自相矛盾" in app.STORY_VALIDATOR_PROMPT
-    assert "明确提出最低字数" in app.STORY_VALIDATOR_PROMPT
-    assert "系统建议的 10000 字以上不构成门槛" in app.STORY_VALIDATOR_PROMPT
-    assert "未明确提出时忽略长度" in app.STORY_VALIDATOR_PROMPT
-    assert "长度不足" not in app.STORY_VALIDATOR_PROMPT
+    assert "正文中文字符数必须达到 10000" in app.STORY_VALIDATOR_PROMPT
+    assert "若低于 10000，overall_ok=false、repairable=true" in app.STORY_VALIDATOR_PROMPT
+    assert "10000 字是本系统默认要求" in app.STORY_VALIDATOR_PROMPT
+    assert "系统建议的 10000 字以上不构成门槛" not in app.STORY_VALIDATOR_PROMPT
+    assert "未明确提出时忽略长度" not in app.STORY_VALIDATOR_PROMPT
+    assert "篇幅不足" in app.STORY_VALIDATOR_PROMPT
     assert "creative_brief" not in app.STORY_VALIDATOR_PROMPT
     assert all(
         "json" in prompt.lower()
         for prompt in (app.STORY_PROMPT, app.STORY_VALIDATOR_PROMPT)
     )
-
-
-def test_story_core_prompt_lengths_match_compression_target():
-    before = {
-        "STORY_PROMPT": 2492,
-        "STORY_VALIDATOR_PROMPT": 2573,
-    }
-    after = {
-        "STORY_PROMPT": len(app.STORY_PROMPT),
-        "STORY_VALIDATOR_PROMPT": len(app.STORY_VALIDATOR_PROMPT),
-    }
-    assert after == {
-        "STORY_PROMPT": 1050,
-        "STORY_VALIDATOR_PROMPT": 1813,
-    }
-    reduction = 1 - sum(after.values()) / sum(before.values())
-    assert 0.35 <= reduction <= 0.50
 
 
 def test_scene_plan_appends_independent_ending_scene():

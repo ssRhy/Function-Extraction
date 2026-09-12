@@ -20,10 +20,11 @@ SCENE_PLAN_PROMPT = """你是中篇网文小说场景结构策划。把既定大
 3. `characters` 只能填写 `allowed_character_ids` 中已有的 seed 人物 ID，不能填写“P3的手下”“村长”等自然语言角色、临时人物或角色描述；非核心人物只能在 beats/setting 中作为背景描述，如果其行动是本场必要部分，必须先由 seed 定义对应 ID。人物、世界、冲突和关键行动只能依据输入展开，不新增核心人物、核心冲突或新的结局方案。
 4. 同一来源段的场景组整体落实对应 function_constraints 段的结构要求和 narrative_plan 中同索引的 genre_realization；不得自行设计另一种题材化实现。
 5. 将 narrative_plan 已确定的 motivation_setup、connective_event、reaction_beat 和 setup_payoffs 分配到正确场景；不得新增另一套动机、伏笔或回收方式。
-6. 每场必须明确目标、阻碍、关键行动和状态变化；transition 只承接已经确定的 connective_event 或 causal_to_next。
+6. 每场必须明确当前目标、阻碍、关键行动和状态变化。相邻场景应把已有的压力、信息、选择、代价或关系变化继续向前落实；transition 只承接已有的 connective_event、causal_to_next 或未决后果，不新增核心事件。
 7. `ending` 必须至少包含一个、最多三个场景，并且只能放在全部 Function 场景之后。它是独立结局，不绑定新的 Function；必须把 ending_target 的 resolution_actions、ending_must_show 和 required_final_state 分配为可观察行动及后果。最后一个 ending 场景必须完成结局兑现，不能只写准备、承诺或为后续故事埋伏笔。
 8. 场景只能实现已有关系变化，不得把理解、信任、合作、和解或关心升级为另一种关系或更高承诺。
-9. 若输入提供 literary_design，只把它作为场景的表达、环境、感官和节奏依据；Function 场景使用对应 steps，ending 场景使用 literary_design.literary_ending；不得把文学设计改写成新的核心事件、人物、资源、关系变化或结局方案。"""
+9. 若输入提供 literary_design，只把它作为场景的表达、环境、感官和节奏依据；Function 场景使用对应 steps，ending 场景使用 literary_design.literary_ending；不得把文学设计改写成新的核心事件、人物、资源、关系变化或结局方案。
+10. 事件所有权规则：每个核心行动只能在一个 Function 或 ending 场景实际发生；Function 已完成的 resolution_action，ending 只能回收直接后果、余波或其他尚未完成的结局动作，不得重演。"""
 
 
 DEVELOP_SCENES_PROMPT = """你是场景叙事开发器。输入中的情节、场景顺序和结局已经确定；只标出需要重点展开的既定行动，不改变情节，只输出 JSON：
@@ -42,13 +43,13 @@ STORY_PROMPT = """你是中文中篇网文小说作者。把已确定的 scene_p
 {"title":"自然的故事标题","character_names":{"P1":"正文使用的姓名","P2":"正文使用的姓名"},"scenes":[{"scene_id":"S1","text":"该场景正文"}]}
 
 规则：
-1. 原始 user_request 是最高内容约束；附加要求只补充非结构表达，冲突时服从原始请求和固定结构。完整执行所有场景及 expand_points，并根据情节重要性和 pacing_mode 自然分配篇幅：DRAMATIZE 充分展开关键行动、风暴、关系转折或离别；DEVELOP 适度展开人物反应、关系推进或决定形成；COMPRESS 简洁处理航程过渡、重复日常和信息衔接。整体篇幅建议达到 10000 字以上，但这是软性建议；以完整、自然地实现用户要求为准，不为达标重复或注水。
+1. 原始 user_request 是最高内容约束；附加要求只补充非结构表达，冲突时服从原始请求和固定结构。完整执行所有场景及 expand_points，并根据情节重要性和 pacing_mode 自然分配篇幅：DRAMATIZE 充分展开关键行动、风暴、关系转折或离别；DEVELOP 适度展开人物反应、关系推进或决定形成；COMPRESS 简洁处理过渡、重复日常和信息衔接。整体篇幅必须达到 10000 字以上；不得通过重复或注水凑数。
 2. 为每个 seed.characters 的 ID 输出唯一、自然且全文固定的 character_names。叙述策略遵守 literary_design.global_design；缺失时使用清晰的第三人称限知视角。正文不得出现 P1 等内部 ID、Function 名、场景标题或系统说明。
-3. 按 scene_id 顺序覆盖全部既定场景，使每场的核心行动和状态变化清晰发生；场景内部的铺陈、对话、动作、心理和过渡由作者自然组织。
-4. Function 场景应完成对应的核心行动和状态变化；ending 完成尚未完成的结局动作，并展示冲突结果和最终状态。Function 与 ending 不重复承担同一核心事件。
-5. 以 seed、Function、题材实现和关系状态作为主线骨架。正文可以补充不改变主线结果的配角、局部阻碍、日常行动、对话、心理和环境细节；这些补充不得成为解决核心冲突的临时关键人物、证据、资源或援助，也不得改变 Function 结果、关系上界和结局方向。
+3. 按 scene_id 顺序覆盖全部既定场景，使每场的核心行动和状态变化清晰发生。scene_plan 规定的是结构结果，不是逐句写法；场景内部的铺陈、对话、动作、心理、环境和过渡由作者自然组织。
+4. Function 场景完成对应的核心行动和状态变化；ending 完成尚未完成的结局动作，并展示冲突结果和稳定终态。Function 与 ending 不重复承担同一核心事件。
+5. 以 seed、Function 约束、题材实现、伏笔和关系账本作为主线骨架。可以补充不改变主线因果的对话、心理、身体反应、职业细节、环境反应、日常动作和自然过渡；不得让补充内容改变 Function 结果、关系上界、核心冲突或用户指定的结局。
 6. 用具体动作、对话、证据、物件变化、身体反应和可观察后果表现情绪与关系，避免抽象总结、机械重复、同义反复和注水。信息分散在已有场景；最终供述或告白只补当前必要的缺口，不复述完整案情或全部动机。
-7. LiteraryDesign 是表达和局部展开依据；不得用文学呈现替换核心行动，或改写 Function 结果、关系终态和结局方向。"""
+7. literary_design 作为表达和局部展开依据。可以使用其中的视角、气质、感官、意象和潜台词，但不得用文学呈现替代核心行动，或改写 Function 结果、关系终态和结局方向。"""
 
 
 STORY_VALIDATOR_PROMPT = """你是 Story Validator。只依据原始 user_request、seed、Function 约束、scene_plan、scene_developments、ending_target、chinese_char_count 和正文，判断是否可以导出，只输出 JSON：
@@ -61,6 +62,4 @@ STORY_VALIDATOR_PROMPT = """你是 Story Validator。只依据原始 user_reques
 3. causal_constraints_ok 与 character_consistency_ok：Function 行动、required_effects、状态和因果是否按序发生；人物身份、动机、角色位置、关系和代价是否有输入及正文证据支持，不能张冠李戴或无依据升级关系。goal/motivation 是开场驱动力，不是必须完成的结局义务。
 4. ending_ok：最后独立 ending 是否完成 ending_target 的 resolution_actions、ending_must_show、conflict_resolution 和 required_final_state，并展示同尺度的直接后果；不能停在准备、决定或新的危险。ending_evidence 只是诊断记录，不要求与 must_show 一一对应。允许制度、阵营和利益余波存在，但不能以个人结果代偿集体/系统主线。不得重演 Function 已完成的核心行动。
 5. unsupported_solution_ok：是否新增输入之外的临时能力、人物、线索、援助、证据、规则或解决方案；没有则为 true。
-6. 若原始 user_request 明确提出最低字数，才根据 chinese_char_count 检查该用户要求；系统建议的 10000 字以上不构成门槛，未明确提出时忽略长度，不得自行设定门槛。只报告阻止导出的具体问题。固定输入一致时，正文遗漏、偏离、因果不足或无依据解决方案均为 repairable=true；通过时 repairable=false。literary_design 只影响表达，文学质量和文风偏好不得导致机械失败。"""
-
-SCENE_PLAN_PROMPT += " 事件所有权规则：每个核心行动只能在一个 Function 或 ending 场景实际发生；Function 已完成的 resolution_action，ending 只能回收直接后果、余波或其他尚未完成的结局动作，不得重演。"
+6. 正文中文字符数必须达到 10000；若低于 10000，overall_ok=false、repairable=true，并指出篇幅不足。10000 字是本系统默认要求，不因 user_request 未明确提出而忽略。只报告阻止导出的具体问题。固定输入一致时，正文遗漏、偏离、因果不足、篇幅不足或无依据解决方案均为 repairable=true；通过时 repairable=false。literary_design 只影响表达，文学质量和文风偏好不得导致机械失败。"""

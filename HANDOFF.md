@@ -2386,3 +2386,21 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Story Prompt 直接重写第 3、4、5、7 条：保留场景顺序、核心行动、Function/ending 事件所有权、关系上界和结局方向；允许不改变主线结果的配角、局部阻碍、日常、对话、心理和环境细节。
 - LiteraryDesign 直接重写全局字段和逐结构段字段定义，删除旧的气质枚举、重复通用禁止段和过度细分的文学要求；`exit_effect` 改为下一段的压力、信息、选择或情绪余波。未新增字段、Schema、节点或 Prompt 层，既有 JSON/`motif_plan` 接口约束保留。
 - 当前 `LITERARY_DESIGN_PROMPT=2925` 字符；5 个核心 Prompt 合计 `6432` 字符。Story 回归 `23 passed`，Outline 回归 `42 passed`，全量 `434 passed, 1 skipped`；未启动真实 LLM，未修改正式 SQLite。
+
+## 312. 第一版解除正文过度限制并重写文学表达（2026-09-12）
+
+- Seed 将用户明确的时代、地点、人物关系、核心事件和结局事实作为不可替换的内容约束；`core_conflict` 聚焦开场压力、主人公目标和失败代价，人物 `goal`/`motivation` 需要能解释行动。未新增字段，Published Seed 的 `ending_spec` 仍只作历史参考。
+- Narrative 用已有的 `genre_realization`、动机/前因/反应、信息揭示、已有压力与结局事实替换原先更细的情节技巧清单；不再要求为了推进主动制造新的主线 Function 或核心悬念。
+- LiteraryDesign 继续使用原有 Schema，字段定义改为进入已有处境、连续阅读语言、行动化人物表达、有效世界/感官信息、可回收意象和表达边界；逐段设计只服务既定行动的呈现，`exit_effect` 保留已有后果、未决问题、选择或情绪余波。
+- ScenePlan 只要求相邻场景继续落实已有压力、信息、选择、代价或关系变化；Story 允许不改变主线因果的对话、心理、职业细节、环境反应和自然过渡，同时保留 Function/ending 事件所有权与结局边界。
+- 没有新增 `WebNovelMode`、字段、Schema、Prompt 层或节点；Story 的 `DRAMATIZE/DEVELOP/COMPRESS` 和默认 `10000` 字软建议保持不变。Story `22 passed`、Outline `41 passed`、Dynamic/Contract `20 passed`，全量 `432 passed, 1 skipped`；未启动真实 LLM，未修改正式 SQLite、Snapshot 或 serving。
+
+## 313. 默认篇幅要求恢复为 10000 字硬要求（2026-09-12）
+
+- Story Prompt 将“建议达到 10000 字以上”改为“整体篇幅必须达到 10000 字以上”；不足视为未完成，但仍禁止重复或注水凑数。Story Validator 使用已有 `chinese_char_count`，低于 10000 时要求 `overall_ok=false`、`repairable=true`。
+- 本次只调整 Prompt 规则和静态契约断言，不新增 `length_ok`、字段、Schema、节点或数据库结构，也未恢复 Release Pipeline 的独立长度字段/门禁；按请求未运行回归测试、未启动真实 LLM。
+
+## 314. Story Skill 默认使用 Dynamic（2026-09-12）
+
+- 未指定规划方式时，`function-extraction-story` 不再询问，直接显式使用 `--planner-mode dynamic`；只有用户明确选择 Published Pattern 时才使用 `published`。
+- 这是 Story Skill 的调用默认值，公开 `StoryCLI` 的全局默认值未改变；未新增节点、Schema、数据库或 Snapshot 行为。

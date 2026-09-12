@@ -5,13 +5,12 @@ description: 只在 Function-Extraction 项目中根据用户要求启动并核�
 
 # Story 阶段
 
-只执行 Story，不调用 Bootstrap 或 Evolve。开始生成前，如果用户没有明确指定规划方式，先询问一次：
+只执行 Story，不调用 Bootstrap 或 Evolve。默认使用 Dynamic 规划；只有用户明确指定 Published Pattern 时才使用 published 模式，不再为规划方式额外询问：
 
-> 这次使用哪种方式生成？
-> - **Pattern**：使用 serving Snapshot 中已发布的结构，结构更稳定、可控。
-> - **Dynamic**：先根据用户要求生成 Seed，再动态组合兼容的 Function，灵活性更高。
+- **Dynamic（默认）**：先根据用户要求生成 Seed，再动态组合兼容的 Function，灵活性更高。
+- **Published Pattern（显式选择）**：使用 serving Snapshot 中已发布的结构，结构更稳定、可控。
 
-用户选择后，明确使用对应的 `--planner-mode`；Outline 和正文阶段直接自动完成，不要再请求中间确认。先读取可用的 serving Snapshot：
+无论采用哪种方式，都明确传入对应的 `--planner-mode`；Outline 和正文阶段直接自动完成，不要再请求中间确认。先读取可用的 serving Snapshot：
 
 ```bash
 cd /Users/hy/Desktop/code/Function-Extraction/Code
@@ -22,12 +21,13 @@ cd /Users/hy/Desktop/code/Function-Extraction/Code
 
 ```bash
 .venv/bin/python -X utf8 -m StoryCLI story generate \
-  --request "<包含唯一题材关键词的创作要求>"
+  --request "<包含唯一题材关键词的创作要求>" \
+  --planner-mode dynamic
 ```
 
 该命令只消费 serving Snapshot，自动完成选定规划方式、Outline 和 Story；不会运行 Bootstrap 或 Evolve。不要把 Outline 或 Story 拆成额外的人工确认步骤。较长要求可改用 `--request-file <文件>`，与 `--request` 二选一。
 
-Pattern 选择：
+只有用户明确选择 Published Pattern 时：
 
 ```bash
 .venv/bin/python -X utf8 -m StoryCLI story generate \

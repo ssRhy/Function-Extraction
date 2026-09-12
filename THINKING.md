@@ -1963,3 +1963,17 @@ Dynamic 的顺序保持为 `user_request → Seed → Dynamic Planner`：Seed �
 - **判断**：Story 不需要把场景内部所有可写内容预先封死。场景顺序、核心行动、Function 结果、关系上界和结局方向是结构边界；铺陈、配角、局部阻碍、日常、对话、心理和环境是正文实现空间。
 - **方案**：用替换方式重写 Story 原有第 3、4、5、7 条，删除全面禁止式表述，只保留可能改写主线结果的新增方案限制。LiteraryDesign 同样直接压缩字段定义，不追加“开篇钩子”或其他网文规则清单。
 - **验证**：Story 和 LiteraryDesign 的职责断言通过；Schema、字段、节点、结构化输出协议和既有结局边界保持不变。
+
+## 309. 第一版先验证正文自由度，不建立网文专用架构（2026-09-12）
+
+用户进一步明确：当前目标是中篇网文的自然可读性试验，而不是一次性实现完整网文系统。由此采用最小范围：Seed 只合并用户要求、人物动机和结局事实规则；Narrative 只落实已有行动、压力、信息、选择、代价和关系变化；LiteraryDesign 只重写既有字段定义；ScenePlan 与 Story 放松正文内部的逐句约束。
+
+这意味着“网文感”暂不通过 `WebNovelMode`、开篇钩子字段、章末卡点、固定反转、章节字数或新节点实现。现有 `DRAMATIZE/DEVELOP/COMPRESS` 继续作为情节权重提示，正文可在不改变 Function 结果、关系上界、核心冲突和用户结局的前提下补充对话、心理、职业细节、环境反应和自然过渡。第一版只观察正文是否更自然，以及 Function/结局是否仍稳定执行；机械测试通过不等同于真实文学质量已经证明。
+
+## 310. 10000 字从软建议改为默认 Prompt 要求（2026-09-12）
+
+用户明确要求将默认篇幅从“建议 10000 字以上”改为“规定 10000 字以上”。本次只把 Story 和 Story Validator 的现有规则改为硬要求，继续使用已有 `chinese_char_count`，不恢复 `length_ok` 或新增字段/Schema/节点；正文仍不得用重复和注水达标。Release Pipeline 的独立长度门禁未在本次修改中恢复，后续若要求发布层也强制拦截，再单独处理。
+
+## 311. Story Skill 默认规划策略（2026-09-12）
+
+用户明确要求 Story Skill 默认使用 Dynamic。由此确定：未指定规划方式时直接执行“用户要求 → Seed → Planner”，不再为 Published Pattern 或 Dynamic 额外询问；只有用户明确要求已发布 Pattern 的稳定结构时，才切换到 `--planner-mode published`。该默认只作用于 Story Skill 的调用规则，StoryCLI 的全局默认值保持不变，通过 Skill 显式传入 `--planner-mode dynamic` 实现。

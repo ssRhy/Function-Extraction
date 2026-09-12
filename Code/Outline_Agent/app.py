@@ -584,7 +584,7 @@ def select_pattern_node(state):
     choice = chat_structured([
         {"role": "system", "content": PATTERN_SELECTION_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-    ], PatternSelection).model_dump()
+    ], PatternSelection, reasoning_effort="medium").model_dump()
     index = choice["candidate_index"]
     if index > len(candidates):
         raise ValueError(f"Pattern 选择序号无效: {index}")
@@ -604,7 +604,7 @@ def dynamic_seed_node(state):
     seed = chat_structured([
         {"role": "system", "content": DYNAMIC_SEED_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-    ], StorySeed).model_dump()
+    ], StorySeed, reasoning_effort="medium").model_dump()
     return {"seed": seed}
 
 
@@ -685,7 +685,7 @@ def seed_node(state):
     seed = chat_structured([
         {"role": "system", "content": SEED_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-    ], StorySeed).model_dump()
+    ], StorySeed, reasoning_effort="medium").model_dump()
     return {"seed": seed}
 
 
@@ -704,7 +704,7 @@ def mechanism_node(state):
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
     ]
     for attempt in range(2):
-        data = chat_structured(messages, MechanismPlan).model_dump()
+        data = chat_structured(messages, MechanismPlan, reasoning_effort="medium").model_dump()
         data["steps"] = _align(state["chain"], data["steps"])
         data["steps"] = normalize_relationship_befores(
             state["chain"], data["steps"], state["seed"],
@@ -752,7 +752,9 @@ def scaffold_node(state):
         {"role": "user", "content": json.dumps(common_user, ensure_ascii=False)},
     ]
     for attempt in range(2):
-        narrative = chat_structured(narrative_messages, NarrativePlan).model_dump()
+        narrative = chat_structured(
+            narrative_messages, NarrativePlan, reasoning_effort="medium",
+        ).model_dump()
         narrative["steps"] = _align(state["chain"], narrative["steps"])
         issues = narrative_plan_issues(state["chain"], narrative)
         if not issues:
@@ -776,7 +778,9 @@ def scaffold_node(state):
         {"role": "system", "content": LITERARY_DESIGN_PROMPT},
         {"role": "user", "content": json.dumps(literary_user, ensure_ascii=False)},
     ]
-    literary_design = chat_structured(literary_messages, LiteraryDesign).model_dump()
+    literary_design = chat_structured(
+        literary_messages, LiteraryDesign, reasoning_effort="medium",
+    ).model_dump()
     literary_design["steps"] = _align(state["chain"], literary_design["steps"])
     return {"narrative": narrative, "literary_design": literary_design}
 
@@ -808,7 +812,9 @@ def realize_node(state):
                 "不得新增人物、真相、证据、解决方案或改变 narrative_plan.ending，并重新输出完整 JSON。"
             ),
         })
-    data = chat_structured(messages, OutlineRealization).model_dump()
+    data = chat_structured(
+        messages, OutlineRealization, reasoning_effort="medium",
+    ).model_dump()
     data["segments"] = _align(state["chain"], data["segments"])
     data["ending"] = state["narrative"]["ending"]
     return {
@@ -839,7 +845,7 @@ def validate_node(state):
     data = chat_structured([
         {"role": "system", "content": VALIDATE_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-    ], OutlineValidation).model_dump()
+    ], OutlineValidation, reasoning_effort="medium").model_dump()
     data["rule_issues"] = rule_check(
         state["chain"], state["outline"], state.get("ending_spec"),
     )
