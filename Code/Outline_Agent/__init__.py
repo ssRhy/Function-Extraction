@@ -1,4 +1,4 @@
-"""Outline Agent：按题材生成单轮短篇大纲。"""
+"""Outline Agent：按题材生成单轮中篇网文大纲。"""
 
 from .app import main
 

@@ -401,9 +401,8 @@ def run_release(
                 "message": "正文场景为空",
             }])
         report["story_path"] = str(story_path)
-        report["story_length_ok"] = bool(story_payload.get("length_ok"))
+        report["story_chinese_char_count"] = story_payload.get("chinese_char_count")
         report["checks"]["story_export"] = "PASS"
-        report["checks"]["story_length"] = "PASS" if report["story_length_ok"] else "REJECT"
 
         outcomes = store.load_generation_outcomes(candidate_id)
         outcome = next((item for item in outcomes if item.get("outline_id") == outline["outline_id"]), None)
@@ -424,11 +423,6 @@ def run_release(
         )
         report["regression"] = regression
         rejection_reasons = list(regression["reasons"])
-        if not report["story_length_ok"]:
-            rejection_reasons.append({
-                "code": "STORY_LENGTH_FAILED",
-                "message": "Story smoke 的 length_ok=false",
-            })
         if rejection_reasons:
             report["rejection_reasons"] = rejection_reasons
         if rejection_reasons and not force_promote:
@@ -491,7 +485,7 @@ def main(argv=None) -> int:
                         help="正式父 Snapshot 根目录")
     parser.add_argument("--out-dir", default=None)
     parser.add_argument("--stage-timeout", type=float, default=1800.0)
-    parser.add_argument("--force-promote", action="store_true", help="人工显式覆盖候选回归与 length_ok 门禁")
+    parser.add_argument("--force-promote", action="store_true", help="人工显式覆盖候选回归")
     args = parser.parse_args(argv)
     user_request = args.request
     if args.request_file:

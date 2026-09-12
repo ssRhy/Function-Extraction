@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import Outline_Agent.app as app
 import Outline_Agent.state as state
+from FunctionExtract_Agent.Prompt.Inducer_prompt import INDUCER_SYSTEM_PROMPT
 
 
 def _pattern(name, support, categories, functions, ending_spec=None):
@@ -617,6 +618,7 @@ def test_prompts_limit_relationship_state_to_function_evidence():
     assert not hasattr(app, "INTERPRET_REQUEST_PROMPT")
     assert not hasattr(app, "CreativeBrief")
     assert "creative_brief" not in app.DYNAMIC_SEED_PROMPT
+    assert "ending_spec" not in app.DYNAMIC_SEED_PROMPT
     assert "creative_brief" not in app.SEED_PROMPT
     assert "creative_brief" not in app.NARRATIVE_PROMPT
     assert "creative_brief" not in app.VALIDATE_PROMPT
@@ -636,19 +638,44 @@ def test_prompts_limit_relationship_state_to_function_evidence():
     assert "不能相守、失去、死亡、失败、分离等负向结局" not in app.DYNAMIC_SEED_PROMPT
     assert "后续 Function 链能够实际回答" not in app.DYNAMIC_SEED_PROMPT
     assert "不要为了迁就尚未生成的 Function 链" in app.DYNAMIC_SEED_PROMPT
-    assert "本轮 LLM seed" in app.NARRATIVE_PROMPT
-    assert "强钩子必须进入核心因果" in app.NARRATIVE_PROMPT
-    assert "一次性完整供述" in app.NARRATIVE_PROMPT
-    assert "保持冲突尺度一致" in app.NARRATIVE_PROMPT
-    assert "对立或互补的行为方式" in app.NARRATIVE_PROMPT
-    assert "动作或物件作为记忆锚点" in app.NARRATIVE_PROMPT
-    assert "不由 Pattern 的 `ending_spec` 直接提供" in app.VALIDATE_PROMPT
+    assert "ending_target 来自本轮 Seed" in app.NARRATIVE_PROMPT
+    assert "异常、秘密或威胁" in app.NARRATIVE_PROMPT
+    assert "改变选择或解决条件" in app.NARRATIVE_PROMPT
+    assert "一次性完整供述" not in app.NARRATIVE_PROMPT
+    assert "对立或互补的行为方式" not in app.NARRATIVE_PROMPT
+    assert "动作或物件作为记忆锚点" not in app.NARRATIVE_PROMPT
+    assert "Pattern 的 ending_spec 只能作为历史参考" in app.VALIDATE_PROMPT
     assert "状态上界" in app.REALIZE_PROMPT
-    assert "可以保留制度阻力" in app.REALIZE_PROMPT
-    assert "不是结局必须完成的义务" in app.VALIDATE_PROMPT
-    assert "允许制度、阵营和利益冲突继续存在" in app.VALIDATE_PROMPT
-    assert "必须单独比较 core_conflict 与 ending 的解决尺度" in app.VALIDATE_PROMPT
+    assert "只输出 JSON" in app.REALIZE_PROMPT
+    assert "可以保留制度、阵营和利益阻力" in app.REALIZE_PROMPT
+    assert app.REALIZE_PROMPT.count("事件所有权") == 1
+    assert all(
+        "json" in prompt.lower()
+        for prompt in (app.NARRATIVE_PROMPT, app.REALIZE_PROMPT, app.VALIDATE_PROMPT)
+    )
+    assert "不是必须完成的结局义务" in app.VALIDATE_PROMPT
+    assert "冲突主线与结局须保持同一尺度" in app.VALIDATE_PROMPT
     assert "overall_ok 必须为 false" in app.VALIDATE_PROMPT
+
+
+def test_outline_core_prompt_lengths_match_compression_target():
+    before = {
+        "NARRATIVE_PROMPT": 3131,
+        "REALIZE_PROMPT": 1323,
+        "VALIDATE_PROMPT": 2558,
+    }
+    after = {
+        "NARRATIVE_PROMPT": len(app.NARRATIVE_PROMPT),
+        "REALIZE_PROMPT": len(app.REALIZE_PROMPT),
+        "VALIDATE_PROMPT": len(app.VALIDATE_PROMPT),
+    }
+    assert after == {
+        "NARRATIVE_PROMPT": 1652,
+        "REALIZE_PROMPT": 811,
+        "VALIDATE_PROMPT": 1106,
+    }
+    reduction = 1 - sum(after.values()) / sum(before.values())
+    assert 0.35 <= reduction <= 0.50
 
 
 def test_literary_design_prompt_and_schema_are_independent_from_narrative_plan():
@@ -656,6 +683,16 @@ def test_literary_design_prompt_and_schema_are_independent_from_narrative_plan()
     assert "全局文学设计" in app.LITERARY_DESIGN_PROMPT
     assert "逐结构段文学实现" in app.LITERARY_DESIGN_PROMPT
     assert "已经完成并校验通过的 NarrativePlan" in app.LITERARY_DESIGN_PROMPT
+    assert "开头应尽快让读者看见人物欲望、现实压力或当前异常" in app.LITERARY_DESIGN_PROMPT
+    assert "语言应清晰、流畅、适合连续阅读" in app.LITERARY_DESIGN_PROMPT
+    assert "可理解的情绪反馈" in app.LITERARY_DESIGN_PROMPT
+    assert "不单独堆砌氛围" in app.LITERARY_DESIGN_PROMPT
+    assert "自然出现且能在结局回收" in app.LITERARY_DESIGN_PROMPT
+    assert "连续低强度段落" in app.LITERARY_DESIGN_PROMPT
+    assert "本段结束后留下的新压力、信息、选择或情绪余波" in app.LITERARY_DESIGN_PROMPT
+    assert "现实、浪漫、冷峻、荒诞、悬疑或诗性" not in app.LITERARY_DESIGN_PROMPT
+    assert "文学性设计不得" not in app.LITERARY_DESIGN_PROMPT
+    assert "开篇钩子" not in app.LITERARY_DESIGN_PROMPT
     assert "motif_plan 只能二选一" in app.LITERARY_DESIGN_PROMPT
     assert "同时包含 motif、initial_meaning、transformation、final_payoff 四个非空字段" in app.LITERARY_DESIGN_PROMPT
     assert "组合输出协议" not in app.NARRATIVE_PROMPT
@@ -670,6 +707,13 @@ def test_literary_design_prompt_and_schema_are_independent_from_narrative_plan()
     assert state.NarrativePlan.model_fields["ending"]
     assert "ending" not in state.OutlineRealization.model_fields
     assert state.NarrativePlan.model_fields.get("literary_design") is None
+
+
+def test_inducer_prompt_uses_evidence_without_forcing_domain_coverage():
+    assert "至少 2 个不同的 story_id" in INDUCER_SYSTEM_PROMPT
+    assert "只输出有多个跨故事 evidence 支持的 Function" not in INDUCER_SYSTEM_PROMPT
+    assert "尽可能覆盖不同领域/类型" not in INDUCER_SYSTEM_PROMPT
+    assert "只能保留 supporting observations 实际支持的不同实现" in INDUCER_SYSTEM_PROMPT
 
 
 def test_dynamic_seed_receives_raw_user_request_without_brief(monkeypatch):

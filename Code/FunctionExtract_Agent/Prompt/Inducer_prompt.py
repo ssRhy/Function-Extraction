@@ -110,11 +110,10 @@ realization_pattern 不能只是照抄原始事件，也不能抽象成 Function
 ## 注意事项
 
 - 一次输入可能包含多个需要归纳的 Function，需要全部识别
-- 只输出有多个跨故事 evidence 支持的 Function
 - realization_patterns 必须以 supporting observations 为依据，可以规范化改写，但不能增加证据中不存在的事件机制
 - 删除人物名、专有物品和世界观词汇，保留动作机制、实现路径或可观察结果
 - 不要输出“警告/劝说/告诫”这类同义词列表；不同 pattern 应代表真正不同的实现方式
-- realization_patterns 应尽可能覆盖不同领域/类型，体现跨故事泛化能力
+- realization_patterns 只能保留 supporting observations 实际支持的不同实现；不得为了覆盖领域或类型补造 pattern
 - 原始 surface_form 和 event 不写入卡片（证据保留在 Observation Bank，由 supporting_obs_ids 关联），不需要输出
 - 置信度将由系统根据跨故事多样性、语义一致性、表面形式多样性、与已有 Function 的可区分性自动计算
 """

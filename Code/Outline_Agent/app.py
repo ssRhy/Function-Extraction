@@ -1,4 +1,4 @@
-"""Outline Agent - 按题材生成单轮短篇大纲。
+"""Outline Agent - 按题材生成单轮中篇网文大纲。
 
 图流程：published 走 Pattern 选择 → Seed，dynamic 走 Seed → Dynamic Planner；两者随后共用
 mechanism → scaffold → realize → validate → export → END。
@@ -1081,7 +1081,7 @@ def _build_graph():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="按题材生成单轮短篇大纲")
+    parser = argparse.ArgumentParser(description="按题材生成单轮中篇网文大纲")
     parser.add_argument("--genre", required=True, help="题材（如 悬疑惊悚 或 01_悬疑惊悚）")
     parser.add_argument("--pattern", default=None, help="指定 pattern 名称（题材内，配合 --list-patterns 查看）")
     parser.add_argument("--list-patterns", action="store_true", help="列出题材下的候选 pattern 后退出")

@@ -2345,3 +2345,44 @@ MVP-B 验收标准：至少针对 3 个不同题材各生成 3 份大纲；每�
 - Skill 明确审计范围覆盖实际 Prompt、请求组装、Schema/结构化重试及项目 Skill；保留 `user_request → Seed → Planner`、Function/Contract、事件所有权、LiteraryDesign 边界、Validator 证据和 Snapshot/正式库安全，不把 Claude 模型结论直接套用到当前 DeepSeek。
 - 默认只读审计；只有用户明确要求落地时才应用修改。真实 LLM 对照必须固定请求、Snapshot、planner mode 并使用数据库副本，不能把机械 PASS 当作文学质量证明。
 - `quick_validate.py`、`compileall` 和 `git diff --check` 通过；未启动真实 LLM，未修改正式 SQLite。
+
+## 305. 核心 Prompt 精简与职责归位（2026-09-11）
+
+- 重写 `NARRATIVE_PROMPT`、`REALIZE_PROMPT`、`VALIDATE_PROMPT`、`STORY_PROMPT` 和 `STORY_VALIDATOR_PROMPT`，只保留 Function、因果、人物关系、结局、事件所有权和导出阻断检查等结构职责；Schema、API、数据库和生成阶段边界不变。
+- Narrative 删除了 Story/LiteraryDesign 已承接的调查供述、人物反差和记忆锚点重复规则，没有把它们复制到别的结构 Prompt；Story 保留具体动作、证据分散、反抽象总结和 LiteraryDesign 表达边界。
+- 5 个核心 Prompt 从改写前记录的 `12077` 字符压缩到 `6494` 字符：Narrative `3131→1652`、Realize `1323→811`、Outline Validator `2558→1101`、Story `2492→1234`、Story Validator `2573→1696`，总减少约 `46.2%`。
+- 静态测试改为验证职责、边界和字符压缩区间；Outline/Story/Dynamic/Contract 聚焦回归通过。未启动真实 LLM，未修改正式 SQLite；其他工作区脏改动未纳入本次行为变更。
+
+## 306. 结构化 JSON Prompt 兼容性回归修复（2026-09-11）
+
+- Prompt 精简曾将 `REALIZE_PROMPT` 的“只输出 JSON”缩成“只输出”，触发 `response_format=json_object` 接口的 400；已恢复 `只输出 JSON：`，未改变 Realize 的输出字段或数据流。
+- 在 Outline Prompt 契约测试中固定检查 `REALIZE_PROMPT` 必须包含 `JSON`，并同步记录字符数；Outline/LLM/Dynamic/Contract 回归和全量测试通过。未重新运行真实 LLM，未修改正式 SQLite。
+
+## 307. Outline Validator JSON 兼容性回归修复（2026-09-11）
+
+- `VALIDATE_PROMPT` 也曾在精简时保留“只输出：”而删除 `JSON`，导致 `response_format=json_object` 在 `validate_node` 直接返回 400；已恢复为 `只输出 JSON：`，不改变 `OutlineValidation` 字段或校验数据流。
+- Outline/Story 的核心 Prompt 契约测试现在统一检查所有 5 个核心 Prompt 含有 `json`，避免 Realize 和 Validator 分别暴露同类问题。当前 5 个核心 Prompt 合计 `6499` 字符；未重新运行真实 LLM，未修改正式 SQLite。
+
+## 308. Story Validator JSON 兼容性回归修复（2026-09-11）
+
+- 同一静态契约检查发现 `STORY_VALIDATOR_PROMPT` 也缺少 `JSON`，已补为 `只输出 JSON：`；5 个核心 Prompt 的 JSON 前置条件现已全部覆盖。
+- 当前 5 个核心 Prompt 合计 `6504` 字符；只增加结构化接口所需关键词，不改变 Story Validator 输出字段或正文流程。未重新运行真实 LLM，未修改正式 SQLite。
+
+## 309. 默认篇幅交给 Story 的情节权重判断（2026-09-12）
+
+- 删除 Story Agent 的 `_MIN_CHINESE_CHARS=10000`、`writing_requirements.min_chinese_chars` 输入、导出 `length_ok` 和对应 CLI 输出；正文只保留 `chinese_char_count` 作为统计信息。
+- Story Prompt 用 `DRAMATIZE/DEVELOP/COMPRESS` 指示关键行动充分展开、关系与决定适度展开、过渡和重复过程压缩，不再要求为固定字数重复或注水。Story Validator 只有在原始 `user_request` 明确提出最低字数时才检查该要求，默认请求忽略长度。
+- Release Pipeline 继续检查正文是否导出且场景非空，但不再因 `length_ok=false` 或默认字数不足拒绝候选；报告记录 `story_chinese_char_count`。未修改 Schema、数据库、Snapshot 或 serving 数据流。
+- Story 回归 `23 passed`，Release Pipeline 回归 `5 passed`，Dynamic/Outline/Contract 回归 `62 passed`，全仓 `434 passed, 1 skipped`；未启动真实 LLM，未修改正式 SQLite。
+
+## 310. Story 定位调整为中篇网文（2026-09-12）
+
+- Story 场景规划和正文 Prompt、Outline/Story 的模块说明及 CLI 描述统一改为“中篇网文”；Story Prompt 建议正文达到 `10000` 字以上，但继续明确这是软性建议，不是导出或发布门槛。
+- Story Validator 明确：只有原始 `user_request` 自己提出最低字数时才检查；系统建议不影响 `overall_ok`、`story_status` 或 Release candidate gate。`chinese_char_count` 仍只作统计。
+- 5 个核心 Prompt 当前合计 `6712` 字符；Story 回归 `23 passed`，Outline/Dynamic/Contract 回归 `62 passed`，未启动真实 LLM，未修改正式 SQLite。
+
+## 311. Prompt 规则改为替换式精简（2026-09-12）
+
+- Story Prompt 直接重写第 3、4、5、7 条：保留场景顺序、核心行动、Function/ending 事件所有权、关系上界和结局方向；允许不改变主线结果的配角、局部阻碍、日常、对话、心理和环境细节。
+- LiteraryDesign 直接重写全局字段和逐结构段字段定义，删除旧的气质枚举、重复通用禁止段和过度细分的文学要求；`exit_effect` 改为下一段的压力、信息、选择或情绪余波。未新增字段、Schema、节点或 Prompt 层，既有 JSON/`motif_plan` 接口约束保留。
+- 当前 `LITERARY_DESIGN_PROMPT=2925` 字符；5 个核心 Prompt 合计 `6432` 字符。Story 回归 `23 passed`，Outline 回归 `42 passed`，全量 `434 passed, 1 skipped`；未启动真实 LLM，未修改正式 SQLite。

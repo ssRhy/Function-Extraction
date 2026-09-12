@@ -1,5 +1,7 @@
 """Release Pipeline 的副本、门禁和失败回滚测试。"""
 
+from pathlib import Path
+
 import release_pipeline as app
 
 
@@ -36,6 +38,15 @@ def test_parent_snapshot_is_validated_and_copied(tmp_path, monkeypatch):
     assert result["snapshot_id"] == "parent"
     assert (target_root / "parent" / "function_contracts.jsonl").read_text(encoding="utf-8") == "parent-contract"
     assert calls == [str(source), str(target_root / "parent")]
+
+
+def test_story_length_is_statistic_not_release_gate():
+    source = Path(app.__file__).read_text(encoding="utf-8")
+
+    assert "story_chinese_char_count" in source
+    assert "story_length_ok" not in source
+    assert "STORY_LENGTH_FAILED" not in source
+    assert "length_ok 门禁" not in source
 
 
 def test_release_keeps_serving_when_story_fails(tmp_path, monkeypatch):

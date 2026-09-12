@@ -1,4 +1,4 @@
-"""Story Agent - 从已生成大纲写成中文短篇正文。
+"""Story Agent - 从已生成大纲写成中文中篇网文正文。
 
 线性图：START → load_outline → function_constraints → plan_scenes → develop_scenes → write_story → export → END
 用法（Code/ 下）：
@@ -43,7 +43,6 @@ from Story_Agent.validation import _function_execution_issues
 
 
 _DATA = os.path.join(_ROOT, "data")
-_MIN_CHINESE_CHARS = 10000
 
 
 def load_outline_document(knowledge_db, outline_id):
@@ -340,9 +339,6 @@ def write_story_node(state):
         "scene_developments": state["scene_developments"],
         "literary_design": source.get("literary_design"),
         "user_request": user_request,
-        "writing_requirements": {
-            "min_chinese_chars": _MIN_CHINESE_CHARS,
-        },
         "ending_target": _ending_target(source),
         "ending_budget": source.get("ending_budget") or {},
         "ending": source["outline"]["ending"],
@@ -353,8 +349,6 @@ def write_story_node(state):
     story = chat_structured([
         {"role": "system", "content": STORY_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
-        *([{"role": "user", "content": f"补充创作要求：{user_request}"}]
-          if user_request else []),
         *([{
             "role": "user",
             "content": (
@@ -395,7 +389,6 @@ def validate_story_node(state):
         "ending": source["outline"]["ending"],
         "story": state["story"],
         "chinese_char_count": chinese_char_count,
-        "min_chinese_chars": _MIN_CHINESE_CHARS,
     }
     validation = chat_structured([
         {"role": "system", "content": STORY_VALIDATOR_PROMPT},
@@ -410,17 +403,8 @@ def validate_story_node(state):
         validation["issues"] = list(dict.fromkeys(
             [*validation.get("issues", []), *execution_issues]
         ))
-    validation["length_ok"] = chinese_char_count >= _MIN_CHINESE_CHARS
-    if not validation["length_ok"] and not any(
-        "长度" in issue or "字符" in issue for issue in validation["issues"]
-    ):
-        validation["issues"].append(
-            f"正文中文字符数为 {chinese_char_count}，低于 {_MIN_CHINESE_CHARS}"
-        )
     if not validation["overall_ok"] and not validation["issues"]:
         validation["issues"] = ["Validator 未提供可执行的问题说明"]
-    if not validation["length_ok"]:
-        validation["overall_ok"] = False
     result = {"story_validation": validation}
     if state.get("story_repair_count", 0):
         result["story_revalidation"] = validation
@@ -441,7 +425,7 @@ def _should_repair_story(state):
 def story_failure_type(validation):
     if validation.get("overall_ok"):
         return None
-    return "rule" if validation.get("length_ok") is False else "semantic"
+    return "semantic"
 
 
 def story_follow_up(validation_ok, repair_occurred):
@@ -465,7 +449,6 @@ def export_node(state):
         "scene_developments": state["scene_developments"],
         "story": story,
         "chinese_char_count": chinese_char_count,
-        "length_ok": chinese_char_count >= _MIN_CHINESE_CHARS,
         "story_validation": validation,
         "first_story_validation": state.get("first_story_validation"),
         "story_revalidation": state.get("story_revalidation"),
@@ -527,7 +510,7 @@ def _build_graph():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="按已生成大纲写成中文短篇正文")
+    parser = argparse.ArgumentParser(description="按已生成大纲写成中文中篇网文正文")
     parser.add_argument("--outline-id", required=True, help="知识库中的大纲 ID")
     parser.add_argument("--knowledge-db", default=str(DEFAULT_DB_PATH))
     parser.add_argument("--request", default=None, help="用户创作要求")
@@ -553,7 +536,6 @@ def main():
         exported = json.load(f)
     print(f"[Story] result={result['result_path']}")
     print(f"[Story] chinese_char_count={exported['chinese_char_count']}")
-    print(f"[Story] length_ok={exported['length_ok']}")
 
 
 if __name__ == "__main__":
