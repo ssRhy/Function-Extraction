@@ -22,3 +22,7 @@ Code/vendor/
 
 # Third-party checkouts
 chromadb-admin/
+
+# Local reference materials and diagrams
+architecture_diagrams/
+Books/
