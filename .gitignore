@@ -26,3 +26,9 @@ chromadb-admin/
 # Local reference materials and diagrams
 architecture_diagrams/
 Books/
+
+# Local project instructions and working notes
+AGENTS.md
+HANDOFF.md
+Plan.md
+THINKING.md
