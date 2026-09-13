@@ -30,7 +30,11 @@ chromadb-admin/
 # Local reference materials and diagrams
 architecture_diagrams/*
 !architecture_diagrams/neurips_framework_overview.png
-Books/
+Books/*
+!Books/
+!Books/Docs/
+Books/Docs/*
+!Books/Docs/README.md
 
 # Local project instructions and working notes
 AGENTS.md
