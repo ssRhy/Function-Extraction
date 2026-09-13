@@ -18,6 +18,7 @@ Code/vendor/
 
 # pytest
 .pytest_cache/
+Code/test/
 
 
 # Third-party checkouts
