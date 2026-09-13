@@ -378,13 +378,8 @@ def test_rule_check():
     assert any("重复 Function 未递进" in issue for issue in app.rule_check(dup_chain, dup))
 
 
-def test_rule_check_requires_pattern_ending():
+def test_rule_check_requires_ending():
     chain = [{"function_name": "A"}]
-    ending_spec = {
-        "resolves": "核心冲突",
-        "must_show": ["解决动作"],
-        "final_state": "稳定终态",
-    }
     missing = {"segments": [{"function_name": "A", "beats": ["x"]}]}
     valid = {
         "segments": [{"function_name": "A", "beats": ["x"]}],
@@ -394,8 +389,8 @@ def test_rule_check_requires_pattern_ending():
             "final_state": "稳定终态",
         },
     }
-    assert any("结局收束" in issue for issue in app.rule_check(chain, missing, ending_spec))
-    assert app.rule_check(chain, valid, ending_spec) == []
+    assert any("结局收束" in issue for issue in app.rule_check(chain, missing))
+    assert app.rule_check(chain, valid) == []
 
 
 def test_rule_check_rejects_ending_repeating_function_action():

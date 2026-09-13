@@ -352,7 +352,7 @@ def run_release(
         _require(bool(published), "gate", "候选 Snapshot 没有 Published Pattern")
         catalog = store.load_pattern_catalog(candidate_id)
         candidates = outline_app.available_patterns(
-            catalog, genre, str(work_db), store.load_pattern_feedback(candidate_id),
+            catalog, genre, store.load_pattern_feedback(candidate_id),
         )
         _require(bool(candidates), "gate", "Planner 无法读取候选 Pattern")
         report["pattern_count"] = {

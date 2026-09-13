@@ -1,0 +1,521 @@
+<mxfile host="drawio-skill" agent="diagram-ir" version="3.0.0">
+  <diagram id="system" name="System">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="group_0" value="处理层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="12" y="502" width="1451" height="501" as="geometry" />
+        </mxCell>
+        <mxCell id="group_1" value="数据层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1142" y="1012" width="671" height="641" as="geometry" />
+        </mxCell>
+        <mxCell id="group_2" value="模型层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1132" y="12" width="326" height="481" as="geometry" />
+        </mxCell>
+        <mxCell id="group_3" value="输出层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1472" y="362" width="376" height="636" as="geometry" />
+        </mxCell>
+        <mxCell id="group_4" value="Bootstrap" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
+          <mxGeometry x="284" y="344" width="823" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="group_5" value="Evolve" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
+          <mxGeometry x="554" y="184" width="873" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="group_6" value="Pattern" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
+          <mxGeometry x="554" y="24" width="563" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="group_7" value="入口与编排" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
+          <mxGeometry x="24" y="104" width="518" height="213" as="geometry" />
+        </mxCell>
+        <mxCell id="group_8" value="服务指针" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_1">
+          <mxGeometry x="404" y="254" width="243" height="128" as="geometry" />
+        </mxCell>
+        <mxCell id="group_9" value="检索索引" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_1">
+          <mxGeometry x="24" y="184" width="253" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="group_10" value="正式知识库" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_1">
+          <mxGeometry x="24" y="24" width="253" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="group_11" value="版本存储" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_1">
+          <mxGeometry x="24" y="334" width="253" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="group_12" value="语料输入" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_1">
+          <mxGeometry x="34" y="494" width="238" height="123" as="geometry" />
+        </mxCell>
+        <mxCell id="group_13" value="向量模型" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_2">
+          <mxGeometry x="34" y="24" width="268" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="group_14" value="提示与Schema" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_2">
+          <mxGeometry x="24" y="334" width="278" height="123" as="geometry" />
+        </mxCell>
+        <mxCell id="group_15" value="结构化LLM" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_2">
+          <mxGeometry x="34" y="174" width="263" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="group_16" value="Function知识" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_3">
+          <mxGeometry x="54" y="484" width="283" height="128" as="geometry" />
+        </mxCell>
+        <mxCell id="group_17" value="Pattern知识" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_3">
+          <mxGeometry x="54" y="324" width="278" height="128" as="geometry" />
+        </mxCell>
+        <mxCell id="group_18" value="图例" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_3">
+          <mxGeometry x="24" y="184" width="328" height="123" as="geometry" />
+        </mxCell>
+        <mxCell id="group_19" value="版本产物" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_3">
+          <mxGeometry x="54" y="24" width="268" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="corpus" value="Story Corpus&#10;zhihu_story_subset_*_clean/" style="rounded=1;dashed=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_12" data-model-id="corpus" data-kind="external" data-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;input&quot;}" data-source-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;input&quot;}" data-source-label="Story Corpus&#10;zhihu_story_subset_*_clean/" data-provenance="{&quot;path&quot;:&quot;Code/zhihu_story_subset_60_5domains_20260819_clean&quot;}">
+          <mxGeometry x="24" y="24" width="190" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="knowledge_store" value="StoryKnowledgeStore&#10;SQLite formal DB&#10;story_knowledge.db" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_10" data-model-id="knowledge_store" data-kind="database" data-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;formal persistence&quot;}" data-source-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;formal persistence&quot;}" data-source-label="StoryKnowledgeStore&#10;SQLite formal DB&#10;story_knowledge.db" data-provenance="{&quot;path&quot;:&quot;Code/KnowledgeBase/store.py&quot;,&quot;line&quot;:19}">
+          <mxGeometry x="24" y="24" width="205" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="observation_index" value="ObservationBank /&#10;ScopedObservationBank&#10;ChromaDB + JSONL" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_9" data-model-id="observation_index" data-kind="database" data-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;retrieval index&quot;}" data-source-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;retrieval index&quot;}" data-source-label="ObservationBank /&#10;ScopedObservationBank&#10;ChromaDB + JSONL" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/Bank/bank.py&quot;,&quot;line&quot;:11}">
+          <mxGeometry x="24" y="24" width="205" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="snapshot_store" value="OntologySnapshot&#10;immutable JSONL directory&#10;manifest + hashes" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_11" data-model-id="snapshot_store" data-kind="database" data-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;version boundary&quot;,&quot;immutable&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;version boundary&quot;,&quot;immutable&quot;:true}" data-source-label="OntologySnapshot&#10;immutable JSONL directory&#10;manifest + hashes" data-provenance="{&quot;path&quot;:&quot;Code/Contracts/snapshot.py&quot;,&quot;line&quot;:1}">
+          <mxGeometry x="24" y="24" width="205" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="serving_pointer" value="serving_snapshot_id&#10;pointer_id = 1&#10;current service version" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_8" data-model-id="serving_pointer" data-kind="database" data-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;serving pointer&quot;}" data-source-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;serving pointer&quot;}" data-source-label="serving_snapshot_id&#10;pointer_id = 1&#10;current service version" data-provenance="{&quot;path&quot;:&quot;Code/KnowledgeBase/store.py&quot;,&quot;line&quot;:1402}">
+          <mxGeometry x="24" y="24" width="195" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="story_cli" value="StoryCLI.run_function&#10;公开 Bootstrap / Evolve / Pattern 入口" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_7" data-model-id="story_cli" data-kind="command" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;public entry&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;public entry&quot;}" data-source-label="StoryCLI.run_function&#10;公开 Bootstrap / Evolve / Pattern 入口" data-provenance="{&quot;path&quot;:&quot;Code/StoryCLI/app.py&quot;,&quot;line&quot;:223}">
+          <mxGeometry x="24" y="114" width="225" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="release_pipeline" value="release_pipeline.py&#10;isolated candidate + release gates" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_7" data-model-id="release_pipeline" data-kind="command" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;isolated release workflow&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;isolated release workflow&quot;}" data-source-label="release_pipeline.py&#10;isolated candidate + release gates" data-provenance="{&quot;path&quot;:&quot;Code/release_pipeline.py&quot;,&quot;line&quot;:318}">
+          <mxGeometry x="24" y="24" width="210" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="coordinator" value="FunctionCoordinator_Agent&#10;run_coordinator()&#10;retry + timeout supervisor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_7" data-model-id="coordinator" data-kind="service" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;optional supervisor&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;optional supervisor&quot;}" data-source-label="FunctionCoordinator_Agent&#10;run_coordinator()&#10;retry + timeout supervisor" data-provenance="{&quot;path&quot;:&quot;Code/FunctionCoordinator_Agent/app.py&quot;,&quot;line&quot;:292}">
+          <mxGeometry x="284" y="24" width="210" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="bootstrap_graph" value="Bootstrap Graph&#10;FunctionExtract_Agent/app.py&#10;12 LangGraph nodes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_4" data-model-id="bootstrap_graph" data-kind="service" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;bootstrap&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;bootstrap&quot;}" data-source-label="Bootstrap Graph&#10;FunctionExtract_Agent/app.py&#10;12 LangGraph nodes" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/app.py&quot;,&quot;line&quot;:501}">
+          <mxGeometry x="24" y="24" width="220" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="bootstrap_extract" value="story_loader → Preprocessor → Observer&#10;Bank Adder → Retrieval → Pairs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#5b9b62;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_4" data-model-id="bootstrap_extract" data-kind="module" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;bootstrap&quot;,&quot;verified_graph_edges&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;bootstrap&quot;,&quot;verified_graph_edges&quot;:true}" data-source-label="story_loader → Preprocessor → Observer&#10;Bank Adder → Retrieval → Pairs" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/app.py&quot;,&quot;line&quot;:510}">
+          <mxGeometry x="284" y="24" width="245" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="bootstrap_induce" value="Cluster → Inducer → Evaluator&#10;Revise ↔ Final Review" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#5b9b62;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_4" data-model-id="bootstrap_induce" data-kind="module" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;bootstrap&quot;,&quot;verified_graph_edges&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;bootstrap&quot;,&quot;verified_graph_edges&quot;:true}" data-source-label="Cluster → Inducer → Evaluator&#10;Revise ↔ Final Review" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/app.py&quot;,&quot;line&quot;:528}">
+          <mxGeometry x="574" y="24" width="225" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="evolve_graph" value="Evolve Graph&#10;FunctionExtract_Agent/evolve.py&#10;12 LangGraph nodes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_5" data-model-id="evolve_graph" data-kind="service" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;evolve&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;evolve&quot;}" data-source-label="Evolve Graph&#10;FunctionExtract_Agent/evolve.py&#10;12 LangGraph nodes" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/evolve.py&quot;,&quot;line&quot;:548}">
+          <mxGeometry x="24" y="24" width="220" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="evolve_match" value="Preprocessor → Observer&#10;Matcher → Critic → Collector" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#5b9b62;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_5" data-model-id="evolve_match" data-kind="module" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;evolve&quot;,&quot;verified_graph_edges&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;evolve&quot;,&quot;verified_graph_edges&quot;:true}" data-source-label="Preprocessor → Observer&#10;Matcher → Critic → Collector" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/evolve.py&quot;,&quot;line&quot;:551}">
+          <mxGeometry x="294" y="34" width="230" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="evolve_curate" value="Evaluator_mid → Curator&#10;Rematch unresolved → Evaluator_final" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#5b9b62;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_5" data-model-id="evolve_curate" data-kind="module" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;evolve&quot;,&quot;verified_graph_edges&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;evolve&quot;,&quot;verified_graph_edges&quot;:true}" data-source-label="Evaluator_mid → Curator&#10;Rematch unresolved → Evaluator_final" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/evolve.py&quot;,&quot;line&quot;:558}">
+          <mxGeometry x="604" y="34" width="245" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="pattern_graph" value="Pattern Graph&#10;StoryPattern_Agent/app.py&#10;8 LangGraph nodes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_6" data-model-id="pattern_graph" data-kind="service" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;pattern&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;pattern&quot;}" data-source-label="Pattern Graph&#10;StoryPattern_Agent/app.py&#10;8 LangGraph nodes" data-provenance="{&quot;path&quot;:&quot;Code/StoryPattern_Agent/app.py&quot;,&quot;line&quot;:681}">
+          <mxGeometry x="24" y="24" width="220" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="pattern_nodes" value="Sequences → Motifs → Pair Review&#10;Clusters → Summaries → Publish" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#5b9b62;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_6" data-model-id="pattern_nodes" data-kind="module" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;pattern&quot;,&quot;verified_graph_edges&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;workflow&quot;:&quot;pattern&quot;,&quot;verified_graph_edges&quot;:true}" data-source-label="Sequences → Motifs → Pair Review&#10;Clusters → Summaries → Publish" data-provenance="{&quot;path&quot;:&quot;Code/StoryPattern_Agent/app.py&quot;,&quot;line&quot;:683}">
+          <mxGeometry x="294" y="34" width="245" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="structured_llm" value="Structured LLM&#10;FunctionExtract_Agent/llm.py&#10;DeepSeek + Pydantic" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_15" data-model-id="structured_llm" data-kind="model" data-properties="{&quot;layer&quot;:&quot;model&quot;,&quot;role&quot;:&quot;structured generation / review&quot;}" data-source-properties="{&quot;layer&quot;:&quot;model&quot;,&quot;role&quot;:&quot;structured generation / review&quot;}" data-source-label="Structured LLM&#10;FunctionExtract_Agent/llm.py&#10;DeepSeek + Pydantic" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/llm.py&quot;,&quot;line&quot;:98}">
+          <mxGeometry x="24" y="24" width="215" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="embedding_model" value="Embedder&#10;Embedding/embedding.py&#10;BAAI/bge-small-zh-v1.5 offline" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_13" data-model-id="embedding_model" data-kind="model" data-properties="{&quot;layer&quot;:&quot;model&quot;,&quot;role&quot;:&quot;vector encoding&quot;}" data-source-properties="{&quot;layer&quot;:&quot;model&quot;,&quot;role&quot;:&quot;vector encoding&quot;}" data-source-label="Embedder&#10;Embedding/embedding.py&#10;BAAI/bge-small-zh-v1.5 offline" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/Embedding/embedding.py&quot;,&quot;line&quot;:21}">
+          <mxGeometry x="24" y="24" width="220" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="prompt_schema" value="Prompt/* + typed schemas&#10;Observer / Matcher / Evaluator / Pattern" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_14" data-model-id="prompt_schema" data-kind="library" data-properties="{&quot;layer&quot;:&quot;model&quot;,&quot;role&quot;:&quot;prompt and output contract&quot;}" data-source-properties="{&quot;layer&quot;:&quot;model&quot;,&quot;role&quot;:&quot;prompt and output contract&quot;}" data-source-label="Prompt/* + typed schemas&#10;Observer / Matcher / Evaluator / Pattern" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/Prompt&quot;}">
+          <mxGeometry x="24" y="24" width="230" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="function_output" value="Function + Contract + Occurrence&#10;functions.jsonl / occurrences.jsonl" style="shape=folder;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_16" data-model-id="function_output" data-kind="database" data-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;formal Function knowledge&quot;}" data-source-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;formal Function knowledge&quot;}" data-source-label="Function + Contract + Occurrence&#10;functions.jsonl / occurrences.jsonl" data-provenance="{&quot;path&quot;:&quot;Code/Contracts/occurrence.py&quot;,&quot;line&quot;:1}">
+          <mxGeometry x="24" y="24" width="235" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pattern_output" value="Pattern Set + Motif Evidence&#10;patterns / snapshot_patterns" style="shape=folder;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_17" data-model-id="pattern_output" data-kind="database" data-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;cross-story Pattern knowledge&quot;}" data-source-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;cross-story Pattern knowledge&quot;}" data-source-label="Pattern Set + Motif Evidence&#10;patterns / snapshot_patterns" data-provenance="{&quot;path&quot;:&quot;Code/StoryPattern_Agent/app.py&quot;,&quot;line&quot;:1018}">
+          <mxGeometry x="24" y="24" width="230" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="snapshot_output" value="New immutable Snapshot&#10;root or child version&#10;evaluation PASS required" style="shape=folder;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_19" data-model-id="snapshot_output" data-kind="database" data-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;versioned release artifact&quot;}" data-source-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;versioned release artifact&quot;}" data-source-label="New immutable Snapshot&#10;root or child version&#10;evaluation PASS required" data-provenance="{&quot;path&quot;:&quot;Code/Contracts/snapshot.py&quot;,&quot;line&quot;:376}">
+          <mxGeometry x="24" y="24" width="220" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="legend" value="图例&#10;实线 = 代码确认的 import / call / data flow&#10;虚线 = 间接 subprocess 或无法静态确认" style="shape=note;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Helvetica;fontSize=11;align=left;verticalAlign=middle;" vertex="1" parent="group_18" data-model-id="legend" data-kind="note" data-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;legend&quot;,&quot;intentional_orphan&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;legend&quot;,&quot;intentional_orphan&quot;:true}" data-source-label="图例&#10;实线 = 代码确认的 import / call / data flow&#10;虚线 = 间接 subprocess 或无法静态确认" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/app.py&quot;}">
+          <mxGeometry x="24" y="24" width="280" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="input" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="corpus" target="story_cli" data-model-id="corpus-cli" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="input">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="920" y="1570" />
+              <mxPoint x="130" y="1570" />
+              <mxPoint x="130" y="1570" />
+              <mxPoint x="130" y="1570" />
+              <mxPoint x="130" y="810" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="call: FunctionExtract_Agent" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="story_cli" target="bootstrap_graph" data-model-id="cli-bootstrap" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call: FunctionExtract_Agent">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="340" y="770" />
+              <mxPoint x="390" y="770" />
+              <mxPoint x="390" y="770" />
+              <mxPoint x="390" y="770" />
+              <mxPoint x="390" y="860" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="call: FunctionExtract_Agent.evolve" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="story_cli" target="evolve_graph" data-model-id="cli-evolve" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call: FunctionExtract_Agent.evolve">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="280" y="750" />
+              <mxPoint x="580" y="750" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="call: run_pattern_evolve" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="story_cli" target="pattern_graph" data-model-id="cli-pattern" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call: run_pattern_evolve">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="280" y="670" />
+              <mxPoint x="280" y="590" />
+              <mxPoint x="280" y="590" />
+              <mxPoint x="280" y="590" />
+              <mxPoint x="580" y="590" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="import + call: run_coordinator" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="release_pipeline" target="coordinator" data-model-id="release-coordinator" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import + call: run_coordinator">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="270" y="660" />
+              <mxPoint x="310" y="660" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="indirect subprocess" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;dashPattern=8 4;endArrow=open;strokeColor=#d79b00;fontColor=#8c5e00;fontSize=11;" edge="1" parent="1" source="coordinator" target="evolve_graph" data-model-id="coordinator-evolve" data-kind="uncertain" data-properties="{&quot;confirmed&quot;:false,&quot;reason&quot;:&quot;stage command resolved at runtime&quot;}" data-source-properties="{&quot;confirmed&quot;:false,&quot;reason&quot;:&quot;stage command resolved at runtime&quot;}" data-source-label="indirect subprocess">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="460" y="720" />
+              <mxPoint x="460" y="720" />
+              <mxPoint x="460" y="720" />
+              <mxPoint x="460" y="720" />
+              <mxPoint x="580" y="720" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="indirect subprocess" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;dashPattern=8 4;endArrow=open;strokeColor=#d79b00;fontColor=#8c5e00;fontSize=11;" edge="1" parent="1" source="coordinator" target="pattern_graph" data-model-id="coordinator-pattern" data-kind="uncertain" data-properties="{&quot;confirmed&quot;:false,&quot;reason&quot;:&quot;stage command resolved at runtime&quot;}" data-source-properties="{&quot;confirmed&quot;:false,&quot;reason&quot;:&quot;stage command resolved at runtime&quot;}" data-source-label="indirect subprocess">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="530" y="630" />
+              <mxPoint x="580" y="630" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="import / graph nodes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#3d6fa3;fontColor=#31577d;fontSize=11;" edge="1" parent="1" source="bootstrap_graph" target="bootstrap_extract" data-model-id="bootstrap-import-extract" data-kind="import" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import / graph nodes">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="540" y="910" />
+              <mxPoint x="560" y="910" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="LangGraph edge" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="bootstrap_extract" target="bootstrap_induce" data-model-id="bootstrap-extract-induce" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="LangGraph edge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="820" y="910" />
+              <mxPoint x="850" y="910" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="write: stage_story_observations" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="bootstrap_extract" target="knowledge_store" data-model-id="bootstrap-extract-db" data-kind="write" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="write: stage_story_observations">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="740" y="1010" />
+              <mxPoint x="740" y="1120" />
+              <mxPoint x="740" y="1120" />
+              <mxPoint x="740" y="1120" />
+              <mxPoint x="1180" y="1120" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="write / retrieve observations" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="bootstrap_extract" target="observation_index" data-model-id="bootstrap-extract-bank" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="write / retrieve observations">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="660" y="1040" />
+              <mxPoint x="660" y="1270" />
+              <mxPoint x="660" y="1270" />
+              <mxPoint x="660" y="1270" />
+              <mxPoint x="1180" y="1270" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="import / call: chat_structured" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#3d6fa3;fontColor=#31577d;fontSize=11;" edge="1" parent="1" source="bootstrap_extract" target="structured_llm" data-model-id="bootstrap-extract-llm" data-kind="import" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import / call: chat_structured">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="820" y="730" />
+              <mxPoint x="820" y="230" />
+              <mxPoint x="820" y="230" />
+              <mxPoint x="820" y="230" />
+              <mxPoint x="1180" y="230" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12" value="import / call: Embedder" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#3d6fa3;fontColor=#31577d;fontSize=11;" edge="1" parent="1" source="bootstrap_extract" target="embedding_model" data-model-id="bootstrap-extract-embed" data-kind="import" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import / call: Embedder">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="810" y="710" />
+              <mxPoint x="810" y="80" />
+              <mxPoint x="810" y="80" />
+              <mxPoint x="810" y="80" />
+              <mxPoint x="1170" y="80" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e13" value="call: induce / evaluate / revise" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="bootstrap_induce" target="structured_llm" data-model-id="bootstrap-induce-llm" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call: induce / evaluate / revise">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1120" y="880" />
+              <mxPoint x="1140" y="880" />
+              <mxPoint x="1140" y="880" />
+              <mxPoint x="1140" y="880" />
+              <mxPoint x="1140" y="280" />
+              <mxPoint x="1140" y="280" />
+              <mxPoint x="1140" y="280" />
+              <mxPoint x="1180" y="280" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e14" value="import: Prompt + schemas" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#3d6fa3;fontColor=#31577d;fontSize=11;" edge="1" parent="1" source="bootstrap_induce" target="prompt_schema" data-model-id="bootstrap-induce-schema" data-kind="import" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import: Prompt + schemas">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1130" y="890" />
+              <mxPoint x="1150" y="890" />
+              <mxPoint x="1150" y="890" />
+              <mxPoint x="1150" y="890" />
+              <mxPoint x="1150" y="410" />
+              <mxPoint x="1150" y="410" />
+              <mxPoint x="1150" y="410" />
+              <mxPoint x="1170" y="410" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e15" value="stage / commit evidence" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="bootstrap_induce" target="knowledge_store" data-model-id="bootstrap-induce-db" data-kind="write" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="stage / commit evidence">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1170" y="930" />
+              <mxPoint x="1260" y="930" />
+              <mxPoint x="1260" y="930" />
+              <mxPoint x="1260" y="930" />
+              <mxPoint x="1260" y="1050" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e16" value="produce Function / Contract / Occurrence" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="bootstrap_induce" target="function_output" data-model-id="bootstrap-induce-function" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="produce Function / Contract / Occurrence">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1090" y="920" />
+              <mxPoint x="1530" y="920" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e17" value="publish root Snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="bootstrap_induce" target="snapshot_output" data-model-id="bootstrap-snapshot-output" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="publish root Snapshot">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1130" y="910" />
+              <mxPoint x="1160" y="910" />
+              <mxPoint x="1160" y="910" />
+              <mxPoint x="1160" y="910" />
+              <mxPoint x="1160" y="460" />
+              <mxPoint x="1160" y="460" />
+              <mxPoint x="1160" y="460" />
+              <mxPoint x="1540" y="460" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e18" value="import / graph nodes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#3d6fa3;fontColor=#31577d;fontSize=11;" edge="1" parent="1" source="evolve_graph" target="evolve_match" data-model-id="evolve-import-match" data-kind="import" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import / graph nodes">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="810" y="740" />
+              <mxPoint x="850" y="740" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e19" value="LangGraph edge" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="evolve_match" target="evolve_curate" data-model-id="evolve-match-curate" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="LangGraph edge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1090" y="760" />
+              <mxPoint x="1160" y="760" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e20" value="ScopedObservationBank" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="evolve_match" target="observation_index" data-model-id="evolve-match-bank" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="ScopedObservationBank">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1110" y="780" />
+              <mxPoint x="1120" y="780" />
+              <mxPoint x="1120" y="780" />
+              <mxPoint x="1120" y="780" />
+              <mxPoint x="1120" y="1240" />
+              <mxPoint x="1120" y="1240" />
+              <mxPoint x="1120" y="1240" />
+              <mxPoint x="1180" y="1240" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e21" value="call: Matcher / Critic" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="evolve_match" target="structured_llm" data-model-id="evolve-match-llm" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call: Matcher / Critic">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1120" y="750" />
+              <mxPoint x="1130" y="750" />
+              <mxPoint x="1130" y="750" />
+              <mxPoint x="1130" y="750" />
+              <mxPoint x="1130" y="270" />
+              <mxPoint x="1130" y="270" />
+              <mxPoint x="1130" y="270" />
+              <mxPoint x="1180" y="270" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e22" value="call: vector recall / confidence" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="evolve_match" target="embedding_model" data-model-id="evolve-match-embed" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call: vector recall / confidence">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1110" y="730" />
+              <mxPoint x="1110" y="730" />
+              <mxPoint x="1110" y="730" />
+              <mxPoint x="1110" y="730" />
+              <mxPoint x="1110" y="120" />
+              <mxPoint x="1110" y="120" />
+              <mxPoint x="1110" y="120" />
+              <mxPoint x="1170" y="120" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e23" value="stage + commit child Snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="evolve_curate" target="knowledge_store" data-model-id="evolve-curate-db" data-kind="write" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="stage + commit child Snapshot">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1330" y="790" />
+              <mxPoint x="1330" y="1050" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e24" value="update Function / Occurrence" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="evolve_curate" target="function_output" data-model-id="evolve-curate-function" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="update Function / Occurrence">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1410" y="840" />
+              <mxPoint x="1410" y="900" />
+              <mxPoint x="1410" y="900" />
+              <mxPoint x="1410" y="900" />
+              <mxPoint x="1530" y="900" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e25" value="publish child Snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="evolve_curate" target="snapshot_output" data-model-id="evolve-curate-snapshot" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="publish child Snapshot">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1420" y="640" />
+              <mxPoint x="1420" y="480" />
+              <mxPoint x="1420" y="480" />
+              <mxPoint x="1420" y="480" />
+              <mxPoint x="1540" y="480" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e26" value="load complete Snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="snapshot_store" target="pattern_graph" data-model-id="snapshot-store-pattern" data-kind="read" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="load complete Snapshot">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1060" y="1420" />
+              <mxPoint x="830" y="1420" />
+              <mxPoint x="830" y="1420" />
+              <mxPoint x="830" y="1420" />
+              <mxPoint x="830" y="610" />
+              <mxPoint x="830" y="610" />
+              <mxPoint x="830" y="610" />
+              <mxPoint x="820" y="610" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e27" value="read parent Snapshot / Functions" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="knowledge_store" target="evolve_graph" data-model-id="knowledge-evolve" data-kind="read" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="read parent Snapshot / Functions">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1060" y="1100" />
+              <mxPoint x="840" y="1100" />
+              <mxPoint x="840" y="1100" />
+              <mxPoint x="840" y="1100" />
+              <mxPoint x="840" y="770" />
+              <mxPoint x="840" y="770" />
+              <mxPoint x="840" y="770" />
+              <mxPoint x="820" y="770" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e28" value="import / graph nodes" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#3d6fa3;fontColor=#31577d;fontSize=11;" edge="1" parent="1" source="pattern_graph" target="pattern_nodes" data-model-id="pattern-import-nodes" data-kind="import" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import / graph nodes">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="810" y="580" />
+              <mxPoint x="840" y="580" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e29" value="load inputs + commit Pattern Run" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="pattern_nodes" target="knowledge_store" data-model-id="pattern-db" data-kind="read" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="load inputs + commit Pattern Run">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1100" y="750" />
+              <mxPoint x="1100" y="1080" />
+              <mxPoint x="1100" y="1080" />
+              <mxPoint x="1100" y="1080" />
+              <mxPoint x="1180" y="1080" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e30" value="call: pair review / summarize" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="pattern_nodes" target="structured_llm" data-model-id="pattern-llm" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call: pair review / summarize">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1020" y="470" />
+              <mxPoint x="1020" y="250" />
+              <mxPoint x="1020" y="250" />
+              <mxPoint x="1020" y="250" />
+              <mxPoint x="1180" y="250" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e31" value="call: variant retrieval" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="pattern_nodes" target="embedding_model" data-model-id="pattern-embed" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call: variant retrieval">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="940" y="440" />
+              <mxPoint x="940" y="100" />
+              <mxPoint x="940" y="100" />
+              <mxPoint x="940" y="100" />
+              <mxPoint x="1170" y="100" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e32" value="publish Pattern Set" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="pattern_nodes" target="pattern_output" data-model-id="pattern-output" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="publish Pattern Set">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1250" y="600" />
+              <mxPoint x="1470" y="600" />
+              <mxPoint x="1470" y="600" />
+              <mxPoint x="1470" y="600" />
+              <mxPoint x="1470" y="750" />
+              <mxPoint x="1470" y="750" />
+              <mxPoint x="1470" y="750" />
+              <mxPoint x="1540" y="750" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e33" value="call: promote_snapshot" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="story_cli" target="serving_pointer" data-model-id="cli-promote" data-kind="call" data-properties="{&quot;confirmed&quot;:true,&quot;gate&quot;:&quot;Pattern SUCCESS + published Pattern&quot;}" data-source-properties="{&quot;confirmed&quot;:true,&quot;gate&quot;:&quot;Pattern SUCCESS + published Pattern&quot;}" data-source-label="call: promote_snapshot">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="210" y="920" />
+              <mxPoint x="210" y="1340" />
+              <mxPoint x="210" y="1340" />
+              <mxPoint x="210" y="1340" />
+              <mxPoint x="1550" y="1340" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e34" value="read / update singleton pointer" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="knowledge_store" target="serving_pointer" data-model-id="store-pointer" data-kind="write" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="read / update singleton pointer">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1510" y="1100" />
+              <mxPoint x="1660" y="1100" />
+              <mxPoint x="1660" y="1100" />
+              <mxPoint x="1660" y="1100" />
+              <mxPoint x="1660" y="1280" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -226,7 +226,7 @@ def candidate_patterns(catalog, genre, feedback=None):
     ))
 
 
-def available_patterns(catalog, genre, knowledge_db=DEFAULT_DB_PATH, feedback=None):
+def available_patterns(catalog, genre, feedback=None):
     return candidate_patterns(catalog, genre, feedback)
 
 
@@ -417,7 +417,7 @@ def _ending_overlap_issues(outline):
     return issues
 
 
-def rule_check(chain, outline, ending_spec=None):
+def rule_check(chain, outline):
     issues = []
     actual = [segment["function_name"] for segment in outline["segments"]]
     target = [step["function_name"] for step in chain]
@@ -561,7 +561,7 @@ def select_pattern_node(state):
     store = StoryKnowledgeStore(state["knowledge_db"])
     feedback = store.load_pattern_feedback(state["snapshot_id"])
     candidates = available_patterns(
-        catalog, state["genre"], state["knowledge_db"], feedback,
+        catalog, state["genre"], feedback,
     )
     if not candidates:
         raise ValueError(f"题材 {state['genre']} 没有可用 Pattern")
@@ -614,7 +614,7 @@ def planner_node(state):
     store = StoryKnowledgeStore(state["knowledge_db"])
     feedback = store.load_pattern_feedback(snapshot_id)
     available = available_patterns(
-        catalog, state["genre"], state["knowledge_db"], feedback,
+        catalog, state["genre"], feedback,
     )
     pattern_request = state.get("pattern_request")
     if pattern_request and not any(
@@ -846,9 +846,7 @@ def validate_node(state):
         {"role": "system", "content": VALIDATE_PROMPT},
         {"role": "user", "content": json.dumps(user, ensure_ascii=False)},
     ], OutlineValidation, reasoning_effort="medium").model_dump()
-    data["rule_issues"] = rule_check(
-        state["chain"], state["outline"], state.get("ending_spec"),
-    )
+    data["rule_issues"] = rule_check(state["chain"], state["outline"])
     if data["rule_issues"]:
         data["overall_ok"] = False
         data["issues"] = list(data.get("issues", [])) + data["rule_issues"]
@@ -1108,7 +1106,7 @@ def main():
     if args.list_patterns:
         feedback = StoryKnowledgeStore(args.knowledge_db).load_pattern_feedback(snapshot_id)
         for index, pattern in enumerate(available_patterns(
-            load_catalog(snapshot_id, args.knowledge_db), genre, args.knowledge_db, feedback,
+            load_catalog(snapshot_id, args.knowledge_db), genre, feedback,
         ), 1):
             chain = [step["function_name"] for step in pattern["core_function_chain"]]
             print(f"{index}. {pattern['pattern_name']} (support={pattern['story_support']}) -> {' -> '.join(chain)}")

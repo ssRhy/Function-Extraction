@@ -1,292 +1,177 @@
-# Function-Extraction
+# 📚 Function-Extraction
+
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?logo=python&logoColor=white)
+![LLM](https://img.shields.io/badge/LLM-DeepSeek-5A67D8)
+![Workflow](https://img.shields.io/badge/Workflow-LangGraph-1F2937)
+![Storage](https://img.shields.io/badge/Storage-SQLite-003B57?logo=sqlite&logoColor=white)
 
 基于 Vladimir Propp《民间故事形态学》的叙事结构分析与故事生成系统。
 
-项目使用 LLM、向量检索和结构化数据模型，把故事文本中的叙事行动归纳为可复用的 **Function**，再从 Function 组合出 **Pattern**，最后根据用户的创作要求生成大纲和故事正文。
+> 🔬 从故事中抽取结构，🧬 让结构持续演化，✍️ 把结构重新写成故事。
 
-## 项目目的
+## 🌱 项目简介
 
-项目试图建立一条可持续演化的叙事知识流水线：
+Function-Extraction 试图回答一个问题：**故事中的“发生了什么”，能否被提炼为可复用、可演化、可验证的叙事结构？**
 
-1. 从多篇故事中提取和归纳跨故事的结构功能，而不是只做关键词统计。
-2. 将 Function 和 Pattern 作为版本化知识资产保存，支持新增语料后的增量演化。
-3. 使用已发布的叙事结构辅助故事创作，同时保留根据用户要求动态规划的能力。
-4. 让每次运行都有 Run、Snapshot、产物 manifest 和校验结果，便于追踪和复核。
+项目使用 LLM、向量检索和结构化数据模型，将自然语言故事拆解为叙事观察（Observation），从跨故事的共同行动中归纳叙事功能（Function），再进一步总结 Function 的组合方式（Pattern）。这些结构可以持续吸收新的故事语料，也可以辅助生成新的故事大纲和正文。
 
-## 架构
+## ✨ 项目效果
 
-整体流程可以概括为：
+- **看见故事结构**：把事件、前因、结果、人物关系和状态变化整理成结构化叙事证据。
+- **发现跨故事共性**：从不同故事中归纳不依赖具体人名、地点和单一题材的叙事功能。
+- **沉淀可复用模式**：总结故事中反复出现的结构，形成可以参考的故事模式，而不是照搬某一篇故事。
+- **支持持续演化**：新故事可以在已有基础上继续学习，让这套知识不断更新。
+- **连接分析与创作**：总结出的结构既能帮助分析故事，也能帮助生成新的故事，并支持按照用户要求灵活创作。
+- **保留过程证据**：系统会保留处理过程和结果，方便之后查看、比较和复核。
+
+## 🧬 方法论：从故事到结构
+
+项目的分析思路来自 Propp 的故事形态学，但不止于给故事贴一个标签。一个故事会先被整体理解，再被拆解为连续的事件和叙事观察；随后系统关注这些事件如何配对、如何形成轮次和功能序列、由哪些角色承担，以及哪些组合可以跨故事复用。
+
+可以把这套方法概括为：
 
 ```text
-故事文本
-   │
-   ▼
-Bootstrap ──► Observation ──► Function ──► Function Snapshot
-                                             │
-                                             ▼
-                                           Pattern
-                                             │
-                                             ▼
-                                           serving
-
-新故事文本 ──► Evolve：基于 serving Snapshot 增量提取 ──► 子 Snapshot ──► Pattern 增量
-
-用户创作要求 ──► Published Pattern / Dynamic Planner ──► Outline ──► Story 正文
+整体理解 → 事件观察 → 功能归纳 → 配对与序列 → 角色行动 → 结构模式
 ```
 
-对应的阶段流程图如下：
+其中，Function 是故事推进的“骨架”，Observation 和辅助信息说明它具体如何发生；Pattern 则进一步回答“这些功能通常怎样组合”。这种从局部证据到整体图式的过程，让系统不仅能生成情节，也能解释情节的结构来源。
+
+更完整的方法论记录见：[民间故事形态学分析流程](Books/Docs/README.md)。
+
+## 🧭 总体架构
+
+项目由两条相互衔接的主链路组成：
+
+1. **叙事知识抽取**：故事语料 → Observation → Function → Pattern → serving Snapshot
+2. **故事生成**：用户要求 → Dynamic / Published Pattern → Outline → Story 正文
+
+### 🖼️ Framework Overview
+
+![Framework Overview — Evidence-grounded Narrative Knowledge + Story Generation](architecture_diagrams/neurips_framework_overview.png)
+
+### 🧠 算法框架一：叙事知识抽取
 
 ```mermaid
-flowchart TD
-    A[多篇 UTF-8 故事文本] --> B[Bootstrap Skill]
-    B --> C[Pre-Processor / Observer]
-    C --> D[Observation Bank<br/>向量检索]
-    D --> E[Inducer / Evaluator / Revise]
-    E --> F[根 Function Snapshot]
-    F --> G[StoryPattern_Agent]
-    G --> H[(统一 SQLite 知识库)]
-    H --> I[serving Snapshot]
+flowchart LR
+    corpus["📚 故事语料"] --> bootstrap["Bootstrap"]
+    bootstrap --> preprocess["文本预处理"]
+    preprocess --> observer["Observer<br/>叙事观察"]
+    observer --> bank[("Observation Bank<br/>结构化证据 + 向量检索")]
+    bank --> retrieval["跨故事语义检索"]
+    retrieval --> inducer["Inducer<br/>Function 归纳"]
+    inducer --> review["Evaluator / Revise / Curator"]
+    review --> snapshot["✅ Function Snapshot"]
 
-    J[新增故事文本] --> K[Evolve Skill]
-    I --> K
-    K --> L[Function 增量与匹配]
-    L --> M[子 Function Snapshot]
-    M --> N[Pattern 增量]
-    N --> H
-    N --> I
+    corpus --> evolve["Evolve"]
+    serving[["🚦 当前 serving Snapshot"]] --> evolve
+    evolve --> matcher["Matcher<br/>增量匹配与新证据"]
+    matcher --> snapshot
 
-    O[用户创作要求] --> P[Story Skill]
-    I --> P
-    P --> Q{规划方式}
-    Q -->|Published Pattern| R[已发布 Pattern]
-    Q -->|Dynamic| S[Seed → Planner]
-    R --> T[Outline_Agent]
-    S --> T
-    T --> U[Story_Agent]
-    U --> V[Markdown 正文与 pipeline_manifest]
+    snapshot --> pattern["StoryPattern_Agent<br/>Pattern 分析"]
+    pattern --> knowledge[("统一知识库<br/>Run / Snapshot / Pattern")]
+    knowledge --> serving
+
+    classDef input fill:#fff7ed,stroke:#f97316,color:#7c2d12
+    classDef process fill:#eff6ff,stroke:#3b82f6,color:#1e3a8a
+    classDef artifact fill:#ecfdf5,stroke:#10b981,color:#064e3b
+    classDef store fill:#f5f3ff,stroke:#8b5cf6,color:#4c1d95
+    class corpus,bootstrap,evolve input
+    class preprocess,observer,retrieval,inducer,review,matcher,pattern process
+    class snapshot,serving artifact
+    class bank,knowledge store
 ```
 
-其中 Bootstrap 和 Evolve 负责生产、更新知识库，Story 负责消费当前 serving Snapshot。Dynamic 路径不会先强行套用固定 Function 链，而是先从用户要求生成 Seed，再由 Planner 组合 Function。
+抽取链路从故事中提炼可复用的叙事结构，先由 Bootstrap 建立基础版本，再由 Evolve 持续吸收新故事并更新知识。
 
-### Function 提取层
+### ✍️ 算法框架二：大纲与全文生成
 
-`FunctionExtract_Agent` 负责从故事文本中建立叙事知识：
+```mermaid
+flowchart LR
+    request["📝 用户创作要求"] --> story["Story"]
+    serving[["🚦 serving Snapshot"]] --> story
+    story --> choice{"规划方式"}
+    choice -->|"Dynamic（默认）"| seed["Seed<br/>形成故事级意图"]
+    seed --> dynamic["Dynamic Planner<br/>组合兼容 Function"]
+    choice -->|"Published（显式选择）"| published["已发布 Pattern<br/>稳定结构"]
+    dynamic --> outline["Outline_Agent<br/>结构化大纲"]
+    published --> outline
+    outline --> outline_check{"Outline 校验"}
+    outline_check -->|通过| writer["Story_Agent<br/>生成正文"]
+    outline_check -->|失败| blocked["保留大纲并停止"]
+    writer --> validator["Story Validator"]
+    validator --> output["📄 正文与运行记录"]
 
-- Pre-Processor 将文本整理为可分析的句子和段落。
-- Observer 从句子中提取结构化 `NarrativeObservation`，包括事件、前因、结果、影响和人物关系等信息。
-- Observation Bank 保存观察结果并提供向量检索。
-- Inducer 根据跨故事相似 Observation 归纳 Function。
-- Evaluator、Revise 和 Curator 对 Function 进行评估、合并、修订或剔除。
-- Matcher 在 Evolve 阶段把新 Observation 匹配到已有 Function，并保留无法可靠匹配的证据用于发现新 Function。
-- `FunctionCoordinator_Agent` 提供 Bootstrap/Evolve → Pattern 的底层阶段调度和有限重试；公开使用优先通过 `StoryCLI`。
-
-### Pattern 层
-
-`StoryPattern_Agent` 消费一个完整、通过校验的 Function Snapshot，分析故事中的 Function 序列、关系和重复变体，生成可发布的 PatternSet。
-
-Pattern 是对故事结构组合方式的更高层总结，不等同于某一篇故事的原文模板。
-
-### 故事生成层
-
-- `Outline_Agent` 根据题材、Pattern 或动态规划结果生成结构化大纲，并进行大纲校验。
-- `Story_Agent` 根据已保存的大纲生成正文，并进行 Story Validator 校验。
-- `Pipeline_Agent` 编排 `Outline → Story`。
-- `StoryCLI` 是面向用户的统一命令行入口。
-- `StoryUI` 提供 Bootstrap、Evolve 和 Story 的轻量 Tkinter 界面。
-
-Story 有两种规划方式，Story Skill 默认使用 Dynamic：
-
-- **Dynamic Planner**：遵循“用户要求 → Seed → Planner”，根据当前创作要求动态组合兼容的 Function，更灵活。
-- **Published Pattern**：只有明确选择时才读取 serving Snapshot 中已发布的 Pattern，结构更稳定、可控。
-
-### 持久化与版本
-
-- `Code/data/knowledge/story_knowledge.db`：统一 SQLite 知识库，保存 Run、Snapshot、Pattern、Outline 和生成审计信息。
-- `Code/data/ontology_snapshots/`：不可变的 Function Snapshot（代码中称为 OntologySnapshot）文件。
-- `Code/data/bank/`、`Code/data/registry/`：Function 提取阶段的 Bank 和 Registry 运行资产。
-- `Code/data/story_cli/`、`Code/data/pipeline_runs/`：CLI 运行目录和生成产物。
-- `serving_snapshot_id`：当前供 Pattern 和 Story 默认读取的 Snapshot 指针。
-
-Snapshot 是完整的知识边界。Evolve 以当前 serving Snapshot 为父版本生成子 Snapshot；只有 Function 和 Pattern 都通过现有门禁后，新的 Snapshot 才会成为 serving。失败运行不会替换原 serving。
-
-## 数据库操作指南
-
-正式数据库位于 `Code/data/knowledge/story_knowledge.db`，由 `KnowledgeBase.StoryKnowledgeStore` 统一管理。它保存 Run、故事版本、Observation、Function、Pattern、Outline 和 serving Snapshot 指针。
-
-Snapshot 是正式知识的版本边界；不要把数据库中的“最新记录”当作某个 Snapshot 的完整内容。
-
-日常只需要以下三个操作。
-
-### 1. 查看状态
-
-```bash
-cd Code
-.venv/bin/python -X utf8 -m StoryCLI library status
+    classDef input fill:#fff7ed,stroke:#f97316,color:#7c2d12
+    classDef process fill:#eff6ff,stroke:#3b82f6,color:#1e3a8a
+    classDef decision fill:#fefce8,stroke:#eab308,color:#713f12
+    classDef artifact fill:#ecfdf5,stroke:#10b981,color:#064e3b
+    class request,story input
+    class seed,dynamic,published,outline,writer,validator process
+    class choice,outline_check decision
+    class serving,output,blocked artifact
 ```
 
-该命令可以查看数据库路径、各类记录数量、Run 类型和 Pattern 状态。
+生成链路根据用户要求选择合适的结构，先规划故事大纲，再生成并校验正文。
 
-### 2. 备份数据库
+## 🔍 从整体生成效果看：本项目的差异
 
-正式库维护前先备份：
+这里关注的不是模型响应速度或某个分数，而是最终生成出来的故事是否**有结构**：事件之间有没有因果，人物关系是否持续变化，冲突是否逐步升级，前文埋下的承诺是否在结局得到兑现。
 
-```bash
-cd Code
-sqlite3 data/knowledge/story_knowledge.db \
-  ".backup 'data/knowledge/story_knowledge.db.backup'"
-```
+许多网文生成项目更注重“把情节写出来”。它们通常从一个主题、人物设定或故事梗概直接进入章节和正文，优点是启动快、表达自由、局部场景容易写得热闹；但当故事变长，常见问题是情节之间靠偶然事件连接，人物为了推动剧情突然改变动机，关系变化缺少积累，结尾也容易变成对前文的简单收束。固定套路或章节模板可以让节奏更整齐，却可能让不同故事共享同一套推进方式；RAG 或范文续写可以让文本“像某类故事”，但内容相似并不等于真正理解了事件功能和因果关系。
 
-### 3. 检查数据库
+Function-Extraction 在真正写正文之前，会先分析故事结构，再安排故事发展，最后生成大纲和正文。因此生成的故事不只是事件的堆叠，也更容易保持前后因果、人物动机和冲突发展的连贯性。
 
-迁移、复制或怀疑数据库异常时执行：
+> 🎯 **核心差异**：很多方法直接从主题写到情节和正文；本项目会先整理故事结构，再用这些结构辅助创作，因此更重视前后连贯和因果关系。
 
-```bash
-cd Code
-sqlite3 data/knowledge/story_knowledge.db "PRAGMA integrity_check;"
-sqlite3 data/knowledge/story_knowledge.db "PRAGMA foreign_key_check;"
-```
+这种结构性在生成效果中表现为：关键行动有前因和后果，人物关系的变化有过程，重复出现的情节会形成有差异的变体，前面留下的任务、冲突和承诺会在后文得到回应，而不是只靠新的事件不断把故事向前推。
 
-正常情况下第一条返回 `ok`，第二条无输出。
+这种结构性是本项目最重要的优势，也是它的代价：前置抽取和评估需要更多时间与语料，结构校验也不能替代文学表达。
 
-### 写入原则
+## 🧩 三种独立 Skill
 
-- 日常写入使用 `StoryCLI bootstrap` 或 `StoryCLI evolve`，不要直接修改 SQLite 表。
-- Evolve 使用当前 serving Snapshot 作为父版本；成功后才切换新的 serving，失败时保留原 serving。
-- 不要直接删除或覆盖 Snapshot、Function version、Pattern version 等正式版本数据。
-- 需要清空重建时使用 `bootstrap --reset-formal`，旧资产会先归档到 `Code/data/formal_archives/`。
-- 探索性测试使用数据库副本，不要污染正式库。
+项目把完整流程拆成三个可以独立调用的 Codex Skill。每个 Skill 负责一个顶层阶段，并自动完成自己的内部流程，不在中间步骤反复打断用户。
 
-## 三种独立 Skill 的执行方法
+### 🌱 Bootstrap：建立根知识库
 
-项目将 Bootstrap、Evolve、Story 设计为三个独立的 Codex Skill。每个 Skill 负责一个顶层阶段，并自动完成该阶段内部已经定义好的子流程；不需要在内部步骤之间反复确认，也不会把三个阶段强行合并成一个总 Runner。
+用一批已有故事，先建立一套可以参考的故事结构知识。它适合项目第一次开始运行时使用，完成后就有了第一版基础，不负责后续更新或生成新故事。
 
-对应的项目 Skill 文件位于：
+### 🔁 Evolve：增量演化知识
 
-```text
-skills/function-extraction/
-├── function-extraction-bootstrap/SKILL.md
-├── function-extraction-evolve/SKILL.md
-└── function-extraction-story/SKILL.md
-```
+当有了新故事后，可以在原有基础上继续学习和更新。每次更新都会先检查结果；如果不合适，就保留原来的版本，不影响已经建立好的知识。
 
-### 1. Bootstrap Skill：建立根知识库
+### ✍️ Story：消费知识生成故事
 
-适用于第一次建立 Function 根库，或者用户明确要求重建正式库的场景。
+当基础知识准备好后，输入一个创作要求，系统会先设计故事的大致结构，再据此写出正文。它既可以参考已经总结好的故事模式，也可以根据当前要求灵活组织情节。
 
-```text
-调用：function-extraction-bootstrap
-```
+## 💾 数据与版本
 
-它会自动执行：
+系统会保存故事知识、版本和生成过程，方便查看每次更新的来源和结果。每次更新都会建立新版本，确认没有问题后才替换当前版本；如果更新失败，仍会保留原来的版本。
 
-```text
-文本 → Function 提取/评估 → 根 Function Snapshot → Pattern → serving
-```
+## 🧱 核心组件
 
-公开 CLI 对应命令：
+| 组件 | 职责 |
+| --- | --- |
+| `FunctionExtract_Agent` | 预处理故事、提取 Observation、归纳和演化 Function |
+| `StoryPattern_Agent` | 从 Function 序列和证据中分析并发布 Pattern |
+| `Outline_Agent` | 根据 Pattern 或 Dynamic Planner 生成结构化大纲 |
+| `Story_Agent` | 根据大纲生成正文并执行正文校验 |
+| `Pipeline_Agent` | 编排 Outline 到 Story 的生成链路 |
+| `StoryCLI` / `StoryUI` | 提供统一命令行和轻量交互入口 |
 
-```bash
-cd Code
-.venv/bin/python -X utf8 -m StoryCLI bootstrap \
-  --input /path/to/bootstrap_texts
-```
+## 🚀 开始使用
 
-Bootstrap 输入至少需要两个 UTF-8 `.txt` 故事。实际使用时建议准备多篇、多个题材的故事，以提供足够的跨故事证据和结构多样性。Bootstrap Skill 不会继续运行 Evolve 或 Story。
+### 🧩 Codex Skill 入口
 
-只有明确需要清空并重建正式资产时，才增加 `--reset-formal`：
+在 Codex 中可以按项目阶段直接进入对应 Skill：
 
-```bash
-.venv/bin/python -X utf8 -m StoryCLI bootstrap \
-  --reset-formal \
-  --input /path/to/bootstrap_texts
-```
+- [Bootstrap Skill](skills/function-extraction/function-extraction-bootstrap/SKILL.md)：建立根知识库
+- [Evolve Skill](skills/function-extraction/function-extraction-evolve/SKILL.md)：增量演化 Function 和 Pattern
+- [Story Skill](skills/function-extraction/function-extraction-story/SKILL.md)：根据用户要求生成大纲和正文
 
-正式资产会先归档到 `Code/data/formal_archives/`，而不是直接永久删除。
+### 🛠️ 运行文档
 
-### 2. Evolve Skill：增量演化知识库
+环境准备、输入格式、运行方式、命令行参数和数据库操作已独立整理，请跳转查看 **[运行与命令行指南](Code/StoryCLI/README.md)**。
 
-适用于 Bootstrap 完成后加入新的故事语料。Evolve 默认读取当前 serving Snapshot 作为父版本。
+## 📎 项目边界
 
-```text
-调用：function-extraction-evolve
-```
-
-它会自动执行：
-
-```text
-新故事 → Function 增量匹配/归纳 → 子 Function Snapshot → Pattern 增量 → serving
-```
-
-公开 CLI 对应命令：
-
-```bash
-cd Code
-.venv/bin/python -X utf8 -m StoryCLI evolve \
-  --input /path/to/new_texts
-```
-
-Evolve 成功的前提是 Function 和 Pattern 阶段都通过。成功后新 Snapshot 自动切换为 serving；失败时保留原 serving 和不可变 Snapshot。输入应是真正的新故事，不能用内容发生变化的既有 `story_id` 冒充新文本。Evolve Skill 不运行 Bootstrap，也不继续运行 Story。
-
-### 3. Story Skill：根据要求生成故事
-
-适用于知识库已经有可用 serving Snapshot 之后的创作请求。
-
-```text
-调用：function-extraction-story
-```
-
-它会自动执行（默认使用 Dynamic）：
-
-```text
-用户要求 → Dynamic Planner（默认）/ Published Pattern（显式选择）→ Outline → Story 正文
-```
-
-默认 Dynamic Planner：
-
-```bash
-cd Code
-.venv/bin/python -X utf8 -m StoryCLI story generate \
-  --request "古风仙侠：写一个雨夜寻药故事，结局必须完成真相揭示" \
-  --planner-mode dynamic
-```
-
-明确选择 Published Pattern：
-
-```bash
-cd Code
-.venv/bin/python -X utf8 -m StoryCLI story generate \
-  --request "现代情感：写一次克制的家庭关系修复，结局要有可观察的解决行动" \
-  --planner-mode published
-```
-
-较长的创作要求可以改用 `--request-file`，它和 `--request` 二选一。创作要求中应包含且只包含一个可识别的题材方向。Story Skill 只消费 serving Snapshot，不运行 Bootstrap 或 Evolve。
-
-## 推荐使用顺序
-
-```text
-1. Bootstrap Skill：用多篇故事建立根库
-2. Evolve Skill：用新增故事增量更新 Function 和 Pattern
-3. Story Skill：消费 serving Snapshot 生成 Outline 和 Story
-```
-
-三种 Skill 的关系是阶段顺序，而不是每次生成故事都重新执行 Bootstrap 或 Evolve。通常只在知识库需要建立或更新时运行前两个阶段；日常创作直接运行 Story Skill。
-
-## 环境与更多命令
-
-项目的 Python 入口位于 `Code/`，建议使用项目虚拟环境：
-
-```bash
-cd Code
-.venv/bin/python -m pip install sentence-transformers chromadb openai pydantic langgraph
-.venv/bin/python -m pip install --no-deps --target vendor \
-  langgraph-checkpoint-sqlite sqlite-vec aiosqlite
-```
-
-LLM 配置、完整参数、输入格式、运行产物和故障处理见 [`Code/StoryCLI/README.md`](Code/StoryCLI/README.md)。查看当前正式库和 serving 指针：
-
-```bash
-cd Code
-.venv/bin/python -X utf8 -m StoryCLI library status
-```
-
-自动校验通过只说明流程、结构和数据门禁通过，不等同于生成正文已经满足所有创作要求或具备稳定的文学质量；需要结合 `pipeline_manifest.json`、大纲和最终正文进行独立检查。
+这是一个持续实验和演化中的叙事系统：结构门禁、版本一致性和可追溯性是工程基础；真实的文学质量、长文本稳定性和用户要求保真，仍需要结合实际生成的 Outline 与正文进行独立判断。

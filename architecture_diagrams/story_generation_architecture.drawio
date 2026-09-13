@@ -1,0 +1,386 @@
+<mxfile host="drawio-skill" agent="diagram-ir" version="3.0.0">
+  <diagram id="system" name="System">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="850" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="group_0" value="处理层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="12" y="132" width="1841" height="446" as="geometry" />
+        </mxCell>
+        <mxCell id="group_1" value="数据层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="592" y="582" width="341" height="481" as="geometry" />
+        </mxCell>
+        <mxCell id="group_2" value="模型层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1862" y="12" width="331" height="321" as="geometry" />
+        </mxCell>
+        <mxCell id="group_3" value="输出层" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1482" y="582" width="706" height="471" as="geometry" />
+        </mxCell>
+        <mxCell id="group_4" value="Outline" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
+          <mxGeometry x="934" y="24" width="883" height="238" as="geometry" />
+        </mxCell>
+        <mxCell id="group_5" value="Pipeline" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
+          <mxGeometry x="614" y="284" width="278" height="138" as="geometry" />
+        </mxCell>
+        <mxCell id="group_6" value="Story" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
+          <mxGeometry x="934" y="294" width="873" height="128" as="geometry" />
+        </mxCell>
+        <mxCell id="group_7" value="入口" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#82b366;fontColor=#82b366;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_0">
+          <mxGeometry x="24" y="284" width="553" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="group_8" value="持久化" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_1">
+          <mxGeometry x="34" y="334" width="268" height="123" as="geometry" />
+        </mxCell>
+        <mxCell id="group_9" value="知识库" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_1">
+          <mxGeometry x="24" y="24" width="293" height="138" as="geometry" />
+        </mxCell>
+        <mxCell id="group_10" value="输入" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#6c8ebf;fontColor=#6c8ebf;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_1">
+          <mxGeometry x="44" y="184" width="253" height="123" as="geometry" />
+        </mxCell>
+        <mxCell id="group_11" value="提示与Schema" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_2">
+          <mxGeometry x="24" y="174" width="283" height="123" as="geometry" />
+        </mxCell>
+        <mxCell id="group_12" value="结构化LLM" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#d79b00;fontColor=#d79b00;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_2">
+          <mxGeometry x="34" y="24" width="263" height="133" as="geometry" />
+        </mxCell>
+        <mxCell id="group_13" value="图例" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_3">
+          <mxGeometry x="24" y="324" width="328" height="123" as="geometry" />
+        </mxCell>
+        <mxCell id="group_14" value="大纲产物" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_3">
+          <mxGeometry x="54" y="174" width="268" height="123" as="geometry" />
+        </mxCell>
+        <mxCell id="group_15" value="正文产物" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_3">
+          <mxGeometry x="54" y="24" width="268" height="123" as="geometry" />
+        </mxCell>
+        <mxCell id="group_16" value="运行审计" style="rounded=0;whiteSpace=wrap;html=1;fillColor=none;strokeColor=#9673a6;fontColor=#9673a6;verticalAlign=top;fontStyle=2;dashed=1;" vertex="1" parent="group_3">
+          <mxGeometry x="404" y="24" width="278" height="213" as="geometry" />
+        </mxCell>
+        <mxCell id="user_request" value="用户创作要求&#10;--request / --request-file" style="rounded=1;dashed=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_10" data-model-id="user_request" data-kind="external" data-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;creative input&quot;}" data-source-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;creative input&quot;}" data-source-label="用户创作要求&#10;--request / --request-file" data-provenance="{&quot;path&quot;:&quot;Code/StoryCLI/app.py&quot;,&quot;line&quot;:572}">
+          <mxGeometry x="24" y="24" width="205" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="serving_snapshot" value="Serving Snapshot&#10;Functions + Contracts + Occurrences&#10;Published Pattern catalog" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_9" data-model-id="serving_snapshot" data-kind="database" data-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;read-only generation knowledge&quot;}" data-source-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;read-only generation knowledge&quot;}" data-source-label="Serving Snapshot&#10;Functions + Contracts + Occurrences&#10;Published Pattern catalog" data-provenance="{&quot;path&quot;:&quot;Code/KnowledgeBase/store.py&quot;,&quot;line&quot;:1399}">
+          <mxGeometry x="24" y="24" width="245" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="outline_store" value="outlines table&#10;StoryKnowledgeStore.record_outline()" style="shape=cylinder3;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_8" data-model-id="outline_store" data-kind="database" data-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;outline persistence&quot;}" data-source-properties="{&quot;layer&quot;:&quot;data&quot;,&quot;role&quot;:&quot;outline persistence&quot;}" data-source-label="outlines table&#10;StoryKnowledgeStore.record_outline()" data-provenance="{&quot;path&quot;:&quot;Code/KnowledgeBase/store.py&quot;,&quot;line&quot;:1134}">
+          <mxGeometry x="24" y="24" width="220" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="story_ui" value="StoryUI&#10;route_request + normalize_story_request&#10;shell-free StoryCLI command" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_7" data-model-id="story_ui" data-kind="command" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;desktop entry&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;desktop entry&quot;}" data-source-label="StoryUI&#10;route_request + normalize_story_request&#10;shell-free StoryCLI command" data-provenance="{&quot;path&quot;:&quot;Code/StoryUI/app.py&quot;,&quot;line&quot;:31}">
+          <mxGeometry x="24" y="24" width="235" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="story_cli" value="StoryCLI.generate_story()&#10;_infer_genre + resolve_snapshot" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_7" data-model-id="story_cli" data-kind="command" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;public generation entry&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;public generation entry&quot;}" data-source-label="StoryCLI.generate_story()&#10;_infer_genre + resolve_snapshot" data-provenance="{&quot;path&quot;:&quot;Code/StoryCLI/app.py&quot;,&quot;line&quot;:570}">
+          <mxGeometry x="294" y="24" width="235" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="pipeline_graph" value="Pipeline_Agent&#10;START → generate_outline&#10;→ generate_story → export" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_5" data-model-id="pipeline_graph" data-kind="service" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;thin orchestration&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;thin orchestration&quot;}" data-source-label="Pipeline_Agent&#10;START → generate_outline&#10;→ generate_story → export" data-provenance="{&quot;path&quot;:&quot;Code/Pipeline_Agent/app.py&quot;,&quot;line&quot;:112}">
+          <mxGeometry x="24" y="24" width="230" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="outline_graph" value="Outline_Agent._build_graph()&#10;Published / Dynamic branches" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_4" data-model-id="outline_graph" data-kind="service" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;outline workflow&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;outline workflow&quot;}" data-source-label="Outline_Agent._build_graph()&#10;Published / Dynamic branches" data-provenance="{&quot;path&quot;:&quot;Code/Outline_Agent/app.py&quot;,&quot;line&quot;:1053}">
+          <mxGeometry x="24" y="134" width="230" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="published_branch" value="Published&#10;select_pattern → planner → seed&#10;读取已发布 Pattern" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#5b9b62;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_4" data-model-id="published_branch" data-kind="module" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;planner_mode&quot;:&quot;published&quot;,&quot;verified_graph_edges&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;planner_mode&quot;:&quot;published&quot;,&quot;verified_graph_edges&quot;:true}" data-source-label="Published&#10;select_pattern → planner → seed&#10;读取已发布 Pattern" data-provenance="{&quot;path&quot;:&quot;Code/Outline_Agent/app.py&quot;,&quot;line&quot;:557}">
+          <mxGeometry x="284" y="24" width="245" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="dynamic_branch" value="Dynamic&#10;dynamic_seed → dynamic_planner&#10;用户请求 → Seed → Planner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#5b9b62;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_4" data-model-id="dynamic_branch" data-kind="module" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;planner_mode&quot;:&quot;dynamic&quot;,&quot;verified_graph_edges&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;planner_mode&quot;:&quot;dynamic&quot;,&quot;verified_graph_edges&quot;:true}" data-source-label="Dynamic&#10;dynamic_seed → dynamic_planner&#10;用户请求 → Seed → Planner" data-provenance="{&quot;path&quot;:&quot;Code/Outline_Agent/app.py&quot;,&quot;line&quot;:597}">
+          <mxGeometry x="284" y="124" width="245" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="outline_core" value="mechanism → scaffold → realize → validate&#10;Function chain + Contract ledger" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#5b9b62;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_4" data-model-id="outline_core" data-kind="module" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;outline synthesis and validation&quot;,&quot;verified_graph_edges&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;outline synthesis and validation&quot;,&quot;verified_graph_edges&quot;:true}" data-source-label="mechanism → scaffold → realize → validate&#10;Function chain + Contract ledger" data-provenance="{&quot;path&quot;:&quot;Code/Outline_Agent/app.py&quot;,&quot;line&quot;:692}">
+          <mxGeometry x="604" y="104" width="255" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="story_graph" value="Story_Agent._build_graph()&#10;load_outline → validate_story" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_6" data-model-id="story_graph" data-kind="service" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;story workflow&quot;}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;story workflow&quot;}" data-source-label="Story_Agent._build_graph()&#10;load_outline → validate_story" data-provenance="{&quot;path&quot;:&quot;Code/Story_Agent/app.py&quot;,&quot;line&quot;:488}">
+          <mxGeometry x="24" y="24" width="230" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="story_structure" value="function_constraints&#10;plan_scenes → develop_scenes" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#5b9b62;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_6" data-model-id="story_structure" data-kind="module" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;scene planning&quot;,&quot;verified_graph_edges&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;scene planning&quot;,&quot;verified_graph_edges&quot;:true}" data-source-label="function_constraints&#10;plan_scenes → develop_scenes" data-provenance="{&quot;path&quot;:&quot;Code/Story_Agent/app.py&quot;,&quot;line&quot;:249}">
+          <mxGeometry x="304" y="24" width="220" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="story_write_validate" value="write_story → validate_story&#10;one repair loop when repairable" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f5e9;strokeColor=#5b9b62;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_6" data-model-id="story_write_validate" data-kind="module" data-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;story realization and validation&quot;,&quot;verified_graph_edges&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;processing&quot;,&quot;role&quot;:&quot;story realization and validation&quot;,&quot;verified_graph_edges&quot;:true}" data-source-label="write_story → validate_story&#10;one repair loop when repairable" data-provenance="{&quot;path&quot;:&quot;Code/Story_Agent/app.py&quot;,&quot;line&quot;:330}">
+          <mxGeometry x="614" y="24" width="235" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="structured_llm" value="Structured LLM&#10;chat_structured()&#10;DeepSeek + Pydantic" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_12" data-model-id="structured_llm" data-kind="model" data-properties="{&quot;layer&quot;:&quot;model&quot;,&quot;role&quot;:&quot;generation / selection / validation&quot;}" data-source-properties="{&quot;layer&quot;:&quot;model&quot;,&quot;role&quot;:&quot;generation / selection / validation&quot;}" data-source-label="Structured LLM&#10;chat_structured()&#10;DeepSeek + Pydantic" data-provenance="{&quot;path&quot;:&quot;Code/FunctionExtract_Agent/llm.py&quot;,&quot;line&quot;:98}">
+          <mxGeometry x="24" y="24" width="215" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="prompt_schema" value="Prompt + typed schemas&#10;Outline / Literary / Story / Validation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_11" data-model-id="prompt_schema" data-kind="library" data-properties="{&quot;layer&quot;:&quot;model&quot;,&quot;role&quot;:&quot;structured output contract&quot;}" data-source-properties="{&quot;layer&quot;:&quot;model&quot;,&quot;role&quot;:&quot;structured output contract&quot;}" data-source-label="Prompt + typed schemas&#10;Outline / Literary / Story / Validation" data-provenance="{&quot;path&quot;:&quot;Code/Outline_Agent/Prompt&quot;}">
+          <mxGeometry x="24" y="24" width="235" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="outline_output" value="Outline JSON + outline_id&#10;validated outline artifact" style="shape=folder;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_14" data-model-id="outline_output" data-kind="database" data-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;intermediate artifact&quot;}" data-source-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;intermediate artifact&quot;}" data-source-label="Outline JSON + outline_id&#10;validated outline artifact" data-provenance="{&quot;path&quot;:&quot;Code/Outline_Agent/app.py&quot;,&quot;line&quot;:1001}">
+          <mxGeometry x="24" y="24" width="220" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="story_output" value="Story JSON + Markdown&#10;validated / repaired正文" style="shape=folder;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_15" data-model-id="story_output" data-kind="database" data-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;final story artifact&quot;}" data-source-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;final story artifact&quot;}" data-source-label="Story JSON + Markdown&#10;validated / repaired正文" data-provenance="{&quot;path&quot;:&quot;Code/Story_Agent/app.py&quot;,&quot;line&quot;:437}">
+          <mxGeometry x="24" y="24" width="220" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="generation_audit" value="generation_outcomes&#10;validation / retry / follow-up" style="shape=folder;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_16" data-model-id="generation_audit" data-kind="database" data-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;generation audit&quot;}" data-source-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;generation audit&quot;}" data-source-label="generation_outcomes&#10;validation / retry / follow-up" data-provenance="{&quot;path&quot;:&quot;Code/KnowledgeBase/store.py&quot;,&quot;line&quot;:1203}">
+          <mxGeometry x="24" y="24" width="220" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="pipeline_manifest" value="pipeline_manifest.json&#10;snapshot / mode / artifact paths" style="shape=folder;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontColor=#333333;fontFamily=Helvetica;fontSize=12;align=center;verticalAlign=middle;" vertex="1" parent="group_16" data-model-id="pipeline_manifest" data-kind="database" data-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;reproducibility manifest&quot;}" data-source-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;reproducibility manifest&quot;}" data-source-label="pipeline_manifest.json&#10;snapshot / mode / artifact paths" data-provenance="{&quot;path&quot;:&quot;Code/Pipeline_Agent/app.py&quot;,&quot;line&quot;:87}">
+          <mxGeometry x="24" y="114" width="230" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="legend" value="图例&#10;实线 = 代码确认的 import / call / data flow&#10;虚线 = 间接 subprocess 或无法静态确认" style="shape=note;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontColor=#333333;fontFamily=Helvetica;fontSize=11;align=left;verticalAlign=middle;" vertex="1" parent="group_13" data-model-id="legend" data-kind="note" data-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;legend&quot;,&quot;intentional_orphan&quot;:true}" data-source-properties="{&quot;layer&quot;:&quot;output&quot;,&quot;role&quot;:&quot;legend&quot;,&quot;intentional_orphan&quot;:true}" data-source-label="图例&#10;实线 = 代码确认的 import / call / data flow&#10;虚线 = 间接 subprocess 或无法静态确认" data-provenance="{&quot;path&quot;:&quot;Code/Pipeline_Agent/app.py&quot;}">
+          <mxGeometry x="24" y="24" width="280" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="e0" value="input" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="user_request" target="story_ui" data-model-id="request-ui" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="input">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="490" y="840" />
+              <mxPoint x="170" y="840" />
+              <mxPoint x="170" y="840" />
+              <mxPoint x="170" y="840" />
+              <mxPoint x="170" y="540" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e1" value="CLI input" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="user_request" target="story_cli" data-model-id="request-cli" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="CLI input">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="570" y="820" />
+              <mxPoint x="440" y="820" />
+              <mxPoint x="440" y="820" />
+              <mxPoint x="440" y="820" />
+              <mxPoint x="440" y="540" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e2" value="subprocess call: StoryCLI" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;dashed=1;dashPattern=8 4;endArrow=open;strokeColor=#d79b00;fontColor=#8c5e00;fontSize=11;" edge="1" parent="1" source="story_ui" target="story_cli" data-model-id="ui-cli" data-kind="uncertain" data-properties="{&quot;confirmed&quot;:false,&quot;reason&quot;:&quot;process boundary is resolved at runtime&quot;}" data-source-properties="{&quot;confirmed&quot;:false,&quot;reason&quot;:&quot;process boundary is resolved at runtime&quot;}" data-source-label="subprocess call: StoryCLI">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="290" y="480" />
+              <mxPoint x="310" y="480" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e3" value="import / call: genre only" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#3d6fa3;fontColor=#31577d;fontSize=11;" edge="1" parent="1" source="story_ui" target="structured_llm" data-model-id="ui-llm" data-kind="import" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import / call: genre only">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="170" y="340" />
+              <mxPoint x="170" y="80" />
+              <mxPoint x="170" y="80" />
+              <mxPoint x="170" y="80" />
+              <mxPoint x="1900" y="80" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e4" value="import + call: _build_graph().invoke" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="story_cli" target="pipeline_graph" data-model-id="cli-pipeline" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import + call: _build_graph().invoke">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="560" y="470" />
+              <mxPoint x="640" y="470" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e5" value="resolve_snapshot_id" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="story_cli" target="serving_snapshot" data-model-id="cli-snapshot" data-kind="read" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="resolve_snapshot_id">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="610" y="500" />
+              <mxPoint x="650" y="500" />
+              <mxPoint x="650" y="500" />
+              <mxPoint x="650" y="500" />
+              <mxPoint x="650" y="620" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e6" value="import + invoke Outline" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="pipeline_graph" target="outline_graph" data-model-id="pipeline-outline" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import + invoke Outline">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="970" y="440" />
+              <mxPoint x="1080" y="440" />
+              <mxPoint x="1080" y="440" />
+              <mxPoint x="1080" y="440" />
+              <mxPoint x="1080" y="380" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e7" value="call after Outline validation" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="pipeline_graph" target="story_graph" data-model-id="pipeline-story" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call after Outline validation">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="880" y="470" />
+              <mxPoint x="960" y="470" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e8" value="read snapshot / catalog / contracts" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="serving_snapshot" target="outline_graph" data-model-id="snapshot-outline" data-kind="read" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="read snapshot / catalog / contracts">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="880" y="540" />
+              <mxPoint x="880" y="330" />
+              <mxPoint x="880" y="330" />
+              <mxPoint x="880" y="330" />
+              <mxPoint x="960" y="330" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e9" value="branch: planner_mode=published" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="outline_graph" target="published_branch" data-model-id="outline-published" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="branch: planner_mode=published">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1120" y="260" />
+              <mxPoint x="1120" y="220" />
+              <mxPoint x="1120" y="220" />
+              <mxPoint x="1120" y="220" />
+              <mxPoint x="1220" y="220" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e10" value="branch: planner_mode=dynamic" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="outline_graph" target="dynamic_branch" data-model-id="outline-dynamic" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="branch: planner_mode=dynamic">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1200" y="330" />
+              <mxPoint x="1220" y="330" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e11" value="LangGraph edge" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="published_branch" target="outline_core" data-model-id="published-core" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="LangGraph edge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1360" y="270" />
+              <mxPoint x="1360" y="280" />
+              <mxPoint x="1360" y="280" />
+              <mxPoint x="1360" y="280" />
+              <mxPoint x="1530" y="280" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e12" value="LangGraph edge" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="dynamic_branch" target="outline_core" data-model-id="dynamic-core" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="LangGraph edge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1480" y="310" />
+              <mxPoint x="1530" y="310" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e13" value="call: selection / planning / synthesis" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="outline_graph" target="structured_llm" data-model-id="outline-llm" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call: selection / planning / synthesis">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1040" y="220" />
+              <mxPoint x="1040" y="100" />
+              <mxPoint x="1040" y="100" />
+              <mxPoint x="1040" y="100" />
+              <mxPoint x="1900" y="100" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e14" value="import: prompts + typed schemas" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#3d6fa3;fontColor=#31577d;fontSize=11;" edge="1" parent="1" source="outline_core" target="prompt_schema" data-model-id="core-schema" data-kind="import" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="import: prompts + typed schemas">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1800" y="270" />
+              <mxPoint x="1890" y="270" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e15" value="export validated Outline" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="outline_core" target="outline_output" data-model-id="core-outline-output" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="export validated Outline">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1550" y="460" />
+              <mxPoint x="1550" y="780" />
+              <mxPoint x="1550" y="780" />
+              <mxPoint x="1550" y="780" />
+              <mxPoint x="1550" y="780" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e16" value="record_outline" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="outline_output" target="outline_store" data-model-id="outline-persist" data-kind="write" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="record_outline">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1340" y="820" />
+              <mxPoint x="870" y="820" />
+              <mxPoint x="870" y="820" />
+              <mxPoint x="870" y="820" />
+              <mxPoint x="870" y="930" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e17" value="outline_id / outline artifact" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="outline_output" target="story_graph" data-model-id="outline-story" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="outline_id / outline artifact">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1400" y="790" />
+              <mxPoint x="1120" y="790" />
+              <mxPoint x="1120" y="790" />
+              <mxPoint x="1120" y="790" />
+              <mxPoint x="1120" y="540" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e18" value="load_outline" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="outline_store" target="story_graph" data-model-id="outline-db-story" data-kind="read" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="load_outline">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="950" y="970" />
+              <mxPoint x="1040" y="970" />
+              <mxPoint x="1040" y="970" />
+              <mxPoint x="1040" y="970" />
+              <mxPoint x="1040" y="540" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e19" value="LangGraph edge" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="story_graph" target="story_structure" data-model-id="story-structure" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="LangGraph edge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1200" y="470" />
+              <mxPoint x="1230" y="470" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e20" value="LangGraph edge" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="story_structure" target="story_write_validate" data-model-id="structure-write" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="LangGraph edge">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1470" y="490" />
+              <mxPoint x="1540" y="490" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e21" value="call: write / StoryValidator" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#555555;fontColor=#333333;fontSize=11;" edge="1" parent="1" source="story_graph" target="structured_llm" data-model-id="story-llm" data-kind="call" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="call: write / StoryValidator">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1210" y="500" />
+              <mxPoint x="1210" y="500" />
+              <mxPoint x="1210" y="500" />
+              <mxPoint x="1210" y="500" />
+              <mxPoint x="1210" y="120" />
+              <mxPoint x="1210" y="120" />
+              <mxPoint x="1210" y="120" />
+              <mxPoint x="1900" y="120" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e22" value="export JSON + Markdown" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="story_write_validate" target="story_output" data-model-id="story-output" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="export JSON + Markdown">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1670" y="530" />
+              <mxPoint x="1670" y="620" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e23" value="record_generation_outcome" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="story_write_validate" target="generation_audit" data-model-id="story-audit" data-kind="write" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="record_generation_outcome">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1790" y="580" />
+              <mxPoint x="1790" y="670" />
+              <mxPoint x="1790" y="670" />
+              <mxPoint x="1790" y="670" />
+              <mxPoint x="1900" y="670" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e24" value="export manifest" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="pipeline_graph" target="pipeline_manifest" data-model-id="pipeline-manifest" data-kind="write" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="export manifest">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="910" y="500" />
+              <mxPoint x="930" y="500" />
+              <mxPoint x="930" y="500" />
+              <mxPoint x="930" y="500" />
+              <mxPoint x="930" y="760" />
+              <mxPoint x="930" y="760" />
+              <mxPoint x="930" y="760" />
+              <mxPoint x="1900" y="760" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="e25" value="story_path / Markdown path" style="edgeStyle=orthogonalEdgeStyle;rounded=1;html=1;endArrow=blockThin;endFill=1;strokeColor=#4f7f52;fontColor=#315c35;fontSize=11;" edge="1" parent="1" source="story_output" target="pipeline_manifest" data-model-id="story-manifest" data-kind="data" data-properties="{&quot;confirmed&quot;:true}" data-source-properties="{&quot;confirmed&quot;:true}" data-source-label="story_path / Markdown path">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points">
+              <mxPoint x="1670" y="720" />
+              <mxPoint x="1670" y="740" />
+              <mxPoint x="1670" y="740" />
+              <mxPoint x="1670" y="740" />
+              <mxPoint x="1900" y="740" />
+            </Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
