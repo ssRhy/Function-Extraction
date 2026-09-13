@@ -28,7 +28,8 @@ chromadb-admin/
 .cursor/
 
 # Local reference materials and diagrams
-architecture_diagrams/
+architecture_diagrams/*
+!architecture_diagrams/neurips_framework_overview.png
 Books/
 
 # Local project instructions and working notes
