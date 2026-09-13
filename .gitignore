@@ -24,6 +24,9 @@ Code/test/
 # Third-party checkouts
 chromadb-admin/
 
+# Local editor settings
+.cursor/
+
 # Local reference materials and diagrams
 architecture_diagrams/
 Books/
